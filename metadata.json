@@ -1,0 +1,5 @@
+{
+  "name": "Diário de Revisão LS",
+  "description": "Aplicativo para registrar questões erradas e com dúvida, e gerar listas de revisão automaticamente.",
+  "requestFramePermissions": []
+}
