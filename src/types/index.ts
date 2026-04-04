@@ -5,6 +5,7 @@ export interface Question {
   hasDoubt: boolean;
   correctAnswer?: string;
   isMultipleChoice?: boolean;
+  eliminated?: string[];
 }
 
 export interface ActivityBlock {

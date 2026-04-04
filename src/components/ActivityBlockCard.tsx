@@ -377,12 +377,38 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                 </div>
                 
                 <div className="flex items-center gap-1.5 px-2 py-1 bg-[#1a1a1a] rounded-lg border border-white/5">
-                  {(q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E']).map((alt) => (
-                    <button key={alt} onClick={() => onUpdateQuestion(block.id, q.number, { answer: q.answer === alt ? '' : alt })} disabled={block.isLocked}
-                      className={`min-w-[28px] h-6 rounded text-[10px] font-black transition-all ${q.answer === alt ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}>
-                      {alt}
-                    </button>
-                  ))}
+                  {(q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E']).map((alt) => {
+                    const isEliminated = q.eliminated?.includes(alt);
+                    return (
+                      <button key={alt}
+                        onClick={() => {
+                          if (q.answer === alt) {
+                            onUpdateQuestion(block.id, q.number, { answer: '' });
+                          } else {
+                            const newEliminated = (q.eliminated || []).filter(a => a !== alt);
+                            onUpdateQuestion(block.id, q.number, { answer: alt, eliminated: newEliminated.length > 0 ? newEliminated : undefined });
+                          }
+                        }}
+                        onDoubleClick={() => {
+                          if (block.isLocked) return;
+                          const current = q.eliminated || [];
+                          const next = current.includes(alt)
+                            ? current.filter(a => a !== alt)
+                            : [...current, alt];
+                          onUpdateQuestion(block.id, q.number, { eliminated: next });
+                        }}
+                        disabled={block.isLocked}
+                        className={`min-w-[28px] h-6 rounded text-[10px] font-black transition-all ${
+                          q.answer === alt
+                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
+                            : isEliminated
+                              ? 'line-through text-gray-700 bg-red-900/10 cursor-pointer hover:text-gray-500 hover:bg-red-900/20'
+                              : 'text-gray-500 hover:text-white hover:bg-white/5'
+                        }`}>
+                        {alt}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="flex items-center gap-1">
