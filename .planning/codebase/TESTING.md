@@ -1,132 +1,126 @@
 # TESTING.md — Test Structure & Practices
 
-## Current State: No Tests
-There are **zero test files** in this codebase.
+## Overview
 
-```
-src/
-├── App.tsx    ← no corresponding App.test.tsx
-├── main.tsx   ← no test
-└── index.css  ← no test
-```
+This project has **no automated unit or integration test suite**. Testing is done exclusively through ad-hoc UAT (User Acceptance Testing) scripts using Playwright. There is no `vitest`, `jest`, or any test framework configured in `package.json`. The `@playwright/test` package is present in `dependencies` (not `devDependencies`), suggesting it was added as needed for UAT rather than as a formal test layer.
 
-No test directories exist:
-- No `tests/`
-- No `__tests__/`
-- No `*.test.ts` / `*.spec.ts` files
+## Test Framework
 
----
-
-## No Test Dependencies Configured
-`package.json` contains **no test framework** dependencies:
-- No Vitest
-- No Jest
-- No React Testing Library
-- No Playwright / Cypress
-
-The only "test-like" script in `package.json`:
-```json
-"lint": "tsc --noEmit"
-```
-This is just TypeScript type-checking, **not a test framework**.
-
----
-
-## No CI/CD Configuration
-- No `.github/workflows/` directory
-- No CI pipeline files (`.circleci`, `.gitlab-ci.yml`, etc.)
-- Testing is entirely manual
-
----
-
-## Manual Testing Approach (inferred)
-Based on the codebase structure, testing is currently **entirely manual** via:
-1. Running `npm run dev` → `http://localhost:3000`
-2. Pasting LS platform task text into the import form
-3. Manually verifying block parsing results
-4. Testing question answer input & gabarito import
-5. Checking revision generation output
-
----
-
-## High-Value Test Targets (for future test coverage)
-
-### Unit Tests — Pure Functions
-These functions have no side effects and are ideal for unit testing:
-
-| Function | What to Test |
+| Aspect | Detail |
 |---|---|
-| `parseLSTask(text)` | Various LS text formats → correct block/question extraction |
-| `formatQuestionList(numbers)` | `[1,2,3,4]` → `"1 2 3 e 4"` |
-| `parseQuestionsText(text)` | `"1-20, 25, 30"` → `[1..20, 25, 30]` |
-| `handleImportGabarito` regex | `"1 B\n2 CERTO"` → `Map {1→'B', 2→'C'}` |
+| Framework | Playwright (`@playwright/test ^1.59.1`) |
+| Runner | Node.js CJS (`*.cjs` files executed directly with `node`) |
+| Configuration | None — no `playwright.config.ts` exists |
+| Test discovery | Manual — no `npm test` script defined |
+| Target URL | `http://localhost:3000` (dev server must be running) |
 
-### Integration Tests — State Flows
-| Flow | What to Test |
-|---|---|
-| Import task flow | Paste text → click import → task appears in caderno |
-| Answer a question | Click ✓/✗/flag → question state updates correctly |
-| Gabarito import | Paste gabarito → questions auto-validate |
-| Lock/unlock block | Toggle lock → inputs disabled |
-| Delete + undo block | Delete → undo within 10s → block restored at original position |
-| Finish task | Click "Finalizar" → task moves to historico |
-| Revision generation | Complete task with wrong answers → revisão tab shows correct questions |
+## Only Test File
 
-### Edge Cases Worth Testing
-| Scenario | Expected Behavior |
-|---|---|
-| `parseLSTask` with unexpected format | Returns `[]`, shows toast "Não foi possível..." |
-| Empty import text | "Iniciar Tarefa" button disabled |
-| Gabarito with non-standard format | Regex skips unrecognized lines gracefully |
-| localStorage full | Unhandled — throws exception (see CONCERNS.md) |
-| Question number 0 or negative | Parsed, accepted — no validation |
+### `uat-test-phase15.cjs` (184 lines)
 
----
+A standalone Playwright script that performs browser-based black-box tests against the live app. It is **not integrated into any CI pipeline** and must be run manually.
 
-## Recommended Test Setup (if adding tests)
+**Pattern:**
+```js
+// Minimal test harness — no test framework, raw async functions
+const browser = await chromium.launch();
+const page = await context.newPage();
+await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded' });
 
-### Recommended Stack
+async function test(name, fn) {
+  try {
+    const result = await fn(page);
+    results.push({ name, status: result.passed ? 'pass' : 'issue', detail: result.detail || '' });
+  } catch (err) {
+    results.push({ name, status: 'issue', detail: err.message });
+  }
+}
+```
+
+**Tests covered (12 total):**
+1. Correct/Wrong distribution at block level (checks for ✔/✖ indicators)
+2. Correct/Wrong at section level (section headers with stats)
+3. Correct/Wrong at task level (multiple indicators)
+4. Lock section button presence
+5. Unlock section toggle presence
+6. Stats propagation toggle
+7. Inline section title editing (double-click — DOM attribute check)
+8. Drag and Drop handles present in DOM
+9. AI Revision button presence (`revisar`/`ia` keywords)
+10. AI Revision strategic prompt content (`auditor` keyword)
+11. CEBRASPE/CESPE C/E layout (C/E pattern in text)
+12. Performance badge elements (`[class*="badge"]` selector)
+
+**Test output:** Results saved to `/tmp/uat-results.json` (hardcoded Linux path — **broken on Windows**).
+
+**Run command (manual):**
 ```bash
-npm install -D vitest @testing-library/react @testing-library/user-event jsdom
+node uat-test-phase15.cjs
+# Requires: dev server running at localhost:3000
 ```
 
-### Vitest Config Addition for `vite.config.ts`
-```ts
-import { defineConfig } from 'vite';
+## Testing Approach & Philosophy
 
-export default defineConfig({
-  // ... existing config ...
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./src/test-setup.ts'],
-  },
-});
-```
+- Tests are **smoke tests** — they check DOM presence/text, not behavior flows
+- No assertions on state changes or network calls
+- No mocking of localStorage or Supabase
+- No setup/teardown (browser launched fresh, no stored state)
+- Results are `pass` / `issue` (not `pass`/`fail`) — intentionally lenient
+- Tests do **not** simulate actual user interactions (clicks, typing) — only DOM inspection
 
-### Script to Add
-```json
-"test": "vitest",
-"test:ui": "vitest --ui"
-```
+## What Is NOT Tested
 
-### Example Test for `parseLSTask`
-```ts
-// src/__tests__/parseLSTask.test.ts
-import { describe, it, expect } from 'vitest';
-import { parseLSTask } from '../App'; // would require export
+- `useTasks.ts` — no unit tests for any state mutation logic
+- `parser.ts` (`parseLSTask`, `parseQuestionsText`) — no unit tests for parsing logic
+- `SyncEngine.ts` — no tests for sync/push/pull behavior or offline handling
+- `StorageAdapter.ts` — no tests
+- React component rendering — no component tests
+- Error states (localStorage full, bad JSON, network failure)
+- The gabarito import flow
+- Section deletion / non-cascade behavior
+- Section recursive drag behavior
+- The backup import/export/merge flow
+- Auth modal and Supabase login
 
-describe('parseLSTask', () => {
-  it('parses a range-based LS task', () => {
-    const text = `Atividade 1
-Aula 05 - Versão Original
-Resolva as questões 01 a 20 das páginas 77 a 83. CEBRASPE`;
-    const blocks = parseLSTask(text);
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0].questions).toHaveLength(20);
-    expect(blocks[0].bank).toBe('CEBRASPE');
-  });
-});
-```
+## Coverage Gaps (Critical)
 
-> **Note:** `parseLSTask` is currently a module-level function but not exported. It would need to be exported or moved to a utils file for unit testing.
+| Area | Risk | Recommended Test Type |
+|---|---|---|
+| `parseLSTask()` regex engine | **High** — parses user-pasted text with complex regex | Unit (vitest) |
+| `useTasks.updateQuestion()` grading logic | **High** — auto-grades C/E answers with ANULADA edge case | Unit (vitest) |
+| `useTasks.moveBlock()` section recursion | **High** — complex index manipulation, easy to break | Unit (vitest) |
+| `SyncEngine` push/pull/debounce | **Medium** — async with timers, last-write-wins logic | Unit (vitest + fake timers) |
+| `importBackup` / `mergeBackup` | **Medium** — data destructive if wrong | Integration (Playwright) |
+| Answer mode (CEBRASPE vs A-E) | **Medium** — bank detection drives UX | Unit (vitest) |
+
+## Tmp/Debug Output Files
+
+At root level, there are output files that indicate past debugging/UAT sessions:
+- `tmp_output.txt` (23 KB) — likely captured stdout from a previous run
+- `tmp_output_utf8.txt` (11 KB) — UTF-8 conversion of above
+
+These are **not test artifacts** — they should be added to `.gitignore`.
+
+## Recommended Next Steps
+
+If a test suite is introduced:
+
+1. **Add vitest** — natural fit for Vite projects (zero config, ESM-native)
+   ```bash
+   npm install -D vitest @vitest/ui
+   ```
+
+2. **Unit test `parser.ts`** — the highest value target:
+   ```ts
+   // src/utils/parser.test.ts
+   import { parseLSTask } from './parser';
+   test('parses CEBRASPE range block', () => {
+     const result = parseLSTask('Atividade 1\nResolva as questões CEBRASPE: 1 a 5\n');
+     expect(result[0].bank).toBe('CEBRASPE');
+     expect(result[0].questions).toHaveLength(5);
+   });
+   ```
+
+3. **Unit test `useTasks` mutations** — use `renderHook` from `@testing-library/react`
+
+4. **Update Playwright config** — create `playwright.config.ts` with `baseURL`, reporter, and CI support
