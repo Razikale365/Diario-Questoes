@@ -26,13 +26,13 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
       if (isNumLine) {
         const nums = lines[i].split(/\s+/).map(n => parseInt(n, 10));
         const possibleAnswersLine = lines[i+1];
-        // Captura alternativas limpas incluindo ANULADA
-        const ansMatch = possibleAnswersLine.match(/\b(A|B|C|D|E|CERTO|ERRADO|C|E|ANULADA)\b/gi);
+        // Captura alternativas limpas incluindo ANULADA, CERTA, ERRADA
+        const ansMatch = possibleAnswersLine.match(/\b(A|B|C|D|E|CERTO|CERTA|ERRADO|ERRADA|C|E|ANULADA)\b/gi);
         if (ansMatch && ansMatch.length >= nums.length) {
           nums.forEach((num, idx) => {
             let ans = ansMatch[idx].toUpperCase();
-            if (ans === 'CERTO') ans = 'C';
-            if (ans === 'ERRADO') ans = 'E';
+            if (ans === 'CERTO' || ans === 'CERTA') ans = 'C';
+            if (ans === 'ERRADO' || ans === 'ERRADA') ans = 'E';
             parsedAnswers.set(num, ans);
           });
           i++; // Pula a linha de resposta pois já foi processada
@@ -41,15 +41,15 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
       }
     }
 
-    // Tentativa 2: Fallback pro formato tradicional linha a linha (Q1: A)
-    const regexFallback = /(\d+)\s*[-.)]?\s*([A-E]|CERTO|ERRADO|C|E|ANULADA)\b/gi;
+    // Tentativa 2: Fallback pro formato tradicional linha a linha (Q1: A, 1. LETRA C, 5. ALTERNATIVA C)
+    const regexFallback = /(\d+)\s*[-.)]?\s*(?:LETRA|ALTERNATIVA)?\s*([A-E]|CERTO|CERTA|ERRADO|ERRADA|C|E|ANULADA)\b/gi;
     let match;
     while ((match = regexFallback.exec(text)) !== null) {
       const num = parseInt(match[1], 10);
       if (!parsedAnswers.has(num)) {
         let ans = match[2].toUpperCase();
-        if (ans === 'CERTO') ans = 'C';
-        if (ans === 'ERRADO') ans = 'E';
+        if (ans === 'CERTO' || ans === 'CERTA') ans = 'C';
+        if (ans === 'ERRADO' || ans === 'ERRADA') ans = 'E';
         parsedAnswers.set(num, ans);
       }
     }

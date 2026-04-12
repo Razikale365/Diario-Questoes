@@ -149,16 +149,36 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
   });
 
   const getLayoutClasses = () => {
-    if (block.layout?.type === 'grid') return 'grid gap-4';
-    return 'flex flex-wrap gap-4';
+    if (block.layout?.type === 'grid') return 'grid gap-2 md:gap-4';
+    if (block.layout?.type === 'columns') return 'grid gap-2 md:gap-4';
+    return 'flex flex-wrap gap-2 md:gap-4';
   };
 
   const getDynamicStyles = () => {
+    const mobileCols = 1;
+    const tabletCols = 2;
+    const desktopCols = block.layout?.columns || 1;
+
     if (block.layout?.type === 'grid') {
       return {
-        gridTemplateColumns: `repeat(${block.layout.columns}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${block.layout.rows}, minmax(0, 1fr))`
-      };
+        '--cols': mobileCols,
+        '--tablet-cols': tabletCols,
+        '--desktop-cols': desktopCols,
+        '--rows': block.layout.rows || 1,
+        gridTemplateColumns: `repeat(var(--current-cols, var(--cols)), minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(var(--rows), minmax(0, 1fr))`
+      } as React.CSSProperties;
+    }
+    if (block.layout?.type === 'columns') {
+      return {
+        '--cols': mobileCols,
+        '--tablet-cols': tabletCols,
+        '--desktop-cols': desktopCols,
+        '--rows': block.layout.rows || 1,
+        gridTemplateColumns: `repeat(var(--current-cols, var(--cols)), minmax(0, 1fr))`,
+        gridAutoFlow: 'column',
+        gridTemplateRows: `repeat(var(--rows), minmax(0, 1fr))`
+      } as React.CSSProperties;
     }
     return {};
   };
@@ -294,11 +314,11 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative ${colSpanMap[currentWidth] || 'col-span-12'}`}
+      className={`relative ${colSpanMap[currentWidth as keyof typeof colSpanMap] || 'col-span-12'}`}
     >
       <motion.div
         ref={containerRef}
-        className={`bg-[#262626] border-2 h-full ${block.isLocked ? 'border-[#333333]' : 'border-[#404040] hover:border-purple-500/30'} flex flex-col rounded-2xl p-4 transition-all overflow-hidden ${isResizing ? 'ring-2 ring-purple-500' : ''}`}
+        className={`bg-[#262626] border-2 h-full ${block.isLocked ? 'border-[#333333]' : 'border-[#404040] hover:border-purple-500/30'} flex flex-col rounded-2xl p-3 md:p-4 transition-all overflow-hidden ${isResizing ? 'ring-2 ring-purple-500' : ''}`}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
       >
@@ -362,67 +382,74 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
           </span>
         </div>
 
-        <div className={`overflow-y-auto pr-1 flex-1 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent ${getLayoutClasses()}`} style={getDynamicStyles()}>
+        <div 
+          className={`overflow-y-auto pr-1 flex-1 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent [--current-cols:var(--cols)] md:[--current-cols:var(--tablet-cols)] xl:[--current-cols:var(--desktop-cols)] ${getLayoutClasses()}`} 
+          style={getDynamicStyles()}
+        >
           {block.questions.map((q) => (
-            <div key={q.number} className="group/q flex flex-col gap-1.5 p-2 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
+            <div key={q.number} className="group/q flex flex-col gap-2 p-2 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
+              <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
+                {/* Left: Number */}
+                <div className="flex items-center gap-3">
                   <span 
                     onDoubleClick={() => onUpdateQuestion(block.id, q.number, { isMultipleChoice: !q.isMultipleChoice })}
                     className={`text-[10px] p-2 font-black rounded-lg text-gray-400 w-6 h-6 flex items-center justify-center cursor-pointer select-none transition-all ${q.isMultipleChoice ? 'bg-purple-600/30 text-purple-400 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] hover:text-white hover:bg-purple-600/20'}`}
-                    title="Dê um duplo clique para alternar entre CERTO/ERRADO e Múltipla Escolha"
                   >
                     {q.number}
                   </span>
                 </div>
                 
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-[#1a1a1a] rounded-lg border border-white/5">
-                  {(q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E']).map((alt) => {
-                    const isEliminated = q.eliminated?.includes(alt);
-                    return (
-                      <button key={alt}
-                        onClick={() => {
-                          if (q.answer === alt) {
-                            onUpdateQuestion(block.id, q.number, { answer: '' });
-                          } else {
-                            const newEliminated = (q.eliminated || []).filter(a => a !== alt);
-                            onUpdateQuestion(block.id, q.number, { answer: alt, eliminated: newEliminated.length > 0 ? newEliminated : undefined });
-                          }
-                        }}
-                        onDoubleClick={() => {
-                          if (block.isLocked) return;
-                          const current = q.eliminated || [];
-                          const next = current.includes(alt)
-                            ? current.filter(a => a !== alt)
-                            : [...current, alt];
-                          onUpdateQuestion(block.id, q.number, { eliminated: next });
-                        }}
-                        disabled={block.isLocked}
-                        className={`min-w-[28px] h-6 rounded text-[10px] font-black transition-all ${
-                          q.answer === alt
-                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
-                            : isEliminated
-                              ? 'line-through text-gray-700 bg-red-900/10 cursor-pointer hover:text-gray-500 hover:bg-red-900/20'
-                              : 'text-gray-500 hover:text-white hover:bg-white/5'
-                        }`}>
-                        {alt}
-                      </button>
-                    );
-                  })}
+                {/* Middle: Alternatives (Flexible) */}
+                <div className="flex-1 flex items-center justify-center min-w-fit">
+                  <div className="flex items-center gap-1 px-2 py-1 bg-[#1a1a1a] rounded-lg border border-white/5 overflow-x-auto no-scrollbar">
+                    {(q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E']).map((alt) => {
+                      const isEliminated = q.eliminated?.includes(alt);
+                      return (
+                        <button key={alt}
+                          onClick={() => {
+                            if (q.answer === alt) {
+                              onUpdateQuestion(block.id, q.number, { answer: '' });
+                            } else {
+                              const newEliminated = (q.eliminated || []).filter(a => a !== alt);
+                              onUpdateQuestion(block.id, q.number, { answer: alt, eliminated: newEliminated.length > 0 ? newEliminated : undefined });
+                            }
+                          }}
+                          onDoubleClick={() => {
+                            if (block.isLocked) return;
+                            const current = q.eliminated || [];
+                            const next = current.includes(alt)
+                              ? current.filter(a => a !== alt)
+                              : [...current, alt];
+                            onUpdateQuestion(block.id, q.number, { eliminated: next });
+                          }}
+                          disabled={block.isLocked}
+                          className={`min-w-[28px] h-7 rounded text-[11px] font-black transition-all ${
+                            q.answer === alt
+                              ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
+                              : isEliminated
+                                ? 'line-through text-gray-700 bg-red-900/10 cursor-pointer hover:text-gray-500 hover:bg-red-900/20'
+                                : 'text-gray-500 hover:text-white hover:bg-white/5'
+                          }`}>
+                          {alt}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                {/* Right: Actions */}
+                <div className="flex items-center gap-1 ml-auto">
                   <button onClick={() => onUpdateQuestion(block.id, q.number, { hasDoubt: !q.hasDoubt })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.hasDoubt ? 'text-orange-500 bg-orange-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Flag className={`w-3.5 h-3.5 ${q.hasDoubt ? 'fill-orange-500' : ''}`} /></button>
+                    className={`p-1.5 rounded-lg transition-all ${q.hasDoubt ? 'text-orange-500 bg-orange-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Flag className={`w-4 h-4 ${q.hasDoubt ? 'fill-orange-500' : ''}`} /></button>
                   <div className="w-[1px] h-4 bg-white/5 mx-1" />
                   <button onClick={() => onUpdateQuestion(block.id, q.number, { isCorrect: true })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-3.5 h-3.5" /></button>
+                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-4 h-4" /></button>
                   <button onClick={() => onUpdateQuestion(block.id, q.number, { isCorrect: false })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-3.5 h-3.5" /></button>
+                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-4 h-4" /></button>
                   
                   {block.showGabarito && (
-                    <div className="ml-2 pl-3 border-l border-white/5 flex flex-col items-center">
-                      <span className="text-[8px] uppercase font-black text-gray-600 mb-0.5">Gabarito</span>
+                    <div className="ml-2 pl-3 border-l border-white/5 flex flex-col items-center min-w-[36px]">
+                      <span className="text-[8px] uppercase font-black text-gray-600 mb-0.5">GAB</span>
                       <span 
                         onDoubleClick={() => {
                           if (block.isLocked) return;
@@ -432,7 +459,6 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                           onUpdateQuestion(block.id, q.number, { correctAnswer: options[nextIdx] });
                         }}
                         className={`text-[10px] font-black px-1.5 rounded cursor-pointer select-none transition-all ${q.correctAnswer ? 'text-purple-400 hover:bg-purple-500/10' : 'text-gray-700 bg-white/5 hover:text-white hover:bg-white/10'}`}
-                        title="Duplo clique para alterar o gabarito"
                       >
                         {q.correctAnswer || '?'}
                       </span>

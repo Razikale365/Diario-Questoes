@@ -1,163 +1,78 @@
-# ARCHITECTURE.md — System Design & Patterns
+# ARCHITECTURE.md — System Architecture
 
 ## Pattern
-**SPA Monolith — Single-component architecture.**
+**Single-Page Application (SPA)** — React 19, no routing library, no SSR. All state lives in-memory and persists to localStorage.
 
-The entire application is a single React function component (`App`) in one file (`src/App.tsx`, ~1195 lines). There is no component decomposition, no routing, no external state management. All business logic, UI rendering, and state live in one place.
-
----
-
-## Application Layers
+## Layers
 
 ```
-Browser
-  └── React SPA (Vite)
-        └── App.tsx (single component, all logic + UI)
-              ├── State (useState + useMemo)
-              ├── Business Logic (pure TS functions)
-              ├── Event Handlers (mutate state)
-              └── JSX (renders 3 tabs + 2 modals)
-                    └── localStorage (persistence)
+┌─────────────────────────────────────────────────────┐
+│              UI Components  (src/components/)        │
+│  App.tsx (root) → Sidebar, TaskHeader, ActivityBlockCard │
+│  ImportArea, RevisionArea, HistoryList, Modals       │
+└──────────────────────┬──────────────────────────────┘
+                       │ props + callbacks (no context API)
+┌──────────────────────▼──────────────────────────────┐
+│          State & Logic  (src/hooks/)                 │
+│  useTasks.ts  — all task/block/question mutations    │
+│  useSnapResizer.ts  — drag-resize hook               │
+└──────────────────────┬──────────────────────────────┘
+                       │ reads/writes
+┌──────────────────────▼──────────────────────────────┐
+│          Storage Layer  (src/storage/)               │
+│  StorageAdapter (interface) + LocalStorageAdapter    │
+│  SyncEngine — Supabase cloud sync (optional)         │
+└──────────────────────┬──────────────────────────────┘
+                       │ conditional
+┌──────────────────────▼──────────────────────────────┐
+│          External  (src/lib/)                        │
+│  supabase.ts — nullable Supabase client              │
+└─────────────────────────────────────────────────────┘
 ```
-
----
 
 ## Data Flow
 
-### Write Path
-```
-User Action → Event Handler → setTasks() → useEffect → localStorage.setItem()
-```
+1. **Import**: User pastes LS platform text → `ImportArea` → `parseLSTask()` → `StudyTask` object → `useTasks.addTask()` → React state → localStorage
+2. **Answering questions**: `ActivityBlockCard` → button click → `onUpdateQuestion()` → `useTasks.updateQuestion()` → immutable state update → localStorage persists via `useEffect`
+3. **Sync**: localStorage state → `SyncEngine.syncNow()` → Supabase upsert / pull
+4. **DND reorder**: `DndContext.onDragEnd` → `useTasks.moveBlock()` → updates block order in state
+5. **Revision generation**: `RevisionArea` → filters completed tasks by discipline + lesson → generates text list of wrong/doubt questions
 
-### Read Path
-```
-localStorage.getItem() → useState initializer → useMemo derivations → JSX render
-```
-
-### Task Lifecycle
-```
-Import Form (paste LS text)
-  → parseLSTask() [parse & extract blocks]
-  → handleImport() [create StudyTask]
-  → tasks state [active task]
-  → User fills answers per block
-  → [Optional] Import Gabarito → auto-validate correctness
-  → finishTask() [status → 'completed', activeTaskId → null]
-  → Histórico tab (read-only history)
-  → Revisão tab [filter wrong/doubt questions → generate revision text]
-```
-
----
-
-## Core Data Structures
-
-### `StudyTask`
-Top-level record. One per study session.
-```ts
-interface StudyTask {
-  id: string;             // crypto.randomUUID()
-  date: string;           // ISO date string
-  planejamento?: string;  // e.g., 'Planejamento Iniciante Fiscal [103971]'
-  meta?: string;          // numeric string
-  tarefa?: string;        // numeric string
-  assunto?: string;       // subject matter (auto-extracted from LS text)
-  discipline: string;     // from DISCIPLINAS list
-  bank: string;           // from BANKS list (CEBRASPE, FCC, etc.)
-  blocks: ActivityBlock[];
-  status: 'in_progress' | 'completed';
-}
-```
-
-### `ActivityBlock`
-A group of questions within a task (maps to one "Atividade" in LS platform text).
-```ts
-interface ActivityBlock {
-  id: string;
-  title: string;
-  lesson: string;        // e.g., 'Aula 05'
-  pages: string;         // e.g., '77 a 83'
-  bank?: string;         // override bank for this specific block
-  isLocked?: boolean;    // locks all question inputs
-  questions: Question[];
-}
-```
-
-### `Question`
-Atomic unit — one exam question.
-```ts
-interface Question {
-  number: number;
-  answer: string;          // user-typed answer (A-E, C, E)
-  isCorrect: boolean | null;   // null = not yet evaluated
-  hasDoubt: boolean;
-  correctAnswer?: string;  // set after gabarito import
-}
-```
-
----
+## State Management
+- **No Redux, Zustand, or Context API** — state is hoisted at `App.tsx` level
+- `useTasks` hook owns all task state via `useState<StudyTask[]>`
+- Sync state (`SyncState`) managed separately in `App.tsx` via `useState<SyncState>`
+- All child components receive data and callbacks via props (prop drilling is the intentional pattern)
 
 ## Key Abstractions
 
-### `parseLSTask(text: string): ActivityBlock[]`
-- **Location:** `src/App.tsx` (lines 74–171)
-- **Purpose:** Parses raw text pasted from the LS (LFG) platform into structured `ActivityBlock[]`
-- **Algorithm:**
-  1. Splits text on `Atividade N` boundaries
-  2. For each part, finds question-range lines (`Resolva as questões X a Y`)
-  3. Extracts: question numbers (range or list), pages, bank name, lesson name
-- **Weakness:** Regex-heavy, brittle to LS text format changes
+### StudyTask
+Top-level entity. Has `id`, `date`, `discipline`, `bank`, `status`, and `blocks: ActivityBlock[]`.
 
-### `formatQuestionList(numbers: number[]): string`
-- Converts `[1, 2, 3, 4]` → `"1 2 3 e 4"` (Brazilian list format for revision text)
+### ActivityBlock
+Can be either:
+1. **Activity block** — has `questions[]`, `layout`, `bank`, `lesson`, `pages`
+2. **Section Header** — `isSection: true`, empty `questions[]`, used visually as a divider/grouping label
 
-### `parseQuestionsText(text: string): number[]`
-- Used in block edit modal — parses `"1-20, 25, 30"` → `[1,2,...20,25,30]`
+### Section System
+- Sections are not a separate data type — they're `ActivityBlock` objects with `isSection: true`
+- Blocks are linked to sections by matching `block.lesson === section.title` (case-insensitive)
+- Section stats aggregated in `App.tsx` before being passed down as `sectionStats` prop
 
-### `generatedRevision` (useMemo)
-- **Derived state** — computed from completed tasks filtered by discipline + selected lessons
-- Groups wrong/doubt questions by `lesson|bank` key
-- Produces formatted revision text for clipboard copy
+### Question
+Primitive unit: `{ number, answer, isCorrect, hasDoubt, correctAnswer?, isMultipleChoice?, eliminated? }`
 
----
+## Entry Points
+- `index.html` → `src/main.tsx` → `<App />` mounted to `#root`
+- `src/main.tsx` — minimal, just `createRoot().render()`
 
-## Navigation Model
-- **3 tabs** (rendered conditionally, not via URL routing):
-  - `caderno` — active task + question grid (default)
-  - `revisao` — revision generator
-  - `historico` — read-only list of all tasks
-- **2 modals** (fixed position overlays):
-  - Gabarito import modal
-  - Block edit/create modal
+## Grid Layout System
+- Outer grid: CSS `grid-cols-12` on the blocks container
+- Each `ActivityBlock` has `layout.width` (3 | 6 | 9 | 12 = col-span) and `layout.rowSpan`
+- Inner questions grid: configurable `layout.columns × layout.rows`, type `'grid' | 'columns'`
+- Resize handled by `useSnapResizer` hook — snaps to 3, 6, 9, 12 horizontal columns
 
----
-
-## State Management
-All state is `useState` within `App`:
-| State | Type | Purpose |
-|---|---|---|
-| `tasks` | `StudyTask[]` | All tasks, synced to localStorage |
-| `activeTaskId` | `string \| null` | Currently active task pointer |
-| `activeTab` | `'caderno' \| 'revisao' \| 'historico'` | Navigation |
-| `toastMessage` | `string \| null` | Notification text |
-| `importText` | `string` | Import form textarea |
-| `importPlanejamento` | `string` | Import form field |
-| `importMeta` | `string` | Import form field |
-| `importTarefa` | `string` | Import form field |
-| `importAssunto` | `string` | Import form field |
-| `importDiscipline` | `string` | Import form field |
-| `importBank` | `string` | Import form field |
-| `isEditingTask` | `boolean` | Task meta edit mode |
-| `editForm` | object | Fields for task edit |
-| `revDiscipline` | `string` | Revision filter |
-| `selectedLessons` | `Set<string>` | Revision filter |
-| `deletedBlockInfo` | object \| null | Undo delete buffer |
-| `blockEditModal` | object \| null | Block modal state |
-| `gabaritoModal` | `string \| null` | Gabarito modal (block ID) |
-| `gabaritoText` | `string` | Gabarito textarea content |
-
----
-
-## Rendering Strategy
-- No virtualization — all questions rendered at once
-- CSS multi-column layout for question grid (`columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5`)
-- Animations: `animate-in fade-in slide-in-from-*` (Tailwind CSS animations) for toasts
+## Concurrency Model
+- Supports multiple in-progress tasks simultaneously (`status: 'in_progress'`)
+- Only one task "active" at a time (tracked by `activeTaskId`)
+- Pause/resume: set `activeTaskId = null` to pause, set to task ID to resume

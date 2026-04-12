@@ -16,6 +16,7 @@ import { BlockEditModal } from './components/BlockEditModal';
 import { SectionEditModal } from './components/SectionEditModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal } from './components/AuthModal';
+import { BottomNav } from './components/BottomNav';
 import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/parser';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
@@ -75,6 +76,8 @@ function App() {
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
   const syncEngineRef = useRef<SyncEngine | null>(null);
+  const isInitialMount = useRef(true);
+  const skipSyncRef = useRef(false);
 
   useEffect(() => {
     const adapter = new LocalStorageAdapter();
@@ -84,18 +87,37 @@ function App() {
     syncEngineRef.current = engine;
     engine.init();
 
-    window.addEventListener('ls_sync_pull', ((e: Event) => {
+    const handleSyncPull = (e: Event) => {
       const detail = (e as CustomEvent).detail as StudyTask[];
       if (detail) {
+        skipSyncRef.current = true;
         setTasks(detail);
         showToast('Dados atualizados da nuvem!');
       }
-    }) as EventListener);
+    };
+
+    window.addEventListener('ls_sync_pull', handleSyncPull);
 
     return () => {
       engine.destroy();
+      window.removeEventListener('ls_sync_pull', handleSyncPull);
     };
   }, []);
+
+  // Trigger auto-sync when tasks change locally
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (skipSyncRef.current) {
+      skipSyncRef.current = false;
+      return;
+    }
+
+    syncEngineRef.current?.markLocalWrite();
+  }, [tasks]);
 
   const handleSyncNow = useCallback(() => {
     syncEngineRef.current?.syncNow();
@@ -390,8 +412,8 @@ function App() {
         onDisconnect={handleDisconnect}
       />
 
-      <main className="flex-1 overflow-y-auto bg-[#2d2d2d] p-8 transition-all duration-300">
-        <div className="max-w-[1600px] mx-auto px-4">
+      <main className="flex-1 overflow-y-auto bg-[#2d2d2d] p-4 md:p-8 transition-all duration-300 pb-24 md:pb-8">
+        <div className="max-w-[1600px] mx-auto px-2 md:px-4">
           {activeTab === 'caderno' && (
             <div className="space-y-6">
               {!activeTask ? (
@@ -616,6 +638,15 @@ function App() {
         onClose={() => setShowAuthModal(false)}
         onAuthComplete={handleAuthComplete}
         onError={handleAuthError}
+      />
+
+      <BottomNav 
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        syncStatus={syncState.status}
+        onSyncNow={handleSyncNow}
+        onAuth={() => setShowAuthModal(true)}
+        inProgressCount={inProgressTasks.length}
       />
     </div>
   );

@@ -1,68 +1,44 @@
 # INTEGRATIONS.md — External Services & APIs
 
-## External APIs
+## Supabase (Cloud Sync)
+- **SDK**: `@supabase/supabase-js 2.101.1`
+- **Client**: `src/lib/supabase.ts` — exports nullable `supabase` client
+- **Auth**: Email + Password (Supabase Auth)
+  - Sign up: `supabase.auth.signUp({ email, password })`
+  - Sign in: `supabase.auth.signInWithPassword({ email, password })`
+  - Sign out: `supabase.auth.signOut()`
+  - Session check: `supabase.auth.getSession()`
+- **Database**: Single table `diario_ls_sync`
+  - Schema: `{ id: user_id, user_id, payload: StudyTask[], updated_at }`
+  - Strategy: One row per user (upsert on `id`)
+  - Conflict resolution: last-write-wins based on `updated_at` timestamp
+- **Graceful degradation**: If env vars are missing, `supabase` is `null` and all sync features silently disable
 
-### Google Gemini AI (`@google/genai`)
-- **Package:** `@google/genai@^1.29.0`
-- **Status:** ⚠️ INSTALLED BUT NOT INTEGRATED — the SDK is in `package.json` but **not imported or called anywhere** in `src/App.tsx` or any other source file.
-- **Configuration:** `GEMINI_API_KEY` is passed to the browser via Vite's `define` in `vite.config.ts`:
-  ```ts
-  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-  ```
-- **Env var source:** `.env` / `.env.local` file (example in `.env.example`)
-- **Future use:** Likely intended for AI-powered features (e.g., auto-explain wrong answers, AI revision suggestions)
+### Sync Flow
+1. On init: `pullOnStart()` → if no remote record, push local data
+2. On data change: React state → `localStorage` → `SyncEngine.markLocalWrite()` → debounced push (2s)
+3. On pull: compares remote `updated_at` vs local `ls_tasks_meta_v2.updatedAt` → newer wins
+4. Periodic pull: every 30 seconds while authenticated
+5. Online/offline: browser `online`/`offline` events trigger sync or mark as offline
 
----
+### Sync States
+`idle` | `syncing` | `synced` | `error` | `offline` | `unauthenticated`
 
-## Google Fonts
-- **URL:** `https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap`
-- **Loaded via:** CSS `@import` in `src/index.css`
-- **Purpose:** Typography — Open Sans as the app's default font family
+**Note**: `SyncEngine.markLocalWrite()` is defined but **never called** from `useTasks.ts` or `App.tsx`. Sync is triggered manually via `syncNow()` or on pull timer — local writes do NOT auto-push.
 
----
+## Browser APIs Used
+- `localStorage` — primary data persistence (keys: `ls_tasks_v2`, `ls_active_task_v2`, `ls_tasks_meta_v2`)
+- `navigator.clipboard.writeText()` — used for copy AI prompt and copy revision text
+- `crypto.randomUUID()` — UUID generation for task/block IDs
+- `document.createElement('a')` — file download for JSON backup export
+- `FileReader` — reading imported JSON backup files
+- `CustomEvent('ls_sync_pull')` — cross-boundary notification from `SyncEngine` to React state
+- `window.addEventListener('online'|'offline')` — network status tracking
 
-## Hosting / Deployment Platform
+## No External Analytics / Telemetry
+- No tracking libraries (no GA, Sentry, Mixpanel, etc.)
+- No CDN dependencies (all bundled locally)
 
-### Google AI Studio
-- **App URL:** `https://ai.studio/apps/948bbcb4-f76e-45aa-967e-d08ff90e23ab` (from README)
-- `APP_URL` env var is configured by AI Studio automatically for Cloud Run deployments
-- `GEMINI_API_KEY` is injected by AI Studio from user secrets at runtime
-- HMR is disabled via `DISABLE_HMR=true` env var in the AI Studio environment
-
----
-
-## Browser Storage
-- **localStorage** — the only persistence layer currently in use
-  - `ls_tasks_v2` — array of `StudyTask` objects (full app state)
-  - `ls_active_task_v2` — string ID of the currently active task
-  - No expiration logic; data persists indefinitely until cleared
-
----
-
-## Express Server
-- **Package:** `express@^4.21.2` + `@types/express@^4.17.21`
-- **Status:** ⚠️ INSTALLED BUT NOT USED — no server file exists in the codebase (`server.ts`, `api/`, etc.)
-- **Likely origin:** AI Studio scaffold boilerplate for optional server-side features
-
----
-
-## No Active External Integrations
-The app currently has **zero live API calls** or server-side integrations. It is a fully client-side, offline-capable SPA that stores all data in `localStorage`.
-
-### What is NOT integrated (but installed):
-| Package | Reason Not Used |
-|---|---|
-| `@google/genai` | Key wired but no API calls made |
-| `express` | No server route files found |
-| `dotenv` | Used indirectly by Vite's `loadEnv` |
-
----
-
-## Summary
-| Service | Status | Notes |
-|---|---|---|
-| Gemini AI | Not active | SDK present, key configured, no usage |
-| Google Fonts | Active | Open Sans font loading |
-| AI Studio Hosting | Active (prod) | Cloud Run deployment |
-| localStorage | Active | Sole persistence mechanism |
-| Express API | Not active | Package present, no routes |
+## No External Font / Icon CDNs
+- Lucide React icons bundled via npm
+- No Google Fonts or external typography requests

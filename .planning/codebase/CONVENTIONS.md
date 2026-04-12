@@ -1,174 +1,126 @@
-# CONVENTIONS.md — Code Style & Patterns
+# CONVENTIONS.md — Coding Conventions & Patterns
 
-## Language
-- **TypeScript** with `isolatedModules: true` and `noEmit: true`
-- `skipLibCheck: true` — library types not strictly checked
-- `allowJs: true` — JS files permitted but not used
-- No `strict: true` — TypeScript is **not strict** (notable omission)
-- Lint script: `tsc --noEmit` (type-check only, no ESLint configured)
-
----
+## TypeScript Style
+- **Strict mode** enabled (`"strict": true` in tsconfig)
+- Types declared as `interface` (not `type`) for domain objects
+- Inline `as any` casts used in a few places to work around partial layout type merges (known tech debt in `useTasks.ts` lines 175, 190, 213)
+- `any` also used for `revisionTaskModal` state in `App.tsx` (line 143) and `setEditForm` prop (line 17 `TaskHeader.tsx`)
+- `crypto.randomUUID()` used natively (no uuid library)
 
 ## React Patterns
 
-### Component Style
-- **Functional components only** — class components not used
-- Single `App()` function component containing all UI and logic
-- Props not used (no child components exists)
+### State Architecture
+- **All state hoisted at `App.tsx`** — no Context API, no Zustand, no Redux
+- Children receive data via props and callbacks; this is an intentional flat prop-drilling pattern
+- `useMemo` used for derived data (`activeTask`, `inProgressTasks`, `viewingTask`, `generatedRevision`, `uniqueDisciplines`, `availableLessons`)
 
-### Hooks Usage
+### Component Patterns
 ```tsx
-// State initialization with lazy initializer for localStorage
-const [tasks, setTasks] = useState<StudyTask[]>(() => {
-  const saved = localStorage.getItem('ls_tasks_v2');
-  return saved ? JSON.parse(saved) : [];
-});
+// Functional component with typed props interface
+interface MyComponentProps { ... }
+export const MyComponent: React.FC<MyComponentProps> = ({ ... }) => { ... };
 
-// Side effects
-useEffect(() => {
-  localStorage.setItem('ls_tasks_v2', JSON.stringify(tasks));
-}, [tasks]);
-
-// Expensive derivations cached
-const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId), [tasks, activeTaskId]);
+// Memo + forwardRef (ActivityBlockCard only)
+export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, Props>((props, ref) => { ... }));
 ```
 
-### State Updates
-- Always uses **functional updater form** for state depending on previous state:
-  ```tsx
-  setTasks(prev => prev.map(task => {
-    if (task.id !== activeTaskId) return task;
-    return { ...task, ...updatedFields };
-  }));
-  ```
-- **Immutable updates only** — spread operator for all object mutations
-- No direct state mutation
+### Hook Pattern
+```ts
+// Hooks use useState + useEffect for persistence
+const [tasks, setTasks] = useState<StudyTask[]>(() => {
+  try { return JSON.parse(localStorage.getItem('key') || '[]'); }
+  catch { return []; }
+});
+useEffect(() => { localStorage.setItem('key', JSON.stringify(tasks)); }, [tasks]);
+```
 
----
+### Immutable State Updates
+All state mutations in `useTasks` use immutable `.map()` + spread:
+```ts
+setTasks(prev => prev.map(task =>
+  task.id === taskId
+    ? { ...task, blocks: task.blocks.map(block => ...) }
+    : task
+));
+```
 
-## Naming Conventions
+### Event Handling
+- Callbacks are passed as `on*` named props (e.g., `onUpdateQuestion`, `onToggleLock`)
+- No event bubbling prevention except in `useSnapResizer.ts` (`e.stopPropagation()` on mouse down)
 
-### Functions
-| Pattern | Example |
-|---|---|
-| `handle*` | `handleImport`, `handleDeleteBlock`, `handleCopy` |
-| `save*` | `saveTaskEdits`, `saveBlockEdit` |
-| `open*` | `openEditBlock` |
-| Verb+Noun | `finishTask`, `deleteTask`, `toggleLock`, `undoDeleteBlock` |
-| `parse*` | `parseLSTask`, `parseQuestionsText` |
-| `format*` | `formatQuestionList` |
+## Naming
+
+### Files
+- Components: `PascalCase.tsx`
+- Hooks: `usePascalCase.ts`
+- Utilities/lib: `camelCase.ts` or `PascalCase.ts`
+- Types: `index.ts` (domain), `sync.ts` (sync-specific)
 
 ### Variables
-| Pattern | Example |
-|---|---|
-| camelCase state | `activeTaskId`, `importDiscipline`, `gabaritoModal` |
-| SCREAMING_SNAKE constants | `BANKS`, `PLANEJAMENTOS`, `DISCIPLINAS` |
-| Derived values | `activeTask`, `uniqueDisciplines`, `availableLessons`, `generatedRevision` |
-
-### TypeScript
-| Pattern | Example |
-|---|---|
-| Interfaces | `StudyTask`, `ActivityBlock`, `Question` |
-| Union types | `'in_progress' \| 'completed'`, `boolean \| null` |
-| Generic usage | `useState<StudyTask[]>`, `useMemo<...>`, `Set<string>` |
-
----
-
-## Code Style
-
-### Conditionals in JSX
-- Uses `&&` short-circuit for optional rendering:
-  ```tsx
-  {toastMessage && <div>...</div>}
-  {activeTask.assunto && <p>{activeTask.assunto}</p>}
-  ```
-- Uses ternary for if/else rendering:
-  ```tsx
-  {!activeTask ? (<ImportForm />) : (<ActiveTaskView />)}
-  ```
-
-### Template Literals
-- Tailwind class composition via template literals:
-  ```tsx
-  className={`p-1.5 rounded transition-colors ${q.isCorrect === true ? 'bg-green-600 text-white' : 'bg-[#404040]'}`}
-  ```
-
-### Type Assertions
-- Non-null assertion `!` used in:
-  ```tsx
-  document.getElementById('root')!  // main.tsx
-  grouped.get(key)!                  // guaranteed by has() check
-  ```
-
-### Arrow Functions
-- All function components and handlers use arrow function syntax
-- Inline arrow functions in JSX event handlers:
-  ```tsx
-  onChange={(e) => setImportPlanejamento(e.target.value)}
-  onClick={() => openEditBlock(block)}
-  ```
-
----
-
-## UI Patterns
-
-### Color Palette (hardcoded Tailwind arbitrary values)
-| Token | Hex | Used For |
-|---|---|---|
-| `bg-[#2d2d2d]` | `#2d2d2d` | Main background |
-| `bg-[#333333]` | `#333333` | Card backgrounds |
-| `bg-[#262626]` | `#262626` | Card headers, input fields |
-| `bg-[#404040]` | `#404040` | Interactive elements bg |
-| `bg-[#525252]` | `#525252` | Hover states |
-| `bg-[#5c2092]` | `#5c2092` | Sidebar (purple) |
-| `bg-[#84cc16]` | `#84cc16` | Primary CTA (lime green) |
-| `bg-[#65a30d]` | `#65a30d` | CTA hover |
-| `text-purple-600` | Tailwind | Focus rings, icon accents |
-| `text-[#eab308]` | `#eab308` | Doubt flag color (yellow) |
-
-### Button Patterns
-All buttons follow this class pattern:
-```tsx
-className="bg-[color] hover:bg-[hover-color] text-white px-N py-N rounded font-bold 
-           flex items-center gap-2 transition-colors [disabled styles]"
-```
-
-### Input Patterns
-All text inputs share:
-```tsx
-className="w-full bg-[#404040] border border-[#525252] rounded px-4 py-2 text-white 
-           focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-```
-
-### Toast Notification Pattern
-- Duration: 3 seconds via `setTimeout`
-- Two toast types:
-  - Success (top-right, lime green bg): `showToast(message)`
-  - Undo action (bottom-right, dark bg): `deletedBlockInfo && <UndoToast />`
-- Undo window: 10 seconds (`setTimeout(() => setDeletedBlockInfo(null), 10000)`)
-
-### Modal Pattern
-Modals use a fixed-position backdrop:
-```tsx
-<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-  <div className="bg-[#262626] p-6 rounded-xl w-full max-w-[size] border border-[#404040] shadow-2xl">
-    ...
-  </div>
-</div>
-```
-
----
+- React state: `const [stateVar, setStateVar] = useState(...)`
+- Boolean flags: `is*` (e.g., `isLocked`, `isResizing`, `isEditing`, `isDragging`)
+- Visibility toggles: `show*` (e.g., `showStats`, `showGabarito`)
+- Handlers in `App.tsx`: `handle*` (e.g., `handleDragEnd`, `handlePasteImport`)
+- Callbacks passed as props: `on*` (e.g., `onToggleLock`, `onImport`)
 
 ## Error Handling
-- **No explicit try/catch anywhere** in the codebase
-- localStorage access not wrapped in try/catch (will throw if storage is full/blocked)
-- `JSON.parse` on stored data not guarded (potential parse error if data is corrupted)
-- `confirm()` used for delete confirmation (browser native dialog)
-- Validation: minimal — only checks for empty `importDiscipline` before import, and empty `importText`
+- `try/catch` with silent fallback for localStorage operations (return `[]` or `null`)
+- Supabase errors caught and stored in `SyncState.lastError`
+- User-facing errors use `alert()` (backup import/export failures) — not a toast
+- No global error boundary
 
----
+## CSS / Tailwind Patterns
+- All styling via inline Tailwind classes on JSX elements
+- No custom CSS utilities or `@apply` directives
+- Color design tokens used as literals (no CSS variables):
+  - Accent: `#84cc16` (lime/green)
+  - Sidebar: `#5c2092` (purple)
+  - Dark backgrounds: `#1a1a1a`, `#2d2d2d`, `#262626`, `#333333`, `#404040`
+- Responsive: `md:`, `xl:`, `lg:` prefixes used in grid layouts
+- Hover/active states: `hover:*`, `active:scale-95` common pattern
+- Animations: mix of Tailwind `animate-in` utilities and Framer Motion `motion.div`
 
-## Portuguese Language
-- All UI text is in **Brazilian Portuguese** (product is specific to Brazilian exam prep)
-- Variable/function names are in **English**
-- Constants like `DISCIPLINAS`, `PLANEJAMENTOS` contain Portuguese content values
+## Import Order Convention
+```tsx
+// 1. React (and hooks)
+import React, { useState, useEffect } from 'react';
+// 2. Third-party packages
+import { motion } from 'framer-motion';
+import { useSortable } from '@dnd-kit/sortable';
+// 3. Internal types
+import { ActivityBlock, Question } from '../types';
+// 4. Internal hooks
+import { useSnapResizer } from '../hooks/useSnapResizer';
+// 5. Internal components (where needed)
+```
+
+## Key Business Logic Patterns
+
+### Question Grading (auto-correct)
+When `answer` or `correctAnswer` is set, `isCorrect` is auto-computed:
+- `CERTO` → `C`, `ERRADO` → `E` normalization
+- `ANULADA` correctAnswer → always `isCorrect: true`
+- Otherwise: `isCorrect = userAns === correctAns`
+
+### Section Grouping
+Sections and their child blocks are linked by **title/lesson equality** (case-insensitive `.trim().toLowerCase()`):
+- `section.title === block.lesson` → block belongs to section
+- Section stats are computed in `App.tsx` before each render of `ActivityBlockCard`
+
+### Bank-aware Answer Mode
+```tsx
+// Determines C/E (CEBRASPE) vs A-E (other banks)
+const options = q.isMultipleChoice || (block.bank !== 'CEBRASPE' && block.bank !== 'CESPE')
+  ? ['A', 'B', 'C', 'D', 'E']
+  : ['C', 'E'];
+```
+CEBRASPE/CESPE questions default to C/E mode unless individually toggled with double-click.
+
+### DnD Section Move (Recursive)
+When a section header is dragged, all child blocks automatically move with it:
+```ts
+// useTasks.moveBlock() CASE 1: Moving section header + all children together
+```
+
+### Eliminated Answers
+`question.eliminated?: string[]` — double-click on an answer button toggles eliminated state (strikethrough visual).

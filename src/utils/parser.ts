@@ -17,54 +17,15 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
       title = `Bloco ${partIndex + 1}`;
     }
 
-    const questionLines = lines.filter(l => /resolv(?:a|er) as questões|refaça as questões/i.test(l));
-    
-    if (questionLines.length > 0) {
-      questionLines.forEach((qLine, index) => {
-        const questions: Question[] = [];
+    const questionLineIndices = lines
+      .map((l, i) => ({ line: l, index: i }))
+      .filter(({ line }) => /resolv(?:a|er) as questões|refaça as questões/i.test(line));
+
+    if (questionLineIndices.length > 0) {
+      questionLineIndices.forEach(({ line: qLine, index: qLineIdx }, blockIndex) => {
         let pages = '';
         let bank = '';
         let lesson = '';
-
-        // Support both range ("questões 01 a 20") and explicit list ("questões: 1, 4, 5 E 6")
-        // The optional colon after "questões" covers the LS Aula 14 format
-        const rangeMatch = qLine.match(/questões:?\s+(?:de\s+)?(\d+)\s+a\s+(\d+)/i);
-        if (rangeMatch) {
-          const start = parseInt(rangeMatch[1], 10);
-          const end = parseInt(rangeMatch[2], 10);
-          for (let i = start; i <= end; i++) {
-            questions.push({ number: i, answer: '', isCorrect: null, hasDoubt: false });
-          }
-        } else {
-          // Match explicit list: may have colon, numbers separated by commas, spaces, "e" / "E"
-          const listMatch = qLine.match(/questões:?\s+([\d][\d\s,eE]+)(?:das\s+páginas|\(total|da\s+pág)/i);
-          let numbersStr = '';
-          if (listMatch) {
-            numbersStr = listMatch[1];
-          } else {
-            // Fallback: grab everything that looks like a number list after "questões"
-            const fallbackMatch = qLine.match(/questões:?\s+([\d][\d\s,eE]+)/i);
-            if (fallbackMatch) numbersStr = fallbackMatch[1];
-          }
-          
-          if (numbersStr) {
-            const numbers = numbersStr
-              .replace(/\bE\b/gi, ' ')  // replace standalone "E" / "e" used as "and"
-              .replace(/,/g, ' ')
-              .split(/\s+/)
-              .map(n => parseInt(n, 10))
-              .filter(n => !isNaN(n));
-            
-            Array.from(new Set(numbers)).sort((a,b)=>a-b).forEach(n => {
-              questions.push({ number: n, answer: '', isCorrect: null, hasDoubt: false });
-            });
-          }
-        }
-
-        const pMatch = qLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas)\s*([\d\s a]+)(?:\.|\(|)/i);
-        if (pMatch) {
-          pages = pMatch[1].trim();
-        }
 
         const bankMatch = qLine.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
         if (bankMatch) {
@@ -77,26 +38,129 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
         if (lessonMatch) {
           lesson = lessonMatch[1].trim();
         } else {
-          if (lines.length > 1 && !/resolv/i.test(lines[1])) {
-            lesson = lines[1];
+          for (let i = 1; i < lines.length; i++) {
+            if (!/resolv/i.test(lines[i])) {
+              lesson = lines[i];
+              break;
+            }
           }
         }
 
-        if (questions.length > 0) {
+        const bankRegexStr = '(?:(?:(?:da|das|de|do)\\s+)?(?:CEBRASPE|FCC|FGV|VUNESP|CESPE|Lista\\s+(?:CEBRASPE|FCC|FGV|VUNESP|CESPE))\\s+)?';
+        const inlineRange = qLine.match(new RegExp(`questões:?\\s+${bankRegexStr}(?:de\\s+)?(\\d+)\\s+a\\s+(\\d+)`, 'i'));
+        const inlineList = qLine.match(new RegExp(`questões:?\\s+${bankRegexStr}(?:de\\s+)?([\\d][\\d\\s,eE]+)`, 'i'));
+
+        if (inlineRange) {
+          const questions: Question[] = [];
+          const start = parseInt(inlineRange[1], 10);
+          const end = parseInt(inlineRange[2], 10);
+          for (let i = start; i <= end; i++) {
+            questions.push({ number: i, answer: '', isCorrect: null, hasDoubt: false });
+          }
+
+          const pMatch = qLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
+          if (pMatch) {
+            pages = pMatch[1].trim();
+          }
+
           let blockTitle = title;
-          if (questionLines.length > 1 || !/Atividade/i.test(title)) {
-            blockTitle = `${title} - Bloco ${index + 1}`;
+          if (questionLineIndices.length > 1 || !/Atividade/i.test(title)) {
+            blockTitle = `${title} - Bloco ${blockIndex + 1}`;
             if (bank) blockTitle += ` (${bank})`;
           }
 
-          blocks.push({ 
-            id: crypto.randomUUID(), 
-            title: blockTitle, 
-            lesson, 
-            pages, 
+          blocks.push({
+            id: crypto.randomUUID(),
+            title: blockTitle,
+            lesson,
+            pages,
             bank,
-            questions 
+            questions,
+            layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
           });
+        } else if (inlineList) {
+          const questions: Question[] = [];
+          const numbers = inlineList[1]
+            .replace(/\bE\b/gi, ' ')
+            .replace(/,/g, ' ')
+            .split(/\s+/)
+            .map(n => parseInt(n, 10))
+            .filter(n => !isNaN(n));
+
+          Array.from(new Set(numbers)).sort((a,b)=>a-b).forEach(n => {
+            questions.push({ number: n, answer: '', isCorrect: null, hasDoubt: false });
+          });
+
+          const pMatch = qLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
+          if (pMatch) {
+            pages = pMatch[1].trim();
+          }
+
+          let blockTitle = title;
+          if (questionLineIndices.length > 1 || !/Atividade/i.test(title)) {
+            blockTitle = `${title} - Bloco ${blockIndex + 1}`;
+            if (bank) blockTitle += ` (${bank})`;
+          }
+
+          blocks.push({
+            id: crypto.randomUUID(),
+            title: blockTitle,
+            lesson,
+            pages,
+            bank,
+            questions,
+            layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
+          });
+        } else {
+          const subsequentLines = lines.slice(qLineIdx + 1);
+          const rangeLines = subsequentLines.filter(l => /^\s*[-•]\s*\d+\s+a\s+\d+/.test(l) || /^\s*\d+\s+a\s+\d+/.test(l));
+
+          if (rangeLines.length > 0) {
+            rangeLines.forEach((rLine, rIndex) => {
+              const questions: Question[] = [];
+              let blockPages = '';
+              let blockBank = bank;
+
+              const rMatch = rLine.match(/(\d+)\s+a\s+(\d+)/);
+              if (rMatch) {
+                const start = parseInt(rMatch[1], 10);
+                const end = parseInt(rMatch[2], 10);
+                for (let i = start; i <= end; i++) {
+                  questions.push({ number: i, answer: '', isCorrect: null, hasDoubt: false });
+                }
+              }
+
+              const pMatch = rLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
+              if (pMatch) {
+                blockPages = pMatch[1].trim();
+              }
+
+              const rBankMatch = rLine.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
+              if (rBankMatch) {
+                let matchedBank = rBankMatch[1].toUpperCase();
+                if (matchedBank === 'CESPE') matchedBank = 'CEBRASPE';
+                blockBank = matchedBank;
+              }
+
+              if (questions.length > 0) {
+                let blockTitle = title;
+                if (rangeLines.length > 1) {
+                  blockTitle = `${title} - Bloco ${rIndex + 1}`;
+                  if (blockBank) blockTitle += ` (${blockBank})`;
+                }
+
+                blocks.push({
+                  id: crypto.randomUUID(),
+                  title: blockTitle,
+                  lesson,
+                  pages: blockPages,
+                  bank: blockBank,
+                  questions,
+                  layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
+                });
+              }
+            });
+          }
         }
       });
     }

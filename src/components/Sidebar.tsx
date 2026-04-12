@@ -38,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDisconnect
 }) => {
   return (
-    <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-[#5c2092] flex-shrink-0 flex flex-col shadow-2xl z-20 transition-all duration-300 relative group`}>
+    <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-[#5c2092] flex-shrink-0 hidden md:flex flex-col shadow-2xl z-20 transition-all duration-300 relative group`}>
       <button 
         onClick={onToggleCollapse}
         className="absolute -right-3 top-10 w-6 h-6 bg-[#84cc16] text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all opacity-0 group-hover:opacity-100 z-30"

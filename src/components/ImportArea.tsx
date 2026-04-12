@@ -29,8 +29,19 @@ export const ImportArea: React.FC<ImportAreaProps> = ({ onImport, showToast }) =
       return;
     }
 
-    const assuntoMatch = importText.match(/Assuntos?:\s*(.+)/i);
-    const extractedAssunto = assuntoMatch ? assuntoMatch[1].trim() : importAssunto;
+    // Derive the Assunto pattern from the pasted text. Prefer a top-line declaration
+    // like "Assunto: ..." or "Assuntos: ...". Fallback to existing manually entered value
+    // only if no pattern is found in the text.
+    let extractedAssunto = importAssunto;
+    const assuntoLineTop = importText.match(/^\s*Assuntos?:\s*(.+)$/im);
+    if (assuntoLineTop && assuntoLineTop[1]) {
+      extractedAssunto = assuntoLineTop[1].trim();
+    } else {
+      const assuntoMatch = importText.match(/Assuntos?:\s*(.+)/i);
+      if (assuntoMatch) {
+        extractedAssunto = assuntoMatch[1].trim();
+      }
+    }
 
     const newTask: StudyTask = {
       id: crypto.randomUUID(),

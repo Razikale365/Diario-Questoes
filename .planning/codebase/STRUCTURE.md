@@ -1,110 +1,97 @@
-# STRUCTURE.md — Directory Layout & Organization
+# STRUCTURE.md — Directory Structure
 
-## Project Root
+## Root Layout
 ```
 Diario-Questoes/
-├── src/                    # All application source code
-│   ├── App.tsx             # THE entire application (1195 lines)
-│   ├── main.tsx            # React entry point (11 lines)
-│   └── index.css           # Global styles + Tailwind + Google Fonts (13 lines)
-├── .planning/              # GSD planning directory
-│   └── codebase/           # This codebase map
-├── index.html              # HTML shell (14 lines)
-├── package.json            # Dependencies & scripts
-├── package-lock.json       # Lockfile
-├── tsconfig.json           # TypeScript config
-├── vite.config.ts          # Vite build config
-├── metadata.json           # AI Studio app metadata
-├── .env                    # Local environment variables (gitignored)
-├── .env.example            # Template for env vars
-├── .gitignore              # Git exclusions
-├── README.md               # Setup instructions
-├── node_modules/           # Dependencies (gitignored)
-└── diário-de-revisão-ls.zip  # Archive file (binary, not used)
+├── src/                    # All application code
+│   ├── App.tsx             # Root component — orchestrates all state & layout (625 lines)
+│   ├── main.tsx            # React entry point
+│   ├── index.css           # Minimal global styles (Tailwind import only)
+│   ├── vite-env.d.ts       # Vite env type declarations
+│   ├── components/         # UI components (14 files)
+│   ├── hooks/              # Custom React hooks (2 files)
+│   ├── lib/                # External service clients (1 file)
+│   ├── storage/            # Data persistence layer (2 files)
+│   ├── types/              # TypeScript interfaces (2 files)
+│   └── utils/              # Pure utilities (2 files)
+├── .planning/              # GSD project management
+│   ├── PROJECT.md
+│   ├── ROADMAP.md
+│   ├── STATE.md
+│   ├── codebase/           # This directory (7 docs)
+│   ├── milestones/         # Per-milestone planning artifacts
+│   ├── phases/             # Phase plans
+│   └── ui-reviews/         # UI review artifacts
+├── index.html              # SPA shell
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── .env                    # Supabase credentials (gitignored)
+├── .env.example            # Template with documented variables
+├── SUPABASE_SETUP.md       # Supabase integration guide
+└── uat-test-phase15.cjs    # UAT test script
 ```
 
----
+## `src/components/` — UI Components
 
-## Source Files Detail
+| File | Purpose | Size |
+|------|---------|------|
+| `ActivityBlockCard.tsx` | Main question block card — renders both section headers and activity blocks; handles question answering, layout, DnD, resize | 473 lines |
+| `TaskHeader.tsx` | Task info display + edit form + global layout controls + "Revisar com IA" prompt generator | 416 lines |
+| `HistoryList.tsx` | Paginated history of completed tasks with search and filter | 14.3 KB |
+| `ImportArea.tsx` | Form to paste LS platform task text + metadata fields; triggers parseLSTask() | 165 lines |
+| `RevisionArea.tsx` | Generates revision list from completed tasks; lesson-level checkbox selector | 177 lines |
+| `Sidebar.tsx` | Left navigation + backup actions (export/import/merge/paste) + sync badge | 161 lines |
+| `SyncStatusBadge.tsx` | Compact sync status indicator with login/disconnect actions | 96 lines |
+| `BlockEditModal.tsx` | Modal to create/edit activity blocks (title, lesson, bank, question numbers, layout) | 8.8 KB |
+| `SectionEditModal.tsx` | Modal to bulk-update all blocks in a section (width, rowSpan) | 6 KB |
+| `GabaritoModal.tsx` | Modal to paste/parse correct answer key (gabarito) for a block | 3.8 KB |
+| `AuthModal.tsx` | Email/password login & signup modal for Supabase | 128 lines |
+| `CreateTaskModal.tsx` | Confirmation modal for creating revision tasks | 5.4 KB |
+| `PasteBackupModal.tsx` | Textarea modal to paste JSON backup (import or merge) | 2.9 KB |
+| `ConfirmModal.tsx` | Generic destructive action confirmation dialog | 2.3 KB |
 
-### `src/App.tsx` (1195 lines)
-The **only** application file with logic. Contains:
-- Lines 1–2: Imports (React hooks + lucide-react icons)
-- Lines 4–33: TypeScript interfaces (`Question`, `ActivityBlock`, `StudyTask`)
-- Lines 35–72: Data constants (`BANKS`, `PLANEJAMENTOS`, `DISCIPLINAS`)
-- Lines 74–171: `parseLSTask()` — core text parser function
-- Lines 173–180: `formatQuestionList()` — formatter utility
-- Lines 182–539: `App` function component (state declarations + handlers)
-- Lines 541–1192: JSX return (sidebar + 3 tabs + 2 modals)
-- Lines 1194–1195: `export default App`
+## `src/hooks/`
 
-### `src/main.tsx` (11 lines)
-Standard React 19 entry point using `createRoot`. No customization.
+| File | Purpose |
+|------|---------|
+| `useTasks.ts` | Core state hook — all task/block/question CRUD, DnD, layout, sections, lock, stats, gabarito (523 lines) |
+| `useSnapResizer.ts` | Mouse-drag resize hook — snaps block width/height to grid columns/rows |
 
-### `src/index.css` (13 lines)
-```css
-@import url('https://fonts.googleapis.com/...Open+Sans...');
-@import "tailwindcss";
-@theme { --font-sans: "Open Sans", ...; }
-body { background-color: #2d2d2d; color: #f5f5f5; }
-```
+## `src/storage/`
 
-### `index.html` (14 lines)
-Minimal HTML shell. Title: "Diário de Questões - LS Ensino - JPCCN" (default — not updated).
+| File | Purpose |
+|------|---------|
+| `StorageAdapter.ts` | `StorageAdapter` interface + `LocalStorageAdapter` class — reads/writes to `ls_tasks_v2` |
+| `SyncEngine.ts` | Class-based sync orchestrator — debounced push, periodic pull, online/offline detection (235 lines) |
 
----
+## `src/types/`
 
-## Key Locations by Feature
+| File | Purpose |
+|------|---------|
+| `index.ts` | Core domain types: `Question`, `ActivityBlock`, `StudyTask`, `RevisionTaskModalState` |
+| `sync.ts` | Sync types: `SyncStatus`, `SyncRecord`, `SyncState` |
 
-| Feature | Location |
-|---|---|
-| Task import form | `src/App.tsx` lines ~619–709 |
-| Active task header | `src/App.tsx` lines ~784–813 |
-| Question grid (per block) | `src/App.tsx` lines ~845–891 |
-| Gabarito import modal | `src/App.tsx` lines ~1063–1099 |
-| Block edit modal | `src/App.tsx` lines ~1101–1188 |
-| Revision generator tab | `src/App.tsx` lines ~909–986 |
-| Task history tab | `src/App.tsx` lines ~988–1057 |
-| Text parser logic | `src/App.tsx` lines 74–171 |
-| Revision computation | `src/App.tsx` lines 495–534 |
+## `src/utils/`
 
----
+| File | Purpose |
+|------|---------|
+| `constants.ts` | Static data: `PLANEJAMENTOS`, `DISCIPLINAS`, `BANKS` lists |
+| `parser.ts` | `parseLSTask()` — parses LS platform task text into blocks; `formatQuestionList()`, `parseQuestionsText()` |
+
+## `src/lib/`
+
+| File | Purpose |
+|------|---------|
+| `supabase.ts` | Creates and exports nullable Supabase client |
+
+## Key File Size Reference
+- Largest: `App.tsx` (625 lines) — root orchestrator, likely candidate for refactoring
+- `ActivityBlockCard.tsx` (473 lines) — complex component with dual mode (section header / activity block)
+- `useTasks.ts` (523 lines) — the heart of all business logic
 
 ## Naming Conventions
-
-### Files
-- Single `App.tsx` — no naming convention enforced (only one component file)
-- CSS file: `index.css` (standard Vite convention)
-
-### TypeScript
-- **Interfaces:** PascalCase — `StudyTask`, `ActivityBlock`, `Question`
-- **Constants:** SCREAMING_SNAKE_CASE — `BANKS`, `PLANEJAMENTOS`, `DISCIPLINAS`
-- **State variables:** camelCase — `activeTaskId`, `importDiscipline`, `blockEditModal`
-- **Event handlers:** `handle*` prefix — `handleImport`, `handleDeleteBlock`, `handleImportGabarito`, `handleCopy`
-- **Action functions:** verb + noun — `finishTask`, `deleteTask`, `toggleLock`, `openEditBlock`, `saveBlockEdit`, `undoDeleteBlock`
-- **Computed/derived values:** noun — `activeTask`, `generatedRevision`, `uniqueDisciplines`, `availableLessons`
-
-### CSS / Tailwind
-- All styling is utility-first via Tailwind classes in JSX
-- No custom CSS classes defined (only base `body` styles in `index.css`)
-- Color palette: dark grays (`#2d2d2d`, `#333333`, `#404040`, `#525252`, `#262626`), purple sidebar (`#5c2092`), accent lime-green (`#84cc16`)
-
----
-
-## Build Output
-- `dist/` — Vite build output (gitignored)
-- Entry: `index.html` → `src/main.tsx` → `src/App.tsx`
-
----
-
-## Missing Common Directories
-These directories are **not present** (codebase is minimal):
-- No `src/components/` — no component decomposition
-- No `src/hooks/` — no custom hooks
-- No `src/utils/` — utility functions inline in App.tsx
-- No `src/types/` — types defined inline
-- No `src/constants/` — constants defined inline
-- No `src/services/` — no API layer
-- No `tests/` or `__tests__/` — no test files
-- No `public/` — no static assets
-- No `api/` — no server routes
+- Components: PascalCase, `.tsx` extension
+- Hooks: camelCase with `use` prefix, `.ts` extension
+- Utils/lib: camelCase, `.ts` extension
+- Types: PascalCase interfaces exported from `index.ts`
