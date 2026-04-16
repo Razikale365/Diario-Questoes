@@ -1,8 +1,126 @@
 import { ActivityBlock, Question } from '../types';
 
+type ParsedInstruction = {
+  questionNumbers: number[];
+  pages: string;
+  bank: string;
+};
+
+const cleanLessonLabel = (value: string): string =>
+  value
+    .replace(/\s*-\s*resolv(?:a|er).*$/i, '')
+    .replace(/\s*-\s*execut(?:e|ar).*$/i, '')
+    .replace(/\s*-\s*faça.*$/i, '')
+    .trim();
+
+const createQuestion = (number: number): Question => ({
+  number,
+  answer: '',
+  isCorrect: null,
+  hasDoubt: false
+});
+
+const normalizeBank = (value: string): string => {
+  const matchedBank = value.toUpperCase();
+  return matchedBank === 'CESPE' ? 'CEBRASPE' : matchedBank;
+};
+
+const parseInstructionBank = (line: string): string => {
+  const bankMatch = line.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
+  return bankMatch ? normalizeBank(bankMatch[1]) : '';
+};
+
+const parseInstructionNumbers = (line: string): number[] => {
+  const questions: number[] = [];
+  const rangeRegex = /questões?:?\s*(?:(?:CEBRASPE|FCC|FGV|VUNESP|CESPE)\s+)?(?:de\s+)?(\d+)\s+a\s+(\d+)/gi;
+  let rangeMatch: RegExpExecArray | null;
+
+  while ((rangeMatch = rangeRegex.exec(line)) !== null) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+
+    for (let i = start; i <= end; i++) {
+      questions.push(i);
+    }
+  }
+
+  if (questions.length > 0) {
+    return questions;
+  }
+
+  const listMatch = line.match(/questões?:?\s+(?:(?:CEBRASPE|FCC|FGV|VUNESP|CESPE)\s+)?([\d][\d\s,eE]+)(?:das\s+páginas|\(total|da\s+pág|páginas|$)/i);
+  let numbersStr = '';
+
+  if (listMatch) {
+    numbersStr = listMatch[1];
+  } else {
+    const fallbackMatch = line.match(/questões?:?\s+(?:(?:CEBRASPE|FCC|FGV|VUNESP|CESPE)\s+)?([\d][\d\s,eE]+)/i);
+    if (fallbackMatch) numbersStr = fallbackMatch[1];
+  }
+
+  if (!numbersStr) {
+    return [];
+  }
+
+  return numbersStr
+    .replace(/\bE\b/gi, ' ')
+    .replace(/,/g, ' ')
+    .split(/\s+/)
+    .map(n => parseInt(n, 10))
+    .filter(n => !isNaN(n));
+};
+
+const parseInstructionPages = (line: string): string => {
+  const pMatch = line.match(/(?:das\s+páginas|da\s+pág\.?|páginas)\s*([\d\s ae]+?)(?:\s*[-;,]|\s*\(|\)|\.|$)/i);
+  return pMatch ? pMatch[1].trim() : '';
+};
+
+const extractQuestionInstructions = (lines: string[]): ParsedInstruction[] => {
+  const instructions: ParsedInstruction[] = [];
+  let collectingList = false;
+
+  lines.forEach(line => {
+    const normalizedLine = line.replace(/^[\-\u2022]\s*/, '').trim();
+
+    if (/^(?:resolva|refaça)\s*:?\s*$/i.test(normalizedLine)) {
+      collectingList = true;
+      return;
+    }
+
+    const isQuestionInstruction = /(?:resolv(?:a|er)|refaça)\s+as\s+questões?/i.test(normalizedLine);
+    const isListContinuation = collectingList && /questões?:?\s+\d+/i.test(normalizedLine);
+
+    if (isQuestionInstruction || isListContinuation) {
+      const normalizedInstruction = isQuestionInstruction
+        ? normalizedLine
+        : `Resolva as ${normalizedLine}`.replace(/\s+/g, ' ').trim();
+
+      const questionNumbers = parseInstructionNumbers(normalizedInstruction);
+      if (questionNumbers.length === 0) {
+        return;
+      }
+
+      instructions.push({
+        questionNumbers,
+        pages: parseInstructionPages(normalizedInstruction),
+        bank: parseInstructionBank(normalizedInstruction)
+      });
+      return;
+    }
+
+    if (collectingList) {
+      collectingList = false;
+    }
+  });
+
+  return instructions;
+};
+
 export const parseLSTask = (text: string): ActivityBlock[] => {
   const blocks: ActivityBlock[] = [];
-  
+  const globalLessonMatch = text.match(/(Aula\s+\d+[^.\n]*)/i);
+  const globalLesson = globalLessonMatch ? cleanLessonLabel(globalLessonMatch[1]) : '';
+
   let parts = text.split(/(?=Atividade\s+\d+)/i).filter(p => p.trim().length > 0);
   if (!/Atividade\s+\d+/i.test(text)) {
     parts = [text];
@@ -12,161 +130,50 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
     const lines = part.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) return;
 
-    let title = lines[0].replace(/:$/, '');
+    const activityLine = lines.find(line => /^Atividade\b/i.test(line));
+    let title = (activityLine || lines[0]).replace(/:$/, '');
     if (!/Atividade/i.test(title)) {
       title = `Bloco ${partIndex + 1}`;
     }
 
-    const questionLineIndices = lines
-      .map((l, i) => ({ line: l, index: i }))
-      .filter(({ line }) => /resolv(?:a|er) as questões|refaça as questões/i.test(line));
+    const questionInstructions = extractQuestionInstructions(lines);
 
-    if (questionLineIndices.length > 0) {
-      questionLineIndices.forEach(({ line: qLine, index: qLineIdx }, blockIndex) => {
-        let pages = '';
-        let bank = '';
-        let lesson = '';
+    if (questionInstructions.length > 0) {
+      const bankMatch = part.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
+      const bank = bankMatch ? normalizeBank(bankMatch[1]) : '';
 
-        const bankMatch = qLine.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
-        if (bankMatch) {
-          let matchedBank = bankMatch[1].toUpperCase();
-          if (matchedBank === 'CESPE') matchedBank = 'CEBRASPE';
-          bank = matchedBank;
+      const lessonMatch = part.match(/(Aula\s+\d+[^.\n]*)/i);
+      const lesson = lessonMatch
+        ? cleanLessonLabel(lessonMatch[1])
+        : (lines.length > 1 && !/resolv/i.test(lines[1]) ? cleanLessonLabel(lines[1]) : globalLesson);
+
+      questionInstructions.forEach((instruction, index) => {
+        const questions = Array.from(new Set(instruction.questionNumbers))
+          .sort((a, b) => a - b)
+          .map(createQuestion);
+
+        if (questions.length === 0) {
+          return;
         }
 
-        const lessonMatch = qLine.match(/(Aula\s+\d+[^.]*)/i);
-        if (lessonMatch) {
-          lesson = lessonMatch[1].trim();
-        } else {
-          for (let i = 1; i < lines.length; i++) {
-            if (!/resolv/i.test(lines[i])) {
-              lesson = lines[i];
-              break;
-            }
-          }
+        let blockTitle = title;
+        if (questionInstructions.length > 1 || !/Atividade/i.test(title)) {
+          blockTitle = `${title} - Bloco ${index + 1}`;
+          if (instruction.bank || bank) blockTitle += ` (${instruction.bank || bank})`;
         }
 
-        const bankRegexStr = '(?:(?:(?:da|das|de|do)\\s+)?(?:CEBRASPE|FCC|FGV|VUNESP|CESPE|Lista\\s+(?:CEBRASPE|FCC|FGV|VUNESP|CESPE))\\s+)?';
-        const inlineRange = qLine.match(new RegExp(`questões:?\\s+${bankRegexStr}(?:de\\s+)?(\\d+)\\s+a\\s+(\\d+)`, 'i'));
-        const inlineList = qLine.match(new RegExp(`questões:?\\s+${bankRegexStr}(?:de\\s+)?([\\d][\\d\\s,eE]+)`, 'i'));
-
-        if (inlineRange) {
-          const questions: Question[] = [];
-          const start = parseInt(inlineRange[1], 10);
-          const end = parseInt(inlineRange[2], 10);
-          for (let i = start; i <= end; i++) {
-            questions.push({ number: i, answer: '', isCorrect: null, hasDoubt: false });
-          }
-
-          const pMatch = qLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
-          if (pMatch) {
-            pages = pMatch[1].trim();
-          }
-
-          let blockTitle = title;
-          if (questionLineIndices.length > 1 || !/Atividade/i.test(title)) {
-            blockTitle = `${title} - Bloco ${blockIndex + 1}`;
-            if (bank) blockTitle += ` (${bank})`;
-          }
-
-          blocks.push({
-            id: crypto.randomUUID(),
-            title: blockTitle,
-            lesson,
-            pages,
-            bank,
-            questions,
-            layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
-          });
-        } else if (inlineList) {
-          const questions: Question[] = [];
-          const numbers = inlineList[1]
-            .replace(/\bE\b/gi, ' ')
-            .replace(/,/g, ' ')
-            .split(/\s+/)
-            .map(n => parseInt(n, 10))
-            .filter(n => !isNaN(n));
-
-          Array.from(new Set(numbers)).sort((a,b)=>a-b).forEach(n => {
-            questions.push({ number: n, answer: '', isCorrect: null, hasDoubt: false });
-          });
-
-          const pMatch = qLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
-          if (pMatch) {
-            pages = pMatch[1].trim();
-          }
-
-          let blockTitle = title;
-          if (questionLineIndices.length > 1 || !/Atividade/i.test(title)) {
-            blockTitle = `${title} - Bloco ${blockIndex + 1}`;
-            if (bank) blockTitle += ` (${bank})`;
-          }
-
-          blocks.push({
-            id: crypto.randomUUID(),
-            title: blockTitle,
-            lesson,
-            pages,
-            bank,
-            questions,
-            layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
-          });
-        } else {
-          const subsequentLines = lines.slice(qLineIdx + 1);
-          const rangeLines = subsequentLines.filter(l => /^\s*[-•]\s*\d+\s+a\s+\d+/.test(l) || /^\s*\d+\s+a\s+\d+/.test(l));
-
-          if (rangeLines.length > 0) {
-            rangeLines.forEach((rLine, rIndex) => {
-              const questions: Question[] = [];
-              let blockPages = '';
-              let blockBank = bank;
-
-              const rMatch = rLine.match(/(\d+)\s+a\s+(\d+)/);
-              if (rMatch) {
-                const start = parseInt(rMatch[1], 10);
-                const end = parseInt(rMatch[2], 10);
-                for (let i = start; i <= end; i++) {
-                  questions.push({ number: i, answer: '', isCorrect: null, hasDoubt: false });
-                }
-              }
-
-              const pMatch = rLine.match(/(?:das\s+páginas|da\s+pág\.?|páginas|pág\.?)\s*([\d\s aAeE,]+)(?:\.|\(|)/i);
-              if (pMatch) {
-                blockPages = pMatch[1].trim();
-              }
-
-              const rBankMatch = rLine.match(/(?:Lista\s+)?(CEBRASPE|FCC|FGV|VUNESP|CESPE)/i);
-              if (rBankMatch) {
-                let matchedBank = rBankMatch[1].toUpperCase();
-                if (matchedBank === 'CESPE') matchedBank = 'CEBRASPE';
-                blockBank = matchedBank;
-              }
-
-              if (questions.length > 0) {
-                let blockTitle = title;
-                if (rangeLines.length > 1) {
-                  blockTitle = `${title} - Bloco ${rIndex + 1}`;
-                  if (blockBank) blockTitle += ` (${blockBank})`;
-                }
-
-                blocks.push({
-                  id: crypto.randomUUID(),
-                  title: blockTitle,
-                  lesson,
-                  pages: blockPages,
-                  bank: blockBank,
-                  questions,
-                  layout: { columns: 4, rows: 5, type: 'columns', width: 12 }
-                });
-              }
-            });
-          }
-        }
+        blocks.push({
+          id: crypto.randomUUID(),
+          title: blockTitle,
+          lesson,
+          pages: instruction.pages,
+          bank: instruction.bank || bank,
+          questions
+        });
       });
     }
   });
 
-  // After collecting all blocks, insert Section Headers for each unique lesson
   const finalBlocks: ActivityBlock[] = [];
   const lessonsSeen = new Set<string>();
 
@@ -193,7 +200,7 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
 export const formatQuestionList = (numbers: number[]): string => {
   if (numbers.length === 0) return '';
   if (numbers.length === 1) return numbers[0].toString();
-  
+
   const sorted = [...numbers].sort((a, b) => a - b);
   const last = sorted.pop();
   return `${sorted.join(' ')} e ${last}`;

@@ -9,6 +9,14 @@ export interface SyncRecord {
   updated_at: string;
 }
 
+export interface SyncHistoryEntry {
+  id: string;
+  user_id: string;
+  task_count: number;
+  snapshot_at: string;
+  source: 'auto' | 'manual';
+}
+
 export interface SyncState {
   status: SyncStatus;
   lastSyncAt: string | null;
