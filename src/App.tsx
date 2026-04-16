@@ -21,6 +21,7 @@ import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/par
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
 import { SyncState, SyncStatus } from './types/sync';
+import { useAutoBackup } from './hooks/useAutoBackup';
 import { 
   DndContext, 
   DragEndEvent, 
@@ -67,6 +68,9 @@ function App() {
     addSectionHeader,
     toggleBlockGabarito
   } = useTasks();
+
+  // Auto-download backup when page is hidden (PC shutdown, browser close, etc.)
+  useAutoBackup(tasks);
 
   const [syncState, setSyncState] = useState<SyncState>({
     status: 'idle',
