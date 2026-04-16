@@ -177,18 +177,16 @@ export class SyncEngine {
         new Date(remoteUpdatedAt) > new Date(knownCloudUpdatedAt);
 
       if (isFreshDevice || remoteIsNewer) {
-        // Merge: remote tasks are authoritative on id collision,
-        // but local-only tasks (not in remote) are preserved to avoid any data loss.
-        const merged = this.mergeTasks(remoteTasks, localTasks);
+        // Smart merge: per-task updatedAt decides the winner on conflicts
+        const { merged, hadLocalWinner } = this.mergeTasks(remoteTasks, localTasks);
         this.adapter.writeTasks(merged);
         this.setCloudUpdatedAt(remoteUpdatedAt);
 
         // Notify React state
         window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: merged }));
 
-        // If we added local-only tasks to the merge, push the combined set back
-        const hadLocalOnly = merged.length > remoteTasks.length;
-        if (hadLocalOnly) {
+        // If any local task won the merge, push the reconciled result back to cloud
+        if (hadLocalWinner) {
           setTimeout(() => this.doPush(), 200);
         }
       }
@@ -204,14 +202,54 @@ export class SyncEngine {
   }
 
   /**
-   * Merges remote and local task arrays.
-   * - Remote tasks take precedence on id collision (cloud is source of truth for conflicts).
-   * - Local-only tasks (ids not in remote) are appended so no local work is ever silently lost.
+   * Smart merge of remote and local task arrays using per-task timestamps.
+   *
+   * For each task id:
+   *   - If only in remote → keep remote
+   *   - If only in local  → keep local (never silently discard local work)
+   *   - If in both        → keep whichever has the newer `updatedAt`
+   *                         (falls back to remote if both are missing timestamps)
+   *
+   * Returns { merged, hadLocalWinner } so the caller knows whether to push back.
    */
-  private mergeTasks(remote: StudyTask[], local: StudyTask[]): StudyTask[] {
-    const remoteIds = new Set(remote.map(t => t.id));
-    const localOnly = local.filter(t => !remoteIds.has(t.id));
-    return [...remote, ...localOnly];
+  private mergeTasks(
+    remote: StudyTask[],
+    local: StudyTask[]
+  ): { merged: StudyTask[]; hadLocalWinner: boolean } {
+    const remoteMap = new Map(remote.map(t => [t.id, t]));
+    const localMap  = new Map(local.map(t => [t.id, t]));
+
+    const merged: StudyTask[] = [];
+    let hadLocalWinner = false;
+
+    // Walk remote first
+    for (const remoteTask of remote) {
+      const localTask = localMap.get(remoteTask.id);
+      if (!localTask) {
+        // Only in remote
+        merged.push(remoteTask);
+      } else {
+        // Exists on both — pick the newer one
+        const remoteTs = remoteTask.updatedAt ? new Date(remoteTask.updatedAt).getTime() : 0;
+        const localTs  = localTask.updatedAt  ? new Date(localTask.updatedAt).getTime()  : 0;
+        if (localTs > remoteTs) {
+          merged.push(localTask);
+          hadLocalWinner = true;
+        } else {
+          merged.push(remoteTask);
+        }
+      }
+    }
+
+    // Append tasks that only exist locally (never in remote)
+    for (const localTask of local) {
+      if (!remoteMap.has(localTask.id)) {
+        merged.push(localTask);
+        hadLocalWinner = true;
+      }
+    }
+
+    return { merged, hadLocalWinner };
   }
 
   // ── Meta helpers ────────────────────────────────────────────────────────────

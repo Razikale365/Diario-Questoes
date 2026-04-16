@@ -31,6 +31,7 @@ export interface ActivityBlock {
 export interface StudyTask {
   id: string;
   date: string;
+  updatedAt?: string; // ISO timestamp of last local mutation — used for per-task conflict resolution
   planejamento?: string;
   meta?: string;
   tarefa?: string;

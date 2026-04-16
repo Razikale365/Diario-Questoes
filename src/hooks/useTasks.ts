@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { StudyTask, ActivityBlock, Question } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
 
+const now = () => new Date().toISOString();
+
 export const useTasks = () => {
   const [tasks, setTasks] = useState<StudyTask[]>(() => {
     try {
@@ -44,11 +46,11 @@ export const useTasks = () => {
   const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId), [tasks, activeTaskId]);
 
   const addTask = (task: StudyTask) => {
-    setTasks(prev => [...prev, task]);
+    setTasks(prev => [...prev, { ...task, updatedAt: now() }]);
   };
 
   const updateTask = (taskId: string, updates: Partial<StudyTask>) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates, updatedAt: now() } : t));
   };
 
   const deleteTask = (taskId: string) => {
@@ -59,7 +61,7 @@ export const useTasks = () => {
   const deleteBlock = (taskId: string, blockId: string) => {
     setTasks(prev => prev.map(t => {
       if (t.id !== taskId) return t;
-      return { ...t, blocks: t.blocks.filter(b => b.id !== blockId) };
+      return { ...t, updatedAt: now(), blocks: t.blocks.filter(b => b.id !== blockId) };
     }));
   };
 
@@ -68,6 +70,7 @@ export const useTasks = () => {
       if (task.id !== taskId) return task;
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => {
           if (block.id !== blockId) return block;
           if (block.isLocked) return block;
@@ -104,19 +107,19 @@ export const useTasks = () => {
 
   const toggleLock = (taskId: string, blockId: string) => {
     setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t, blocks: t.blocks.map(b => b.id === blockId ? { ...b, isLocked: !b.isLocked } : b)
+      ...t, updatedAt: now(), blocks: t.blocks.map(b => b.id === blockId ? { ...b, isLocked: !b.isLocked } : b)
     } : t));
   };
 
   const toggleBlockStats = (taskId: string, blockId: string) => {
     setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t, blocks: t.blocks.map(b => b.id === blockId ? { ...b, showStats: b.showStats === false ? true : false } : b)
+      ...t, updatedAt: now(), blocks: t.blocks.map(b => b.id === blockId ? { ...b, showStats: b.showStats === false ? true : false } : b)
     } : t));
   };
 
   const toggleBlockGabarito = (taskId: string, blockId: string) => {
     setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t, blocks: t.blocks.map(b => b.id === blockId ? { ...b, showGabarito: !b.showGabarito } : b)
+      ...t, updatedAt: now(), blocks: t.blocks.map(b => b.id === blockId ? { ...b, showGabarito: !b.showGabarito } : b)
     } : t));
   };
 
@@ -161,7 +164,7 @@ export const useTasks = () => {
           layout: blockData.layout || { columns: 5, rows: 5, type: 'columns', width: 12 }
         });
       }
-      return { ...t, blocks: newBlocks };
+      return { ...t, updatedAt: now(), blocks: newBlocks };
     }));
   };
 
@@ -170,6 +173,7 @@ export const useTasks = () => {
       if (task.id !== taskId) return task;
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => ({
           ...block,
           layout: { ...block.layout, ...layout } as any
@@ -183,6 +187,7 @@ export const useTasks = () => {
       if (task.id !== taskId) return task;
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => {
           if (block.id !== blockId) return block;
           return {
@@ -199,6 +204,7 @@ export const useTasks = () => {
       if (task.id !== taskId) return task;
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => {
           const isTargetSection = block.title.trim().toLowerCase() === sectionTitle.trim().toLowerCase();
           const isTargetBlock = !block.isSection && block.lesson.trim().toLowerCase() === sectionTitle.trim().toLowerCase();
@@ -231,7 +237,7 @@ export const useTasks = () => {
         isSection: true,
         layout: { columns: 12, rows: 1, type: 'columns', width: 12 }
       };
-      return { ...task, blocks: [...task.blocks, newSection] };
+      return { ...task, updatedAt: now(), blocks: [...task.blocks, newSection] };
     }));
   };
 
@@ -243,6 +249,7 @@ export const useTasks = () => {
 
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => {
           if (block.isSection && block.title.trim().toLowerCase() === sectionTitle.trim().toLowerCase()) {
             return { ...block, isLocked: newLockedState };
@@ -264,6 +271,7 @@ export const useTasks = () => {
 
       return {
         ...task,
+        updatedAt: now(),
         blocks: task.blocks.map(block => {
           if (block.isSection && block.title.trim().toLowerCase() === sectionTitle.trim().toLowerCase()) {
             return { ...block, showStats: newStatsState };
@@ -307,7 +315,7 @@ export const useTasks = () => {
         }
       });
 
-      return { ...task, blocks: newOrder };
+      return { ...task, updatedAt: now(), blocks: newOrder };
     }));
   };
 
@@ -326,6 +334,7 @@ export const useTasks = () => {
       if (t.id !== taskId) return t;
       return {
         ...t,
+        updatedAt: now(),
         blocks: t.blocks.map(b => {
           if (b.id !== blockId) return b;
           return {
@@ -358,6 +367,7 @@ export const useTasks = () => {
       if (t.id !== taskId) return t;
       return {
         ...t,
+        updatedAt: now(),
         status: 'in_progress',
         blocks: t.blocks.map(b => ({ ...b, isLocked: false }))
       };
