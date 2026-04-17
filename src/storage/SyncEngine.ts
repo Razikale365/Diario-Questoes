@@ -179,11 +179,15 @@ export class SyncEngine {
       if (isFreshDevice || remoteIsNewer) {
         // Smart merge: per-task updatedAt decides the winner on conflicts
         const { merged, hadLocalWinner } = this.mergeTasks(remoteTasks, localTasks);
-        this.adapter.writeTasks(merged);
         this.setCloudUpdatedAt(remoteUpdatedAt);
 
-        // Notify React state
-        window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: merged }));
+        // Only update React state (and show toast) when data actually changed.
+        // Avoids jarring re-renders on mobile every 30s when nothing changed.
+        const dataChanged = JSON.stringify(merged) !== JSON.stringify(localTasks);
+        if (dataChanged) {
+          this.adapter.writeTasks(merged);
+          window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: merged }));
+        }
 
         // If any local task won the merge, push the reconciled result back to cloud
         if (hadLocalWinner) {

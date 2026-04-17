@@ -96,6 +96,15 @@ function App() {
       if (detail) {
         skipSyncRef.current = true;
         setTasks(detail);
+
+        // If the currently-active task is still in the new data, keep it active.
+        // If it disappeared (edge case), clear gracefully so the user sees the list.
+        setActiveTaskId(prev => {
+          if (!prev) return prev;
+          const stillExists = detail.some(t => t.id === prev);
+          return stillExists ? prev : null;
+        });
+
         showToast('Dados atualizados da nuvem!');
       }
     };
