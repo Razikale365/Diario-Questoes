@@ -178,14 +178,14 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {task.blocks.length} atividades
+                      {(task.blocks || []).length} atividades
                       <span className="block text-xs text-gray-500 mt-1">
-                        {task.blocks.reduce((acc: number, b: ActivityBlock) => acc + (b.questions || []).length, 0)} questões
+                        {(task.blocks || []).reduce((acc: number, b: ActivityBlock) => acc + (b.questions || []).length, 0)} questões
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
-                        const allQ = task.blocks.flatMap((b: ActivityBlock) => b.questions || []);
+                        const allQ = (task.blocks || []).flatMap((b: ActivityBlock) => b.questions || []);
                         const totalQ = allQ.length;
                         const correct = allQ.filter((q: any) => q.isCorrect === true).length;
                         const errors = allQ.filter((q: any) => q.isCorrect === false).length;

@@ -40,19 +40,31 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
     if (!revDiscipline || selectedLessons.size === 0) return [];
 
     const filteredTasks = tasks.filter(t => t.discipline === revDiscipline && t.status === 'completed');
-    const grouped = new Map<string, { qSet: Set<number>, pSet: Set<string> }>();
+    const grouped = new Map<string, { 
+      qSet: Set<number>, 
+      pSet: Set<string>, 
+      observations: Map<number, string>,
+      doubtedAlts: Map<number, string[]>
+    }>();
 
     filteredTasks.forEach(task => {
       task.blocks.forEach(block => {
         if (!block.lesson || !selectedLessons.has(block.lesson)) return;
 
         const key = `${block.lesson}|${block.bank || task.bank}`;
-        if (!grouped.has(key)) grouped.set(key, { qSet: new Set(), pSet: new Set() });
-        const { qSet, pSet } = grouped.get(key)!;
+        if (!grouped.has(key)) grouped.set(key, { 
+          qSet: new Set(), 
+          pSet: new Set(), 
+          observations: new Map(),
+          doubtedAlts: new Map()
+        });
+        const { qSet, pSet, observations, doubtedAlts } = grouped.get(key)!;
 
-        block.questions.forEach(q => {
-          if (q.isCorrect === false || q.hasDoubt) {
+        (block.questions || []).forEach(q => {
+          if (q.isCorrect === false || q.hasDoubt || q.observations || (q.doubtedAlts && q.doubtedAlts.length > 0)) {
             qSet.add(q.number);
+            if (q.observations) observations.set(q.number, q.observations);
+            if (q.doubtedAlts && q.doubtedAlts.length > 0) doubtedAlts.set(q.number, q.doubtedAlts);
           }
         });
 
@@ -63,14 +75,32 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
     const result: string[] = [];
     result.push('Refaça as questões que você errou e marcou como favoritas (que devem incluir as erradas e que houve dúvida). Logo abaixo estão listados os cadernos de questões para realizar essas revisões:\n');
 
-    grouped.forEach(({ qSet, pSet }, key) => {
+    grouped.forEach(({ qSet, pSet, observations, doubtedAlts }, key) => {
       const [lesson, bank] = key.split('|');
-      const qArray = Array.from(qSet).sort((a, b) => a - b);
+      const qArray = Array.from(qSet).sort((a: number, b: number) => a - b);
       
       if (qArray.length > 0) {
         const qString = formatQuestionList(qArray);
         const pString = pSet.size > 0 ? ` (páginas ${Array.from(pSet).join(', ')})` : '';
         result.push(`- Na ${lesson} - Resolver as questões ${qString} (total: ${qArray.length} questões)${pString}. ${bank}`);
+        
+        if (observations.size > 0 || doubtedAlts.size > 0) {
+          result.push('  Observações/Dúvidas:');
+          
+          const allQNums = Array.from(new Set([
+            ...Array.from(observations.keys()),
+            ...Array.from(doubtedAlts.keys())
+          ])).sort((a: number, b: number) => a - b);
+
+          allQNums.forEach(qNum => {
+            const obs = observations.get(qNum);
+            const alts = doubtedAlts.get(qNum);
+            let line = `  - Questão ${qNum}:`;
+            if (alts && alts.length > 0) line += ` [Considerou: ${alts.join(', ')}]`;
+            if (obs) line += ` ${obs}`;
+            result.push(line);
+          });
+        }
       }
     });
 
