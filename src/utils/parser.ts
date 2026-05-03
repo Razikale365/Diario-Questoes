@@ -4,6 +4,7 @@ type ParsedInstruction = {
   questionNumbers: number[];
   pages: string;
   bank: string;
+  lesson?: string;
 };
 
 const cleanLessonLabel = (value: string): string =>
@@ -75,6 +76,11 @@ const parseInstructionPages = (line: string): string => {
   return pMatch ? pMatch[1].trim() : '';
 };
 
+const parseInstructionLesson = (line: string): string => {
+  const match = line.match(/(?:Na\s+)?(Aula\s+\d+.*?)\s*-\s*Resolv/i);
+  return match ? cleanLessonLabel(match[1]) : '';
+};
+
 const extractQuestionInstructions = (lines: string[]): ParsedInstruction[] => {
   const instructions: ParsedInstruction[] = [];
   let collectingList = false;
@@ -103,7 +109,8 @@ const extractQuestionInstructions = (lines: string[]): ParsedInstruction[] => {
       instructions.push({
         questionNumbers,
         pages: parseInstructionPages(normalizedInstruction),
-        bank: parseInstructionBank(normalizedInstruction)
+        bank: parseInstructionBank(normalizedInstruction),
+        lesson: parseInstructionLesson(normalizedInstruction)
       });
       return;
     }
@@ -156,6 +163,8 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
           return;
         }
 
+        const currentLesson = instruction.lesson || lesson;
+        
         let blockTitle = title;
         if (questionInstructions.length > 1 || !/Atividade/i.test(title)) {
           blockTitle = `${title} - Bloco ${index + 1}`;
@@ -165,7 +174,7 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
         blocks.push({
           id: crypto.randomUUID(),
           title: blockTitle,
-          lesson,
+          lesson: currentLesson,
           pages: instruction.pages,
           bank: instruction.bank || bank,
           questions

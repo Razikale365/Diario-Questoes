@@ -61,7 +61,7 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
         const { qSet, pSet, observations, doubtedAlts } = grouped.get(key)!;
 
         (block.questions || []).forEach(q => {
-          if (q.isCorrect === false || q.hasDoubt || q.observations || (q.doubtedAlts && q.doubtedAlts.length > 0)) {
+          if (q.isCorrect === false || q.hasDoubt) {
             qSet.add(q.number);
             if (q.observations) observations.set(q.number, q.observations);
             if (q.doubtedAlts && q.doubtedAlts.length > 0) doubtedAlts.set(q.number, q.doubtedAlts);
