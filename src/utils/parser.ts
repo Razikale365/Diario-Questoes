@@ -139,8 +139,14 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
 
     const activityLine = lines.find(line => /^Atividade\b/i.test(line));
     let title = (activityLine || lines[0]).replace(/:$/, '');
+    
     if (!/Atividade/i.test(title)) {
-      title = `Bloco ${partIndex + 1}`;
+      const lowerTitle = title.toLowerCase();
+      if (lowerTitle.includes('resolver as questões') || lowerTitle.includes('revisão') || lowerTitle.startsWith('- na aula')) {
+        title = 'Revisão';
+      } else {
+        title = `Bloco ${partIndex + 1}`;
+      }
     }
 
     const questionInstructions = extractQuestionInstructions(lines);

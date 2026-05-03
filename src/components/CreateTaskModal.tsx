@@ -86,16 +86,25 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           </div>
 
           <div>
-            <h3 className="font-bold text-white mb-3">Pré-visualização dos Blocos ({modalState.blocks.length})</h3>
+            <h3 className="font-bold text-white mb-3">Pré-visualização dos Blocos ({modalState.blocks.filter(b => !b.isSection).length})</h3>
             <div className="space-y-3">
-              {modalState.blocks.map((block, idx) => (
-                <div key={idx} className="bg-[#1a1a1a] p-3 rounded-lg border border-[#404040]">
-                  <div className="text-sm font-bold text-white mb-1">{block.title}</div>
-                  <div className="text-xs text-gray-400">
-                    {block.lesson} • Páginas {block.pages} • {block.bank} • {block.questions.length} questões
+              {modalState.blocks.map((block, idx) => {
+                if (block.isSection) {
+                  return (
+                    <div key={idx} className="mt-6 mb-2 border-b border-[#333] pb-1">
+                      <div className="text-sm font-bold text-purple-400 uppercase tracking-wider">{block.title}</div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={idx} className="bg-[#1a1a1a] p-3 rounded-lg border border-[#404040]">
+                    <div className="text-sm font-bold text-white mb-1">{block.title}</div>
+                    <div className="text-xs text-gray-400">
+                      {block.lesson} {block.pages ? `• Páginas ${block.pages}` : ''} {block.bank ? `• ${block.bank}` : ''} • {block.questions.length} questões
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
