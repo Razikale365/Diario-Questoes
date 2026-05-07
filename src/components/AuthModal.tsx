@@ -53,8 +53,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthCom
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#333333] border border-[#404040] rounded-2xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-0 md:items-center md:p-4">
+      <div className="bg-[#333333] border border-[#404040] rounded-t-3xl w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200 md:max-w-md md:rounded-2xl md:p-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white uppercase tracking-widest">
             {isSignUp ? 'Criar Conta' : 'Login Cloud'}

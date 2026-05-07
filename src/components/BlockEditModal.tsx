@@ -1,6 +1,6 @@
 import React from 'react';
 import { Edit2, Plus, X, Save } from 'lucide-react';
-import { ActivityBlock } from '../types';
+import { LayoutConfig } from '../types';
 
 interface BlockEditModalProps {
   modalState: {
@@ -11,7 +11,7 @@ interface BlockEditModalProps {
     pages: string;
     bank: string;
     questionsText: string;
-    layout: { columns: number; rows: number; type: 'grid' | 'columns' };
+    layout: LayoutConfig;
   };
   onClose: () => void;
   onSave: () => void;
@@ -27,8 +27,8 @@ export const BlockEditModal: React.FC<BlockEditModalProps> = ({
   if (!modalState.isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#262626] p-6 rounded-xl w-full max-w-2xl border border-[#404040] shadow-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50 p-0 md:items-center md:p-4">
+      <div className="bg-[#262626] p-5 w-full h-full border border-[#404040] shadow-2xl overflow-y-auto md:h-auto md:max-h-[90vh] md:max-w-2xl md:rounded-xl md:p-6">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             {modalState.id ? <Edit2 className="w-6 h-6 text-purple-500" /> : <Plus className="w-6 h-6 text-purple-500" />}
@@ -166,14 +166,14 @@ export const BlockEditModal: React.FC<BlockEditModalProps> = ({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-[#404040]">
-          <button onClick={onClose} className="px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
+        <div className="sticky bottom-0 -mx-5 flex justify-end gap-3 mt-8 border-t border-[#404040] bg-[#262626]/95 p-4 backdrop-blur md:static md:mx-0 md:bg-transparent md:p-0 md:pt-4">
+          <button onClick={onClose} className="min-h-12 px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
             Cancelar
           </button>
           <button 
             onClick={onSave} 
             disabled={!modalState.questionsText.trim()}
-            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
+            className="min-h-12 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
           >
             <Save className="w-5 h-5" />
             Salvar Bloco

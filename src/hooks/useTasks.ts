@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { StudyTask, ActivityBlock, Question } from '../types';
-import { arrayMove } from '@dnd-kit/sortable';
-import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
+import { StudyTask, ActivityBlock, Question, LayoutConfig, LayoutPatch } from '../types';
+import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, mergeLayout, normalizeTaskBlocksLayout } from '../utils/layout';
+import { autoSnapTaskBlocks, moveBlockByStep, moveBlocks } from '../utils/taskMutations';
 
 const now = () => new Date().toISOString();
+const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const useTasks = () => {
   const [tasks, setTasks] = useState<StudyTask[]>(() => {
@@ -33,6 +34,14 @@ export const useTasks = () => {
   }, [tasks]);
 
   useEffect(() => {
+    setTasks(prev => {
+      const cutoff = Date.now() - TRASH_RETENTION_MS;
+      const keptTasks = prev.filter(task => !task.deletedAt || new Date(task.deletedAt).getTime() >= cutoff);
+      return keptTasks.length === prev.length ? prev : keptTasks;
+    });
+  }, []);
+
+  useEffect(() => {
     try {
       if (activeTaskId) {
         localStorage.setItem('ls_active_task_v2', activeTaskId);
@@ -44,7 +53,7 @@ export const useTasks = () => {
     }
   }, [activeTaskId]);
 
-  const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId), [tasks, activeTaskId]);
+  const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId && !t.deletedAt), [tasks, activeTaskId]);
 
   const addTask = (task: StudyTask) => {
     setTasks(prev => [...prev, { ...normalizeTaskBlocksLayout(task), updatedAt: now() }]);
@@ -54,7 +63,42 @@ export const useTasks = () => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates, updatedAt: now() } : t));
   };
 
+  const startTaskTimer = (taskId: string) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, timerStartedAt: now(), updatedAt: now() } : t));
+  };
+
+  const pauseTaskTimer = (taskId: string) => {
+    const pausedAt = Date.now();
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const sessionSeconds = t.timerStartedAt
+        ? Math.max(0, Math.floor((pausedAt - new Date(t.timerStartedAt).getTime()) / 1000))
+        : 0;
+      return {
+        ...t,
+        elapsedSeconds: (t.elapsedSeconds || 0) + sessionSeconds,
+        timerStartedAt: null,
+        updatedAt: now()
+      };
+    }));
+  };
+
   const deleteTask = (taskId: string) => {
+    const deletedAt = now();
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, deletedAt, updatedAt: deletedAt } : t));
+    if (activeTaskId === taskId) setActiveTaskId(null);
+  };
+
+  const restoreTask = (taskId: string) => {
+    const restoredAt = now();
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const { deletedAt, ...restoredTask } = t;
+      return { ...restoredTask, updatedAt: restoredAt };
+    }));
+  };
+
+  const permanentlyDeleteTask = (taskId: string) => {
     setTasks(prev => prev.filter(t => t.id !== taskId));
     if (activeTaskId === taskId) setActiveTaskId(null);
   };
@@ -130,7 +174,7 @@ export const useTasks = () => {
     pages: string;
     bank: string;
     qNumbers: number[];
-    layout?: { columns: number; rows: number; type: 'grid' | 'columns'; width?: number };
+    layout?: LayoutConfig;
   }) => {
     setTasks(prev => prev.map(t => {
       if (t.id !== taskId) return t;
@@ -169,7 +213,7 @@ export const useTasks = () => {
     }));
   };
 
-  const updateTaskBlocksLayout = (taskId: string, layout: { columns: number, rows: number, type: 'grid' | 'columns', width?: number }) => {
+  const updateTaskBlocksLayout = (taskId: string, layout: LayoutPatch) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
       return {
@@ -177,13 +221,13 @@ export const useTasks = () => {
         updatedAt: now(),
         blocks: task.blocks.map(block => ({
           ...block,
-          layout: { ...block.layout, ...layout } as any
+          layout: mergeLayout(block.layout, layout, block.isSection ? DEFAULT_SECTION_LAYOUT : DEFAULT_ACTIVITY_LAYOUT)
         }))
       };
     }));
   };
 
-  const updateBlockLayout = (taskId: string, blockId: string, layout: { width?: number, rowSpan?: number }) => {
+  const updateBlockLayout = (taskId: string, blockId: string, layout: LayoutPatch) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
       return {
@@ -193,14 +237,14 @@ export const useTasks = () => {
           if (block.id !== blockId) return block;
           return {
             ...block,
-            layout: { ...block.layout, ...layout } as any
+            layout: mergeLayout(block.layout, layout, block.isSection ? DEFAULT_SECTION_LAYOUT : DEFAULT_ACTIVITY_LAYOUT)
           };
         })
       };
     }));
   };
 
-  const updateSectionBlocksLayout = (taskId: string, sectionTitle: string, layout: { columns?: number, rows?: number, type?: 'grid' | 'columns', width?: number }, newTitle?: string) => {
+  const updateSectionBlocksLayout = (taskId: string, sectionTitle: string, layout: LayoutPatch, newTitle?: string) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
       return {
@@ -217,7 +261,7 @@ export const useTasks = () => {
             return { 
               ...block, 
               lesson: newTitle || block.lesson, 
-              layout: { ...block.layout, ...layout } as any 
+              layout: mergeLayout(block.layout, layout)
             };
           }
           return block;
@@ -289,44 +333,14 @@ export const useTasks = () => {
   const autoSnapBlocks = (taskId: string) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
-      const blocks = [...task.blocks];
-      const sections = blocks.filter(b => b.isSection);
-      const activities = blocks.filter(b => !b.isSection);
-      
-      const newOrder: ActivityBlock[] = [];
-      const processedActivityIds = new Set<string>();
-
-      // Place sections and their matching activities
-      sections.forEach(section => {
-        newOrder.push(section);
-        activities.forEach(activity => {
-          if (!processedActivityIds.has(activity.id) && 
-              (activity.lesson.trim().toLowerCase() === section.title.trim().toLowerCase() ||
-               activity.lesson.trim().toLowerCase().includes(section.title.trim().toLowerCase()))) {
-            newOrder.push(activity);
-            processedActivityIds.add(activity.id);
-          }
-        });
-      });
-
-      // Add remaining activities
-      activities.forEach(activity => {
-        if (!processedActivityIds.has(activity.id)) {
-          newOrder.push(activity);
-        }
-      });
-
-      return { ...task, updatedAt: now(), blocks: newOrder };
+      return { ...task, updatedAt: now(), blocks: autoSnapTaskBlocks(task.blocks) };
     }));
   };
 
   const reorderBlocks = (taskId: string, oldIndex: number, newIndex: number) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
-      const newBlocks = [...task.blocks];
-      const [movedBlock] = newBlocks.splice(oldIndex, 1);
-      newBlocks.splice(newIndex, 0, movedBlock);
-      return { ...task, blocks: newBlocks };
+      return { ...task, updatedAt: now(), blocks: moveBlocks(task.blocks, task.blocks[oldIndex].id, task.blocks[newIndex].id) };
     }));
   };
 
@@ -399,103 +413,18 @@ export const useTasks = () => {
   const moveBlock = (taskId: string, activeId: string, overId: string) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
-      
-      const blocks = [...task.blocks];
-      const oldIndex = blocks.findIndex(b => b.id === activeId);
-      const newIndex = blocks.findIndex(b => b.id === overId);
-      if (oldIndex === -1 || newIndex === -1) return task;
-
-      const activeBlock = blocks[oldIndex];
-      const overBlock = blocks[newIndex];
-
-      // CASE 1: Moving a Section Header (Recursive Move)
-      if (activeBlock.isSection) {
-        const sectionTitle = activeBlock.title.trim().toLowerCase();
-        
-        // Identify all children blocks that logically belong to this section
-        // (matching title) and are NOT the section header itself.
-        const childrenIndexes: number[] = [];
-        blocks.forEach((b, idx) => {
-          if (!b.isSection && b.lesson.trim().toLowerCase() === sectionTitle) {
-            childrenIndexes.push(idx);
-          }
-        });
-
-        // Collect all blocks to be moved (Header + Children)
-        const movingBlocks = [activeBlock];
-        // Note: Sort children indexes to ensure we remove from largest to smallest to preserve indexing
-        const sortedChildrenIndexes = [...childrenIndexes].sort((a, b) => b - a);
-        
-        const otherChildren: ActivityBlock[] = [];
-        sortedChildrenIndexes.forEach(idx => {
-          const [child] = blocks.splice(idx, 1);
-          otherChildren.push(child);
-        });
-        
-        // Re-find indices after splicing out children
-        let adjustedOldIndex = blocks.findIndex(b => b.id === activeId);
-        blocks.splice(adjustedOldIndex, 1); // remove the header too
-        
-        const combinedMove = [activeBlock, ...otherChildren.reverse()];
-        
-        // Re-find target index
-        let adjustedNewIndex = blocks.findIndex(b => b.id === overId);
-        if (adjustedNewIndex === -1) adjustedNewIndex = blocks.length; // fallback
-        
-        // Standard DND behavior: if moving down, insert after. If moving up, insert before?
-        // Actually arrayMove style:
-        blocks.splice(adjustedNewIndex, 0, ...combinedMove);
-        
-        return { ...task, blocks };
-      }
-
-      // CASE 2: Single Activity Block Move
-      // "Fuse" Behavior: If dragging an activity onto another activity block, 
-      // automatically create a section header for them.
-      if (!activeBlock.isSection && !overBlock.isSection) {
-        const sectionTitle = activeBlock.lesson.trim() || overBlock.lesson.trim() || 'Nova Seção';
-        const hasSection = blocks.some(b => b.isSection && b.title.trim().toLowerCase() === sectionTitle.trim().toLowerCase());
-        
-        // If they don't have a shared section yet, create one "on the fly"
-        // But ONLY if they aren't already considered part of a section (per user feedback)
-        const activeHasLesson = activeBlock.lesson.trim().length > 0;
-        const overHasLesson = overBlock.lesson.trim().length > 0;
-
-        if (!hasSection && !activeHasLesson && !overHasLesson) {
-          const newSection: ActivityBlock = {
-            id: crypto.randomUUID(),
-            title: sectionTitle,
-            lesson: sectionTitle,
-            pages: '',
-            questions: [],
-            isSection: true,
-            layout: DEFAULT_SECTION_LAYOUT
-          };
-          
-          const tempBlocks = [...blocks];
-          tempBlocks.splice(oldIndex, 1);
-          const adjustedNewIndex = tempBlocks.findIndex(b => b.id === overId);
-          
-          const finalBlocks = [...tempBlocks];
-          finalBlocks.splice(adjustedNewIndex, 0, newSection);
-          
-          // Align both to the new section
-          finalBlocks[adjustedNewIndex + 1] = { ...overBlock, lesson: sectionTitle }; 
-          finalBlocks.splice(adjustedNewIndex + 1, 0, { ...activeBlock, lesson: sectionTitle });
-          
-          return { ...task, blocks: finalBlocks };
-        }
-      }
-
-      // Default single block move
-      return {
-        ...task,
-        blocks: arrayMove(task.blocks, oldIndex, newIndex)
-      };
+      return { ...task, updatedAt: now(), blocks: moveBlocks(task.blocks, activeId, overId) };
     }));
   };
 
-  const inProgressTasks = useMemo(() => tasks.filter(t => t.status === 'in_progress' || !t.status), [tasks]);
+  const moveBlockStep = (taskId: string, blockId: string, direction: -1 | 1) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      return { ...task, updatedAt: now(), blocks: moveBlockByStep(task.blocks, blockId, direction) };
+    }));
+  };
+
+  const inProgressTasks = useMemo(() => tasks.filter(t => !t.deletedAt && (t.status === 'in_progress' || !t.status)), [tasks]);
 
   const pauseTask = () => {
     setActiveTaskId(null);
@@ -512,6 +441,10 @@ export const useTasks = () => {
     addTask,
     updateTask,
     deleteTask,
+    restoreTask,
+    permanentlyDeleteTask,
+    startTaskTimer,
+    pauseTaskTimer,
     updateQuestion,
     toggleLock,
     saveBlock,
@@ -526,6 +459,7 @@ export const useTasks = () => {
     toggleSectionStats,
     reopenTask,
     moveBlock,
+    moveBlockStep,
     deleteBlock,
     addSectionHeader,
     toggleBlockGabarito

@@ -1,12 +1,14 @@
 import { StudyTask } from '../types';
-import { SyncState, SyncStatus } from '../types/sync';
+import { SyncState } from '../types/sync';
 import { supabase } from '../lib/supabase';
 import { StorageAdapter } from '../storage/StorageAdapter';
+import { mergeTasksForSync } from '../utils/syncMerge';
 
 const SYNC_DEBOUNCE_MS = 2000;
 const SYNC_INTERVAL_MS = 30000;
 const SYNC_DATA_KEY = 'diario_ls_sync';
 const META_KEY = 'ls_tasks_meta_v2';
+const SNAPSHOT_NAMES_KEY = 'ls_snapshot_names_v2';
 
 export class SyncEngine {
   private adapter: StorageAdapter;
@@ -178,7 +180,7 @@ export class SyncEngine {
 
       if (isFreshDevice || remoteIsNewer) {
         // Smart merge: per-task updatedAt decides the winner on conflicts
-        const { merged, hadLocalWinner } = this.mergeTasks(remoteTasks, localTasks);
+        const { merged, hadLocalWinner, localWins } = mergeTasksForSync(remoteTasks, localTasks);
         this.setCloudUpdatedAt(remoteUpdatedAt);
 
         // Only update React state (and show toast) when data actually changed.
@@ -191,6 +193,11 @@ export class SyncEngine {
 
         // If any local task won the merge, push the reconciled result back to cloud
         if (hadLocalWinner) {
+          const conflictAt = new Date().toISOString();
+          this.updateState({
+            lastConflictAt: conflictAt,
+            lastConflictMessage: `${localWins} alteração local mais recente foi preservada e reenviada para a nuvem.`
+          });
           setTimeout(() => this.doPush(), 200);
         }
       }
@@ -203,57 +210,6 @@ export class SyncEngine {
       const message = e instanceof Error ? e.message : 'Pull failed';
       this.updateState({ status: 'error', lastError: message });
     }
-  }
-
-  /**
-   * Smart merge of remote and local task arrays using per-task timestamps.
-   *
-   * For each task id:
-   *   - If only in remote → keep remote
-   *   - If only in local  → keep local (never silently discard local work)
-   *   - If in both        → keep whichever has the newer `updatedAt`
-   *                         (falls back to remote if both are missing timestamps)
-   *
-   * Returns { merged, hadLocalWinner } so the caller knows whether to push back.
-   */
-  private mergeTasks(
-    remote: StudyTask[],
-    local: StudyTask[]
-  ): { merged: StudyTask[]; hadLocalWinner: boolean } {
-    const remoteMap = new Map(remote.map(t => [t.id, t]));
-    const localMap  = new Map(local.map(t => [t.id, t]));
-
-    const merged: StudyTask[] = [];
-    let hadLocalWinner = false;
-
-    // Walk remote first
-    for (const remoteTask of remote) {
-      const localTask = localMap.get(remoteTask.id);
-      if (!localTask) {
-        // Only in remote
-        merged.push(remoteTask);
-      } else {
-        // Exists on both — pick the newer one
-        const remoteTs = remoteTask.updatedAt ? new Date(remoteTask.updatedAt).getTime() : 0;
-        const localTs  = localTask.updatedAt  ? new Date(localTask.updatedAt).getTime()  : 0;
-        if (localTs > remoteTs) {
-          merged.push(localTask);
-          hadLocalWinner = true;
-        } else {
-          merged.push(remoteTask);
-        }
-      }
-    }
-
-    // Append tasks that only exist locally (never in remote)
-    for (const localTask of local) {
-      if (!remoteMap.has(localTask.id)) {
-        merged.push(localTask);
-        hadLocalWinner = true;
-      }
-    }
-
-    return { merged, hadLocalWinner };
   }
 
   // ── Meta helpers ────────────────────────────────────────────────────────────
@@ -283,6 +239,24 @@ export class SyncEngine {
 
   private setCloudUpdatedAt(ts: string): void {
     this.writeMeta({ cloudUpdatedAt: ts });
+  }
+
+  private readSnapshotNames(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(SNAPSHOT_NAMES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private rememberSnapshotName(id: string, name: string): void {
+    try {
+      const names = this.readSnapshotNames();
+      localStorage.setItem(SNAPSHOT_NAMES_KEY, JSON.stringify({ ...names, [id]: name }));
+    } catch {
+      // ignore
+    }
   }
 
   private updateLocalWriteTime(): void {
@@ -330,27 +304,77 @@ export class SyncEngine {
     if (!supabase) return [];
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return [];
-    const { data, error } = await supabase
+    let result = await supabase
       .from('diario_ls_sync_history')
-      .select('id, user_id, task_count, snapshot_at, source')
+      .select('id, user_id, task_count, snapshot_at, source, snapshot_name')
       .eq('user_id', session.user.id)
       .order('snapshot_at', { ascending: false })
       .limit(10);
+    let data: unknown = result.data;
+    let error = result.error;
+
+    if (error) {
+      const fallback = await supabase
+        .from('diario_ls_sync_history')
+        .select('id, user_id, task_count, snapshot_at, source')
+        .eq('user_id', session.user.id)
+        .order('snapshot_at', { ascending: false })
+        .limit(10);
+      data = fallback.data;
+      error = fallback.error;
+    }
+
     if (error) return [];
-    return (data ?? []) as import('../types/sync').SyncHistoryEntry[];
+    const rememberedNames = this.readSnapshotNames();
+    return ((data ?? []) as import('../types/sync').SyncHistoryEntry[]).map(entry => ({
+      ...entry,
+      snapshot_name: entry.snapshot_name || rememberedNames[entry.id] || null
+    }));
   }
 
   /** Saves an explicit named snapshot (manual backup point) */
-  async saveManualSnapshot(): Promise<void> {
-    if (!supabase) return;
+  async saveManualSnapshot(name?: string): Promise<import('../types/sync').SyncHistoryEntry | null> {
+    if (!supabase) return null;
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) return null;
     const tasks = this.adapter.readTasks();
-    await supabase.from('diario_ls_sync_history').insert({
+    const normalizedName = name?.trim();
+    const payload = {
       user_id: session.user.id,
       payload: tasks,
       source: 'manual',
-    });
+      ...(normalizedName ? { snapshot_name: normalizedName } : {})
+    };
+
+    let result = await supabase
+      .from('diario_ls_sync_history')
+      .insert(payload)
+      .select('id, user_id, task_count, snapshot_at, source, snapshot_name')
+      .single();
+    let data: unknown = result.data;
+    let error = result.error;
+
+    if (error) {
+      const fallback = await supabase
+        .from('diario_ls_sync_history')
+        .insert({
+          user_id: session.user.id,
+          payload: tasks,
+          source: 'manual',
+        })
+        .select('id, user_id, task_count, snapshot_at, source')
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error || !data) return null;
+    const entry = data as import('../types/sync').SyncHistoryEntry;
+    if (normalizedName) {
+      this.rememberSnapshotName(entry.id, normalizedName);
+      entry.snapshot_name = normalizedName;
+    }
+    return entry;
   }
 
   /** Restores a specific snapshot by its history id */
@@ -379,7 +403,7 @@ export class SyncEngine {
     if (!supabase) return;
     await supabase.auth.signOut();
     this.destroy();
-    this.updateState({ status: 'idle' });
+    this.updateState({ status: 'unauthenticated', pendingChanges: 0 });
   }
 
   getState(): SyncState {

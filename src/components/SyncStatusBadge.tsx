@@ -4,24 +4,30 @@ import { Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'luc
 interface SyncStatusBadgeProps {
   status: SyncStatus;
   lastSyncAt: string | null;
+  lastError: string | null;
+  pendingChanges: number;
+  conflictMessage?: string | null;
   onSyncNow: () => void;
   onAuth: () => void;
   onDisconnect: () => void;
   isCollapsed: boolean;
 }
 
-const statusConfig: Record<SyncStatus, { icon: typeof Cloud; color: string; label: string }> = {
-  idle: { icon: CloudOff, color: 'text-gray-500', label: 'Local' },
-  syncing: { icon: RefreshCw, color: 'text-yellow-400', label: 'Sincronizando...' },
-  synced: { icon: CheckCircle, color: 'text-green-400', label: 'Sincronizado' },
-  error: { icon: AlertCircle, color: 'text-red-400', label: 'Erro' },
-  offline: { icon: CloudOff, color: 'text-gray-500', label: 'Offline' },
-  unauthenticated: { icon: LogIn, color: 'text-purple-400', label: 'Login' },
+const statusConfig: Record<SyncStatus, { icon: typeof Cloud; color: string; label: string; helper: string }> = {
+  idle: { icon: CloudOff, color: 'text-gray-500', label: 'Modo local', helper: 'Dados salvos neste aparelho.' },
+  syncing: { icon: RefreshCw, color: 'text-yellow-400', label: 'Sincronizando...', helper: 'Enviando e buscando alterações.' },
+  synced: { icon: CheckCircle, color: 'text-green-400', label: 'Sincronizado', helper: 'Nuvem ativa.' },
+  error: { icon: AlertCircle, color: 'text-red-400', label: 'Erro no sync', helper: 'Alterações continuam salvas localmente.' },
+  offline: { icon: CloudOff, color: 'text-gray-500', label: 'Offline', helper: 'Salvando localmente até a conexão voltar.' },
+  unauthenticated: { icon: LogIn, color: 'text-purple-400', label: 'Sync desativado', helper: 'Entre na conta para salvar na nuvem.' },
 };
 
 export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
   status,
   lastSyncAt,
+  lastError,
+  pendingChanges,
+  conflictMessage,
   onSyncNow,
   onAuth,
   onDisconnect,
@@ -45,7 +51,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       <button
         onClick={status === 'unauthenticated' ? onAuth : onSyncNow}
         className={`w-full flex justify-center py-2 ${config.color} hover:text-white transition-colors`}
-        title={config.label}
+        title={`${config.label}: ${config.helper}`}
       >
         <Icon className={`w-4 h-4 ${status === 'syncing' ? 'animate-spin' : ''}`} />
       </button>
@@ -63,8 +69,19 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
           <span className="text-[9px] text-gray-500">{formatLastSync()}</span>
         )}
       </div>
+      <div className="mb-1 text-[9px] leading-snug text-purple-200/80">
+        {status === 'error' && lastError ? lastError : config.helper}
+        {pendingChanges > 0 && status !== 'synced' && (
+          <span className="block text-yellow-200">{pendingChanges} alteração(ões) aguardando sync.</span>
+        )}
+        {conflictMessage && (
+          <span className="mt-1 block rounded bg-yellow-500/10 px-2 py-1 text-yellow-100">
+            {conflictMessage}
+          </span>
+        )}
+      </div>
       <div className="flex gap-1">
-        {status !== 'unauthenticated' && status !== 'idle' && (
+        {status !== 'unauthenticated' && (
           <button
             onClick={onSyncNow}
             disabled={status === 'syncing'}

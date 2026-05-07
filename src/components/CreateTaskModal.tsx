@@ -17,8 +17,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   if (!modalState.isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-[#262626] rounded-xl shadow-2xl border border-[#404040] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center p-0 md:items-center md:p-4">
+      <div className="bg-[#262626] shadow-2xl border border-[#404040] w-full h-full overflow-hidden flex flex-col md:h-auto md:max-h-[90vh] md:max-w-2xl md:rounded-xl">
         <div className="flex justify-between items-center p-6 border-b border-[#404040]">
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <Plus className="w-6 h-6 text-purple-500" /> Confirmar Tarefa de Revisão
@@ -109,16 +109,16 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           </div>
         </div>
 
-        <div className="p-6 border-t border-[#404040] flex justify-end gap-3 bg-[#1a1a1a] rounded-b-xl">
+        <div className="p-4 md:p-6 border-t border-[#404040] flex justify-end gap-3 bg-[#1a1a1a] md:rounded-b-xl">
           <button 
             onClick={() => setModalState(null)} 
-            className="px-5 py-2 text-gray-300 hover:text-white hover:bg-[#333333] rounded transition-colors font-medium border border-[#404040]"
+            className="min-h-12 px-5 py-2 text-gray-300 hover:text-white hover:bg-[#333333] rounded transition-colors font-medium border border-[#404040]"
           >
             Cancelar
           </button>
           <button 
             onClick={onConfirm}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded font-bold transition-colors flex items-center gap-2"
+            className="min-h-12 bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded font-bold transition-colors flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             Criar Tarefa

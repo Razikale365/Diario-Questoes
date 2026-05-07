@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, CheckCircle2, History, Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Archive, BookOpen, CheckCircle2, History, Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
 import { SyncStatus } from '../types/sync';
 
 interface BottomNavProps {
@@ -8,16 +8,17 @@ interface BottomNavProps {
   syncStatus: SyncStatus;
   onSyncNow: () => void;
   onAuth: () => void;
+  onOpenSnapshots: () => void;
   inProgressCount?: number;
 }
 
-const statusConfig: Record<SyncStatus, { icon: typeof Cloud; color: string }> = {
-  idle: { icon: CloudOff, color: 'text-gray-400' },
-  syncing: { icon: RefreshCw, color: 'text-yellow-400' },
-  synced: { icon: CheckCircle, color: 'text-green-400' },
-  error: { icon: AlertCircle, color: 'text-red-400' },
-  offline: { icon: CloudOff, color: 'text-gray-400' },
-  unauthenticated: { icon: LogIn, color: 'text-purple-400' },
+const statusConfig: Record<SyncStatus, { icon: typeof Cloud; color: string; label: string }> = {
+  idle: { icon: CloudOff, color: 'text-gray-300', label: 'Local' },
+  syncing: { icon: RefreshCw, color: 'text-yellow-300', label: 'Salvando' },
+  synced: { icon: CheckCircle, color: 'text-green-300', label: 'Salvo' },
+  error: { icon: AlertCircle, color: 'text-red-300', label: 'Erro' },
+  offline: { icon: CloudOff, color: 'text-gray-300', label: 'Offline' },
+  unauthenticated: { icon: LogIn, color: 'text-purple-200', label: 'Entrar' },
 };
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -26,10 +27,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   syncStatus,
   onSyncNow,
   onAuth,
+  onOpenSnapshots,
   inProgressCount = 0
 }) => {
   const SyncIcon = statusConfig[syncStatus].icon;
   const syncColor = statusConfig[syncStatus].color;
+  const syncLabel = statusConfig[syncStatus].label;
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#5c2092] border-t border-purple-800/50 flex items-center justify-around px-2 py-1 z-50 pb-safe">
@@ -76,8 +79,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       >
         <SyncIcon className={`w-6 h-6 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
         <span className="text-[10px] font-bold uppercase tracking-tighter">
-          {syncStatus === 'unauthenticated' ? 'Login' : 'Sync'}
+          {syncLabel}
         </span>
+      </button>
+
+      <button
+        onClick={onOpenSnapshots}
+        className="flex flex-col items-center gap-1 p-2 text-purple-300 transition-colors hover:text-white"
+      >
+        <Archive className="w-6 h-6" />
+        <span className="text-[10px] font-bold uppercase tracking-tighter">Backup</span>
       </button>
     </nav>
   );
