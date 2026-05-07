@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Edit2, Save, X, CheckCircle2, Columns, Bot, Brain, Flag, Eye, EyeOff, Check } from 'lucide-react';
 import { StudyTask } from '../types';
 import { BANKS, PLANEJAMENTOS, DISCIPLINAS } from '../utils/constants';
+import { DEFAULT_ACTIVITY_LAYOUT } from '../utils/layout';
 
 interface TaskHeaderProps {
   task: StudyTask;
@@ -132,7 +133,7 @@ export const TaskHeader: React.FC<TaskHeaderProps> = ({
 
   const handleGlobalLayout = (key: 'type' | 'columns' | 'rows', val: any) => {
     if (!onUpdateAllLayouts || task.blocks.length === 0) return;
-    const firstLayout = task.blocks[0].layout || { columns: 4, rows: 5, type: 'columns' };
+    const firstLayout = task.blocks[0].layout || DEFAULT_ACTIVITY_LAYOUT;
     const newLayout = { ...firstLayout, [key]: val };
     onUpdateAllLayouts(newLayout);
   };
@@ -204,7 +205,7 @@ ${sections}
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const firstLayout = task.blocks[0]?.layout || { columns: 4, rows: 5, type: 'columns' };
+  const firstLayout = task.blocks[0]?.layout || DEFAULT_ACTIVITY_LAYOUT;
 
   return (
     <div className="bg-[#333333] p-6 rounded-lg border border-[#404040] shadow-xl relative group overflow-hidden">

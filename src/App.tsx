@@ -18,6 +18,7 @@ import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
 import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/parser';
+import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
 import { SyncState, SyncStatus } from './types/sync';
@@ -252,7 +253,7 @@ function App() {
   };
 
   const openEditBlock = (block?: ActivityBlock) => {
-    const defaultLayout = { columns: 10, rows: 2, type: 'grid' as const };
+    const defaultLayout = DEFAULT_ACTIVITY_LAYOUT;
     if (block) {
       setBlockEditModal({ 
         isOpen: true, 

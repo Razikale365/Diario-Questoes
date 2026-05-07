@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { StudyTask, ActivityBlock, Question } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
+import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
 
 const now = () => new Date().toISOString();
 
@@ -46,7 +47,7 @@ export const useTasks = () => {
   const activeTask = useMemo(() => tasks.find(t => t.id === activeTaskId), [tasks, activeTaskId]);
 
   const addTask = (task: StudyTask) => {
-    setTasks(prev => [...prev, { ...task, updatedAt: now() }]);
+    setTasks(prev => [...prev, { ...normalizeTaskBlocksLayout(task), updatedAt: now() }]);
   };
 
   const updateTask = (taskId: string, updates: Partial<StudyTask>) => {
@@ -149,7 +150,7 @@ export const useTasks = () => {
             pages: blockData.pages, 
             bank: blockData.bank, 
             questions: newQuestions,
-            layout: blockData.layout || b.layout || { columns: 5, rows: 5, type: 'columns', width: 12 }
+            layout: blockData.layout || b.layout || DEFAULT_ACTIVITY_LAYOUT
           };
         });
       } else {
@@ -161,7 +162,7 @@ export const useTasks = () => {
           pages: blockData.pages,
           bank: blockData.bank,
           questions: newQuestions,
-          layout: blockData.layout || { columns: 5, rows: 5, type: 'columns', width: 12 }
+          layout: blockData.layout || DEFAULT_ACTIVITY_LAYOUT
         });
       }
       return { ...t, updatedAt: now(), blocks: newBlocks };
@@ -235,7 +236,7 @@ export const useTasks = () => {
         pages: '',
         questions: [],
         isSection: true,
-        layout: { columns: 12, rows: 1, type: 'columns', width: 12 }
+        layout: DEFAULT_SECTION_LAYOUT
       };
       return { ...task, updatedAt: now(), blocks: [...task.blocks, newSection] };
     }));
@@ -386,7 +387,7 @@ export const useTasks = () => {
           return {
             ...block,
             layout: {
-              ...(block.layout || { columns: 4, rows: 5 }),
+              ...(block.layout || DEFAULT_ACTIVITY_LAYOUT),
               type: currentType === 'columns' ? 'grid' : 'columns'
             }
           };
@@ -468,7 +469,7 @@ export const useTasks = () => {
             pages: '',
             questions: [],
             isSection: true,
-            layout: { columns: 12, rows: 1, type: 'columns', width: 12 }
+            layout: DEFAULT_SECTION_LAYOUT
           };
           
           const tempBlocks = [...blocks];

@@ -81,6 +81,13 @@ const parseInstructionLesson = (line: string): string => {
   return match ? cleanLessonLabel(match[1]) : '';
 };
 
+const isQuestionListHeader = (line: string): boolean =>
+  /^(?:resolva|refaça)\s*:?\s*$/i.test(line) ||
+  /^(?:resolv(?:a|er)|refaça)\s+as\s+questões?\s*:?\s*$/i.test(line);
+
+const isQuestionListContinuation = (line: string): boolean =>
+  /^(?:(?:lista\s+)?(?:CEBRASPE|FCC|FGV|VUNESP|CESPE)\s+)?\d+(?:\s+a\s+\d+)?(?:\s*[,(]|(?:\s+[e,]\s*|\s+)\d+|$)/i.test(line);
+
 const extractQuestionInstructions = (lines: string[]): ParsedInstruction[] => {
   const instructions: ParsedInstruction[] = [];
   let collectingList = false;
@@ -88,18 +95,18 @@ const extractQuestionInstructions = (lines: string[]): ParsedInstruction[] => {
   lines.forEach(line => {
     const normalizedLine = line.replace(/^[\-\u2022]\s*/, '').trim();
 
-    if (/^(?:resolva|refaça)\s*:?\s*$/i.test(normalizedLine)) {
+    if (isQuestionListHeader(normalizedLine)) {
       collectingList = true;
       return;
     }
 
     const isQuestionInstruction = /(?:resolv(?:a|er)|refaça)\s+as\s+questões?/i.test(normalizedLine);
-    const isListContinuation = collectingList && /questões?:?\s+\d+/i.test(normalizedLine);
+    const isListContinuation = collectingList && isQuestionListContinuation(normalizedLine);
 
     if (isQuestionInstruction || isListContinuation) {
       const normalizedInstruction = isQuestionInstruction
         ? normalizedLine
-        : `Resolva as ${normalizedLine}`.replace(/\s+/g, ' ').trim();
+        : `Resolva as questões ${normalizedLine}`.replace(/\s+/g, ' ').trim();
 
       const questionNumbers = parseInstructionNumbers(normalizedInstruction);
       if (questionNumbers.length === 0) {
