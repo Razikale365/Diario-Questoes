@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { X, Mail, Lock, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -21,7 +22,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthCom
     setLoading(true);
 
     try {
-      const { supabase } = await import('../lib/supabase');
       if (!supabase) {
         onError('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.');
         setLoading(false);
