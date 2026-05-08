@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createTasksFromMetaDrafts, parseMetaText } from './metaParser';
+import { createTasksFromMetaDrafts, isDraftSelectedByDefault, parseMetaText } from './metaParser';
 
 test('parseMetaText detects LS meta table rows with discipline, format, description, time and status', () => {
   const text = `CALENDÁRIO DAS TAREFAS
@@ -37,6 +37,16 @@ mentos e posição internacional de investimentos 01:30 0% Pendente
   assert.equal(result.drafts[0].tempoEstimadoMinutos, 90);
   assert.equal(result.drafts[1].discipline, 'Direito Tributário - Reforma Tributária');
   assert.equal(result.drafts[1].formato, 'Lei seca e exercícios');
+});
+
+test('parseMetaText keeps spaces for ordinary wrapped lines', () => {
+  const text = `6 Economia Teórico e Exercícios Balanço de
+pagamentos e posição internacional 01:30 0% Pendente`;
+
+  const result = parseMetaText(text);
+
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].descricao, 'Balanço de pagamentos e posição internacional');
 });
 
 test('parseMetaText ignores orientation and calendar text that is not a task row', () => {
@@ -82,6 +92,33 @@ test('parseMetaText prefers detailed sections over summary rows for the same tas
   assert.equal(result.drafts.length, 1);
   assert.equal(result.drafts[0].tempoEstimadoMinutos, 48);
   assert.equal(result.drafts[0].blocks.some(block => block.questions.length === 24), true);
+});
+
+test('parseMetaText ignores optional extra activity when inferring main format and duration', () => {
+  const text = `.  4) Direito Constitucional Material indicado: Curso Básico. Assunto(s): Administração Pública. Atividade 1 - Estude a versão simplificada da teoria da Aula 10 - Assunto "ADMINISTRAÇÃO PÚBLICA" (páginas 03 a 23). Atividade Extra (Facultativa) - Estimativa de tempo: 15 minutos Resolução de Cards Anki da aula anterior - Revise utilizando o baralho do Anki que disponibilizamos nessa tarefa.`;
+
+  const result = parseMetaText(text);
+
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].formato, 'Teórico');
+  assert.equal(result.drafts[0].tempoEstimadoMinutos, undefined);
+});
+
+test('isDraftSelectedByDefault skips completed and ignored tasks', () => {
+  const result = parseMetaText(`1 Português Exercícios Ortografia 00:30 0% Pendente
+2 Contabilidade Geral Revisão Estoque 01:00 85% Concluído
+3 Estatística Teórico Assimetria 00:15 0% Ignorada
+4 Economia Exercícios Balanço 00:20 0% Iniciada`);
+
+  assert.deepEqual(
+    result.drafts.map(draft => [draft.numero, isDraftSelectedByDefault(draft)]),
+    [
+      ['1', true],
+      ['2', false],
+      ['3', false],
+      ['4', true]
+    ]
+  );
 });
 
 test('createTasksFromMetaDrafts converts selected drafts into StudyTask shells with default blocks', () => {

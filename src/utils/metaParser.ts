@@ -45,6 +45,8 @@ export interface CreateTasksFromMetaDraftsOptions {
   idFactory?: () => string;
 }
 
+const MAIN_ACTIVITY_BOUNDARY = /\s+Atividade\s+Extra\s*(?:\([^)]*\))?\s*[-:]/i;
+
 const FORMATS = [
   'Revisão e Exercícios',
   'Teórico e Exercícios',
@@ -122,9 +124,12 @@ const splitRows = (text: string): { index: number; text: string }[] => {
     }
 
     if (current && !/\d{1,2}:\d{2}/.test(current.text)) {
-      const previousEndsAsWord = /[a-záéíóúâêôãõç]$/i.test(current.text);
-      const continuationStartsAsWord = /^[a-záéíóúâêôãõç]/i.test(line);
-      const separator = previousEndsAsWord && continuationStartsAsWord ? '' : ' ';
+      const previousToken = current.text.match(/([a-záéíóúâêôãõç]{1,5})$/i)?.[1] || '';
+      const continuationToken = line.match(/^([a-záéíóúâêôãõç]{1,5})/i)?.[1] || '';
+      const splitLooksLikeWord = previousToken.length >= 3
+        && continuationToken.length >= 3
+        && !/\b(?:de|da|do|das|dos|e|em|para|por|com|sem)$/i.test(previousToken);
+      const separator = splitLooksLikeWord ? '' : ' ';
       current.text = `${current.text}${separator}${line}`;
       return;
     }
@@ -190,7 +195,8 @@ const parseRow = (rowText: string): Omit<MetaTaskDraft, 'id'> | null => {
 };
 
 const inferDetailedFormat = (content: string): string => {
-  const normalized = comparable(content);
+  const mainContent = content.split(MAIN_ACTIVITY_BOUNDARY)[0] || content;
+  const normalized = comparable(mainContent);
   const hasTheory = /\bestude\b.*\bteoria\b/.test(normalized) || /\bmaterial indicado\b/.test(normalized);
   const hasQuestions = /\bresolva\b.*\bquest/.test(normalized) || /\bresolucao de quest/.test(normalized);
   const hasRevision = /\brevis/.test(normalized);
@@ -205,17 +211,21 @@ const inferDetailedFormat = (content: string): string => {
 };
 
 const parseDetailedDuration = (content: string): number | undefined => {
+  const mainContent = content.split(MAIN_ACTIVITY_BOUNDARY)[0] || content;
   const durations: number[] = [];
   const durationRegex = /(?:tempo ideal(?:\s+de\s+resolu[cç][aã]o)?|estimativa\s+de\s+tempo)\D{0,40}(\d{1,3})\s*minutos/gi;
   let match: RegExpExecArray | null;
 
-  while ((match = durationRegex.exec(content)) !== null) {
+  while ((match = durationRegex.exec(mainContent)) !== null) {
     durations.push(parseInt(match[1], 10));
   }
 
   if (durations.length === 0) return undefined;
   return durations.reduce((total, duration) => total + duration, 0);
 };
+
+export const isDraftSelectedByDefault = (draft: MetaTaskDraft): boolean =>
+  draft.statusOrigem !== 'concluido' && draft.statusOrigem !== 'ignorado';
 
 const parseDetailedDescription = (content: string, discipline: string): string => {
   const assuntoMatch = content.match(/Assunto\(s\):\s*(.+?)(?:\s+Assuntos?:\s|\s+ATENÇÃO:|\s+Orienta[cç][oõ]es|\s+Atividade\s+\d|\s+Quadro\s+de|\s+META\s+\d|$)/i);

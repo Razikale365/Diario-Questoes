@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, FileUp, Loader2, Play, RotateCcw, UploadCloud } from 'lucide-react';
 import { StudyTask } from '../types';
 import { BANKS, PLANEJAMENTOS } from '../utils/constants';
-import { createTasksFromMetaDrafts, MetaParseResult, parseMetaText } from '../utils/metaParser';
+import { createTasksFromMetaDrafts, isDraftSelectedByDefault, MetaParseResult, parseMetaText } from '../utils/metaParser';
 import { extractPdfText, PdfExtractionResult } from '../utils/pdfTextExtractor';
 
 interface MetaImportAreaProps {
@@ -61,7 +61,11 @@ export const MetaImportArea: React.FC<MetaImportAreaProps> = ({ onImport, showTo
       if (!meta && detectedMeta) setMeta(detectedMeta);
       setPdfResult(extracted);
       setParseResult(parsed);
-      setSelectedIds(new Set(parsed.drafts.map(draft => draft.id)));
+      setSelectedIds(new Set(
+        parsed.drafts
+          .filter(isDraftSelectedByDefault)
+          .map(draft => draft.id)
+      ));
 
       if (parsed.drafts.length === 0) {
         setErrorMessage('PDF lido, mas nenhuma tarefa de meta foi detectada. Ele pode conter só orientação ou calendário.');
