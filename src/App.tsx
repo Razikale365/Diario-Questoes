@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { ConfirmModal } from './components/ConfirmModal';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { ImportArea } from './components/ImportArea';
+import { MetaImportArea } from './components/MetaImportArea';
 import { HistoryList } from './components/HistoryList';
 import { RevisionArea } from './components/RevisionArea';
 import { ActivityBlockCard } from './components/ActivityBlockCard';
@@ -53,6 +54,7 @@ function App() {
     inProgressTasks,
     pauseTask,
     addTask,
+    addTasks,
     updateTask,
     deleteTask,
     restoreTask,
@@ -578,6 +580,14 @@ function App() {
                       </div>
                     </div>
                   )}
+                  <MetaImportArea
+                    onImport={(importedTasks) => {
+                      addTasks(importedTasks);
+                      if (importedTasks[0]) setActiveTaskId(importedTasks[0].id);
+                      showToast(`${importedTasks.length} tarefas da meta importadas!`);
+                    }}
+                    showToast={showToast}
+                  />
                   <ImportArea onImport={(task) => { addTask(task); setActiveTaskId(task.id); showToast('Importado!'); }} showToast={showToast} />
                 </div>
               ) : (

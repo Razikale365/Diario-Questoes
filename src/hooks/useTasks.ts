@@ -59,6 +59,15 @@ export const useTasks = () => {
     setTasks(prev => [...prev, { ...normalizeTaskBlocksLayout(task), updatedAt: now() }]);
   };
 
+  const addTasks = (newTasks: StudyTask[]) => {
+    if (newTasks.length === 0) return;
+    const createdAt = now();
+    setTasks(prev => [
+      ...prev,
+      ...newTasks.map(task => ({ ...normalizeTaskBlocksLayout(task), updatedAt: createdAt }))
+    ]);
+  };
+
   const updateTask = (taskId: string, updates: Partial<StudyTask>) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates, updatedAt: now() } : t));
   };
@@ -439,6 +448,7 @@ export const useTasks = () => {
     inProgressTasks,
     pauseTask,
     addTask,
+    addTasks,
     updateTask,
     deleteTask,
     restoreTask,

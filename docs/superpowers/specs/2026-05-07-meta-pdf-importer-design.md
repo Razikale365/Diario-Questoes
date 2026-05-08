@@ -6,20 +6,19 @@ Adicionar um fluxo novo, sem remover o importador atual, para transformar uma me
 
 ## Escopo Da V1
 
-A V1 será um importador de meta por PDF anexado. O usuário seleciona o arquivo PDF da meta LS e o app extrai o texto automaticamente, ingere a meta e apresenta a revisão antes de criar a fila de tarefas.
+A V1 será um importador de meta por PDF anexado. O usuário seleciona o arquivo PDF da meta LS, o app extrai o texto automaticamente, ingere a meta e apresenta a revisão antes de criar a fila de tarefas.
 
-O modo de colar texto extraído pode existir como fallback de diagnóstico, mas não é o fluxo principal.
-
-O fluxo novo terá uma entrada separada chamada "Importar Meta LS". O fluxo atual "Importar Nova Tarefa" continua funcionando para tarefas avulsas.
+O fluxo novo terá uma entrada separada chamada "Importar Meta LS". O fluxo atual "Importar Nova Tarefa" continua funcionando para tarefas avulsas, incluindo colar texto de tarefa individual, e não deve ser removido nem simplificado.
 
 ## Fluxo Do Usuário
 
 1. O usuário abre "Importar Meta LS".
 2. Anexa o PDF da meta LS.
-3. O app extrai o texto do PDF, analisa a meta e mostra uma prévia revisável.
-4. A prévia lista as tarefas detectadas com número, disciplina, formato, descrição, tempo estimado, status inicial e blocos internos quando existirem.
-5. O usuário pode desmarcar tarefas detectadas incorretamente antes de importar.
-6. Ao confirmar, o app cria várias `StudyTask` em lote, todas em `in_progress`, prontas para aparecerem na fila de execução.
+3. O app extrai o texto do PDF automaticamente.
+4. O app analisa a meta e mostra uma prévia revisável.
+5. A prévia lista as tarefas detectadas com número, disciplina, formato, descrição, tempo estimado, status inicial e blocos internos quando existirem.
+6. O usuário pode desmarcar tarefas detectadas incorretamente antes de importar.
+7. Ao confirmar, o app cria várias `StudyTask` em lote, todas em `in_progress`, prontas para aparecerem na fila de execução.
 
 ## Dados Detectados
 
@@ -84,7 +83,6 @@ O modo "Meta LS" mostra:
 
 - seletor de arquivo PDF;
 - estado de extração com progresso/feedback;
-- área opcional "colar texto extraído" para fallback ou depuração;
 - campos de fallback para planejamento, meta, banca padrão;
 - resumo da detecção: total de tarefas, tempo total estimado, disciplinas e formatos;
 - tabela/cards revisáveis com checkbox por tarefa;
