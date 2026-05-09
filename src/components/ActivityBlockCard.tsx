@@ -5,6 +5,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ActivityBlock, Question } from '../types';
 import { useSnapResizer } from '../hooks/useSnapResizer';
+import { getNextQuestionMode, getQuestionAlternatives, isQuestionMultipleChoice } from '../utils/questionMode';
 
 interface PerformanceStats {
   total: number;
@@ -196,10 +197,23 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     return {};
   };
 
-  const getAlternatives = (q: Question) =>
-    q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE')
-      ? ['A', 'B', 'C', 'D', 'E']
-      : ['C', 'E'];
+  const getAlternatives = (q: Question) => getQuestionAlternatives(q, block);
+
+  const toggleQuestionMode = (q: Question) => {
+    if (block.isLocked) return;
+    const nextMode = getNextQuestionMode(q, block);
+    const nextAlternatives = nextMode ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E'];
+    const updates: Partial<Question> = {
+      isMultipleChoice: nextMode,
+      eliminated: (q.eliminated || []).filter(alt => nextAlternatives.includes(alt)),
+      doubtedAlts: (q.doubtedAlts || []).filter(alt => nextAlternatives.includes(alt))
+    };
+
+    if (q.answer && !nextAlternatives.includes(q.answer)) updates.answer = '';
+    if (q.correctAnswer && !nextAlternatives.includes(q.correctAnswer)) updates.correctAnswer = '';
+
+    onUpdateQuestion(block.id, q.number, updates);
+  };
 
   const toggleDoubted = (q: Question, alternative: string) => {
     if (block.isLocked) return;
@@ -705,8 +719,17 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                   <ChevronLeft className="w-5 h-5" />
                 </button>
                 <div className="text-center">
-                  <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
-                    Questão {mobileQuestion.number}
+                  <div className="flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
+                    <span>Questão</span>
+                    <button
+                      type="button"
+                      onDoubleClick={() => toggleQuestionMode(mobileQuestion)}
+                      disabled={block.isLocked}
+                      className={`rounded-lg px-2 py-1 font-black tracking-normal transition-all ${isQuestionMultipleChoice(mobileQuestion, block) ? 'bg-purple-600/30 text-purple-300 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] text-gray-300 hover:text-white hover:bg-purple-600/20'} ${block.isLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                      title="Clique duas vezes para alternar A-E / C-E"
+                    >
+                      {mobileQuestion.number}
+                    </button>
                   </div>
                   <div className="mt-1 text-sm font-semibold text-gray-300">
                     {mobileQuestionIndex + 1} de {block.questions.length}
@@ -722,10 +745,10 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               </div>
               <div className="mb-4 flex items-center justify-center">
                 <button
-                  onDoubleClick={() => onUpdateQuestion(block.id, mobileQuestion.number, { isMultipleChoice: !mobileQuestion.isMultipleChoice })}
-                  className={`flex min-h-11 min-w-[88px] items-center justify-center rounded-xl px-4 text-sm font-black transition-all ${mobileQuestion.isMultipleChoice ? 'bg-purple-600/30 text-purple-300 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] text-gray-300'}`}
+                  onDoubleClick={() => toggleQuestionMode(mobileQuestion)}
+                  className={`flex min-h-11 min-w-[88px] items-center justify-center rounded-xl px-4 text-sm font-black transition-all ${isQuestionMultipleChoice(mobileQuestion, block) ? 'bg-purple-600/30 text-purple-300 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] text-gray-300'}`}
                 >
-                  {mobileQuestion.isMultipleChoice ? 'Múltipla escolha' : 'Certo / Errado'}
+                  {isQuestionMultipleChoice(mobileQuestion, block) ? 'Múltipla escolha' : 'Certo / Errado'}
                 </button>
               </div>
               {renderAlternatives(mobileQuestion, true)}
@@ -771,8 +794,9 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
                 <div className="flex items-center gap-3">
                   <span 
-                    onDoubleClick={() => onUpdateQuestion(block.id, q.number, { isMultipleChoice: !q.isMultipleChoice })}
-                    className={`text-[10px] p-2 font-black rounded-lg text-gray-400 w-6 h-6 flex items-center justify-center cursor-pointer select-none transition-all ${q.isMultipleChoice ? 'bg-purple-600/30 text-purple-400 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] hover:text-white hover:bg-purple-600/20'}`}
+                    onDoubleClick={() => toggleQuestionMode(q)}
+                    className={`text-[10px] p-2 font-black rounded-lg text-gray-400 w-6 h-6 flex items-center justify-center cursor-pointer select-none transition-all ${isQuestionMultipleChoice(q, block) ? 'bg-purple-600/30 text-purple-400 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] hover:text-white hover:bg-purple-600/20'}`}
+                    title="Clique duas vezes para alternar A-E / C-E"
                   >
                     {q.number}
                   </span>
