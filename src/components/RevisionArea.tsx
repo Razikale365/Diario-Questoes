@@ -19,7 +19,7 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
 
   const uniqueDisciplines = useMemo(() => {
     const d = new Set<string>();
-    tasks.filter(t => t.status === 'completed').forEach(t => {
+    tasks.filter(t => !t.deletedAt && t.status === 'completed').forEach(t => {
       if (t.discipline) d.add(t.discipline);
     });
     return Array.from(d).sort();
@@ -28,7 +28,7 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
   const availableLessons = useMemo(() => {
     if (!revDiscipline) return [];
     const lessons = new Set<string>();
-    tasks.filter(t => t.discipline === revDiscipline && t.status === 'completed').forEach(t => {
+    tasks.filter(t => !t.deletedAt && t.discipline === revDiscipline && t.status === 'completed').forEach(t => {
       t.blocks.forEach(b => {
         if (b.lesson) lessons.add(b.lesson);
       });
@@ -39,7 +39,7 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
   const generatedRevision = useMemo(() => {
     if (!revDiscipline || selectedLessons.size === 0) return [];
 
-    const filteredTasks = tasks.filter(t => t.discipline === revDiscipline && t.status === 'completed');
+    const filteredTasks = tasks.filter(t => !t.deletedAt && t.discipline === revDiscipline && t.status === 'completed');
     const grouped = new Map<string, { 
       qSet: Set<number>, 
       pSet: Set<string>, 

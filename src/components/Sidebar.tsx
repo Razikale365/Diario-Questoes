@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, History, Download, Upload, Plus, User, Clipboard, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Archive, BookOpen, CheckCircle2, History, Download, Upload, Plus, User, Clipboard, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { SyncStatus } from '../types/sync';
 
@@ -10,11 +10,15 @@ interface SidebarProps {
   importBackup: (e: React.ChangeEvent<HTMLInputElement>) => void;
   mergeBackup: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenPasteBackup: () => void;
+  onOpenSnapshots: () => void;
   inProgressCount?: number;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   syncStatus: SyncStatus;
   syncLastSyncAt: string | null;
+  syncLastError: string | null;
+  syncPendingChanges: number;
+  syncConflictMessage?: string | null;
   onSyncNow: () => void;
   onAuth: () => void;
   onDisconnect: () => void;
@@ -28,11 +32,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   importBackup,
   mergeBackup,
   onOpenPasteBackup,
+  onOpenSnapshots,
   inProgressCount = 0,
   isCollapsed,
   onToggleCollapse,
   syncStatus,
   syncLastSyncAt,
+  syncLastError,
+  syncPendingChanges,
+  syncConflictMessage,
   onSyncNow,
   onAuth,
   onDisconnect
@@ -145,11 +153,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!isCollapsed && <span>Colar Backup</span>}
           </span>
         </button>
+
+        <button
+          onClick={onOpenSnapshots}
+          className={`w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-purple-200 hover:text-white hover:bg-purple-800/30 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/50 ${isCollapsed ? 'justify-center' : ''}`}
+          title={isCollapsed ? "Snapshots" : "Criar ou restaurar snapshots manuais"}
+        >
+          <span className="flex items-center gap-2">
+            <Archive className="w-4 h-4" />
+            {!isCollapsed && <span>Snapshots</span>}
+          </span>
+        </button>
       </div>
 
       <SyncStatusBadge
         status={syncStatus}
         lastSyncAt={syncLastSyncAt}
+        lastError={syncLastError}
+        pendingChanges={syncPendingChanges}
+        conflictMessage={syncConflictMessage}
         onSyncNow={onSyncNow}
         onAuth={onAuth}
         onDisconnect={onDisconnect}

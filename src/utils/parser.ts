@@ -7,6 +7,11 @@ type ParsedInstruction = {
   lesson?: string;
 };
 
+type ParsedReadingInstruction = {
+  lesson: string;
+  pages: string;
+};
+
 const cleanLessonLabel = (value: string): string =>
   value
     .replace(/\s*-\s*resolv(?:a|er).*$/i, '')
@@ -79,6 +84,28 @@ const parseInstructionPages = (line: string): string => {
 const parseInstructionLesson = (line: string): string => {
   const match = line.match(/(?:Na\s+)?(Aula\s+\d+.*?)\s*-\s*Resolv/i);
   return match ? cleanLessonLabel(match[1]) : '';
+};
+
+const parseReadingInstruction = (lines: string[]): ParsedReadingInstruction | null => {
+  const combined = lines
+    .map(line => line.replace(/^[\-\u2022]\s*/, '').trim())
+    .join(' ')
+    .replace(/\s+/g, ' ');
+
+  if (!/estude\s+(?:a\s+)?(?:vers[aã]o\s+simplificada\s+da\s+)?teoria/i.test(combined)) {
+    return null;
+  }
+
+  const aulaMatch = combined.match(/(Aula\s+\d+)/i);
+  if (!aulaMatch) return null;
+
+  const assuntoMatch = combined.match(/Assunto\s+"?([^".()]+?)"?(?:\s+até|\s*\(|\.|$)/i);
+  const pages = parseInstructionPages(combined);
+  const lesson = cleanLessonLabel(
+    `${aulaMatch[1]}${assuntoMatch ? ` - ${assuntoMatch[1].trim()}` : ''}`
+  );
+
+  return { lesson, pages };
 };
 
 const isQuestionListHeader = (line: string): boolean =>
@@ -193,6 +220,18 @@ export const parseLSTask = (text: string): ActivityBlock[] => {
           questions
         });
       });
+    } else {
+      const readingInstruction = parseReadingInstruction(lines);
+      if (readingInstruction) {
+        blocks.push({
+          id: crypto.randomUUID(),
+          title,
+          lesson: readingInstruction.lesson,
+          pages: readingInstruction.pages,
+          bank: '',
+          questions: []
+        });
+      }
     }
   });
 

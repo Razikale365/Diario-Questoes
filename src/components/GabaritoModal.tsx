@@ -62,8 +62,8 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#262626] p-6 rounded-xl w-full max-w-lg border border-[#404040] shadow-2xl">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50 p-0 md:items-center md:p-4">
+      <div className="bg-[#262626] p-5 w-full min-h-[80vh] border border-[#404040] shadow-2xl rounded-t-3xl md:min-h-0 md:max-w-lg md:rounded-xl md:p-6">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <CheckSquare className="w-6 h-6 text-purple-500" />
@@ -83,13 +83,13 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
           onChange={e => setText(e.target.value)}
         />
         <div className="flex justify-end gap-3">
-          <button onClick={onClose} className="px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
+          <button onClick={onClose} className="min-h-12 px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
             Cancelar
           </button>
           <button 
             onClick={handleImport} 
             disabled={!text.trim()}
-            className="bg-[#84cc16] hover:bg-[#65a30d] disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
+            className="min-h-12 bg-[#84cc16] hover:bg-[#65a30d] disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
           >
             <Check className="w-5 h-5" />
             Importar e Validar

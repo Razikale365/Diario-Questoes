@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight } from 'lucide-react';
 
-import { ActivityBlock, StudyTask, Question } from './types';
+import { ActivityBlock, LayoutConfig, StudyTask, Question } from './types';
 import { useTasks } from './hooks/useTasks';
 import { Sidebar } from './components/Sidebar';
 import { ConfirmModal } from './components/ConfirmModal';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { ImportArea } from './components/ImportArea';
+import { MetaImportArea } from './components/MetaImportArea';
 import { HistoryList } from './components/HistoryList';
 import { RevisionArea } from './components/RevisionArea';
 import { ActivityBlockCard } from './components/ActivityBlockCard';
@@ -14,14 +15,18 @@ import { TaskHeader } from './components/TaskHeader';
 import { GabaritoModal } from './components/GabaritoModal';
 import { BlockEditModal } from './components/BlockEditModal';
 import { SectionEditModal } from './components/SectionEditModal';
+import { SectionCreateModal } from './components/SectionCreateModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
+import { SnapshotModal } from './components/SnapshotModal';
+import { PostTaskSummaryModal } from './components/PostTaskSummaryModal';
 import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/parser';
 import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
+import { getTaskElapsedSeconds } from './utils/productInsights';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
-import { SyncState, SyncStatus } from './types/sync';
+import { SyncHistoryEntry, SyncState } from './types/sync';
 import { useAutoBackup } from './hooks/useAutoBackup';
 import { 
   DndContext, 
@@ -49,8 +54,13 @@ function App() {
     inProgressTasks,
     pauseTask,
     addTask,
+    addTasks,
     updateTask,
     deleteTask,
+    restoreTask,
+    permanentlyDeleteTask,
+    startTaskTimer,
+    pauseTaskTimer,
     updateQuestion,
     toggleLock,
     saveBlock,
@@ -65,6 +75,7 @@ function App() {
     toggleSectionStats,
     reopenTask,
     moveBlock,
+    moveBlockStep,
     deleteBlock,
     addSectionHeader,
     toggleBlockGabarito
@@ -78,6 +89,8 @@ function App() {
     lastSyncAt: null,
     lastError: null,
     pendingChanges: 0,
+    lastConflictAt: null,
+    lastConflictMessage: null,
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
   const syncEngineRef = useRef<SyncEngine | null>(null);
@@ -195,13 +208,28 @@ function App() {
     pages: string;
     bank: string;
     questionsText: string;
-    layout: { columns: number; rows: number; type: 'grid' | 'columns' };
+    layout: LayoutConfig;
   } | null>(null);
   
   const [gabaritoModal, setGabaritoModal] = useState<string | null>(null);
   const [viewingTaskId, setViewingTaskId] = useState<string | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+  const [taskToPermanentlyDelete, setTaskToPermanentlyDelete] = useState<string | null>(null);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [isCreateSectionModalOpen, setIsCreateSectionModalOpen] = useState(false);
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [snapshotName, setSnapshotName] = useState('');
+  const [snapshotHistory, setSnapshotHistory] = useState<SyncHistoryEntry[]>([]);
+  const [isSnapshotLoading, setIsSnapshotLoading] = useState(false);
+  const [timerTick, setTimerTick] = useState(Date.now());
+  const [focusBlockIndex, setFocusBlockIndex] = useState<number | null>(null);
+  const [summaryTask, setSummaryTask] = useState<StudyTask | null>(null);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setTimerTick(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -213,6 +241,54 @@ function App() {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  const loadSnapshots = useCallback(async () => {
+    setIsSnapshotLoading(true);
+    try {
+      const history = await syncEngineRef.current?.listHistory();
+      setSnapshotHistory(history || []);
+    } finally {
+      setIsSnapshotLoading(false);
+    }
+  }, []);
+
+  const openSnapshots = useCallback(() => {
+    setIsSnapshotModalOpen(true);
+    void loadSnapshots();
+  }, [loadSnapshots]);
+
+  const createSnapshot = useCallback(async () => {
+    setIsSnapshotLoading(true);
+    try {
+      const entry = await syncEngineRef.current?.saveManualSnapshot(snapshotName);
+      if (entry) {
+        setSnapshotName('');
+        await loadSnapshots();
+        showToast('Snapshot criado!');
+      } else {
+        showToast('Não foi possível criar snapshot.');
+      }
+    } finally {
+      setIsSnapshotLoading(false);
+    }
+  }, [loadSnapshots, snapshotName]);
+
+  const restoreSnapshot = useCallback(async (snapshotId: string) => {
+    setIsSnapshotLoading(true);
+    try {
+      const restored = await syncEngineRef.current?.restoreFromHistory(snapshotId);
+      if (restored) {
+        setTasks(restored);
+        setActiveTaskId(null);
+        setViewingTaskId(null);
+        showToast('Snapshot restaurado!');
+      } else {
+        showToast('Não foi possível restaurar.');
+      }
+    } finally {
+      setIsSnapshotLoading(false);
+    }
+  }, [setActiveTaskId, setTasks]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -292,10 +368,50 @@ function App() {
 
   const finishTask = () => {
     if (activeTaskId) {
-      updateTask(activeTaskId, { status: 'completed' });
+      const task = activeTask;
+      const elapsedSeconds = task ? getTaskElapsedSeconds(task, timerTick) : 0;
+      updateTask(activeTaskId, { status: 'completed', elapsedSeconds, timerStartedAt: null });
+      if (task) {
+        setSummaryTask({ ...task, status: 'completed', elapsedSeconds, timerStartedAt: null });
+        setIsSummaryOpen(true);
+      }
       setActiveTaskId(null);
       showToast('Tarefa concluída!');
     }
+  };
+
+  const generateRevisionFromTask = (task: StudyTask) => {
+    const revisionBlocks = task.blocks
+      .filter(block => !block.isSection)
+      .map(block => ({
+        ...block,
+        id: crypto.randomUUID(),
+        questions: block.questions
+          .filter(question => question.isCorrect === false || question.hasDoubt)
+          .map(question => ({ ...question, answer: '', isCorrect: null }))
+      }))
+      .filter(block => block.questions.length > 0);
+
+    if (revisionBlocks.length === 0) {
+      showToast('Sem erros ou dúvidas para revisar.');
+      return;
+    }
+
+    addTask({
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      planejamento: 'Revisão',
+      meta: task.meta,
+      tarefa: task.tarefa,
+      assunto: task.assunto,
+      discipline: task.discipline,
+      bank: task.bank,
+      blocks: revisionBlocks,
+      status: 'in_progress'
+    });
+    setIsSummaryOpen(false);
+    setActiveTab('caderno');
+    showToast('Revisão gerada!');
   };
 
   const handleEditSection = (title: string) => {
@@ -354,8 +470,8 @@ function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const incoming = JSON.parse(event.target?.result as string);
-        setTasks(prev => [...prev, ...incoming.filter((t1: any) => !prev.some(t2 => t2.id === t1.id))]);
+        const incoming = JSON.parse(event.target?.result as string) as StudyTask[];
+        setTasks(prev => [...prev, ...incoming.filter(t1 => !prev.some(t2 => t2.id === t1.id))]);
         showToast('Backup mesclado!');
       } catch {
         alert('Erro ao mesclar.');
@@ -377,8 +493,8 @@ function App() {
 
   const handlePasteMerge = (json: string) => {
     try {
-      const incoming = JSON.parse(json);
-      setTasks(prev => [...prev, ...incoming.filter((t1: any) => !prev.some(t2 => t2.id === t1.id))]);
+      const incoming = JSON.parse(json) as StudyTask[];
+      setTasks(prev => [...prev, ...incoming.filter(t1 => !prev.some(t2 => t2.id === t1.id))]);
       setIsPasteModalOpen(false);
       showToast('Backup mesclado!');
     } catch {
@@ -416,11 +532,15 @@ function App() {
         importBackup={importBackup}
         mergeBackup={mergeBackup}
         onOpenPasteBackup={() => setIsPasteModalOpen(true)}
+        onOpenSnapshots={openSnapshots}
         inProgressCount={inProgressTasks.length}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         syncStatus={syncState.status}
         syncLastSyncAt={syncState.lastSyncAt}
+        syncLastError={syncState.lastError}
+        syncPendingChanges={syncState.pendingChanges}
+        syncConflictMessage={syncState.lastConflictMessage}
         onSyncNow={handleSyncNow}
         onAuth={() => setShowAuthModal(true)}
         onDisconnect={handleDisconnect}
@@ -460,6 +580,14 @@ function App() {
                       </div>
                     </div>
                   )}
+                  <MetaImportArea
+                    onImport={(importedTasks) => {
+                      addTasks(importedTasks);
+                      if (importedTasks[0]) setActiveTaskId(importedTasks[0].id);
+                      showToast(`${importedTasks.length} tarefas da meta importadas!`);
+                    }}
+                    showToast={showToast}
+                  />
                   <ImportArea onImport={(task) => { addTask(task); setActiveTaskId(task.id); showToast('Importado!'); }} showToast={showToast} />
                 </div>
               ) : (
@@ -469,7 +597,69 @@ function App() {
                     onSave={saveTaskEdits} onCancel={() => setIsEditingTask(false)} onEditStart={startEditingTask} onFinishTask={finishTask}
                     onPause={pauseTask} showStats={showStats} onToggleStats={() => setShowStats(!showStats)}
                     onUpdateAllLayouts={(layout) => updateTaskBlocksLayout(activeTaskId!, layout)}
+                    elapsedSeconds={getTaskElapsedSeconds(activeTask, timerTick)}
+                    isTimerRunning={!!activeTask.timerStartedAt}
+                    onStartTimer={() => startTaskTimer(activeTaskId!)}
+                    onPauseTimer={() => pauseTaskTimer(activeTaskId!)}
+                    onFocusMode={() => setFocusBlockIndex(0)}
                   />
+                  {focusBlockIndex !== null ? (
+                    <div className="space-y-4">
+                      <div className="sticky top-0 z-40 flex flex-col gap-3 rounded-2xl border border-purple-500/30 bg-[#1f1f1f]/95 p-4 shadow-2xl backdrop-blur md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="text-[10px] font-black uppercase tracking-[0.25em] text-purple-400">Modo foco</div>
+                          <div className="mt-1 text-sm text-gray-300">Estatísticas escondidas e um bloco por vez.</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setFocusBlockIndex(index => Math.max(0, (index || 0) - 1))}
+                            disabled={focusBlockIndex === 0}
+                            className="min-h-11 rounded-xl border border-[#404040] px-4 text-sm font-bold text-gray-300 disabled:opacity-40"
+                          >
+                            Anterior
+                          </button>
+                          <button
+                            onClick={() => setFocusBlockIndex(null)}
+                            className="min-h-11 rounded-xl border border-[#525252] px-4 text-sm font-bold text-gray-300 hover:bg-[#404040]"
+                          >
+                            Sair
+                          </button>
+                          <button
+                            onClick={() => setFocusBlockIndex(index => Math.min(activeTask.blocks.filter(block => !block.isSection).length - 1, (index || 0) + 1))}
+                            disabled={focusBlockIndex >= activeTask.blocks.filter(block => !block.isSection).length - 1}
+                            className="min-h-11 rounded-xl bg-purple-600 px-4 text-sm font-bold text-white disabled:opacity-40"
+                          >
+                            Próximo
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-12 gap-8 pb-20">
+                        {(() => {
+                          const focusBlocks = activeTask.blocks.filter(block => !block.isSection);
+                          const block = focusBlocks[focusBlockIndex] || focusBlocks[0];
+                          if (!block) return null;
+                          return (
+                            <ActivityBlockCard
+                              key={block.id}
+                              block={{ ...block, layout: { ...(block.layout || DEFAULT_ACTIVITY_LAYOUT), width: 12 } }}
+                              index={focusBlockIndex}
+                              globalShowStats={false}
+                              onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
+                              onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
+                              onEditBlock={openEditBlock}
+                              onDeleteBlock={handleDeleteBlock}
+                              onImportGabarito={setGabaritoModal}
+                              onToggleLayout={(blockId) => toggleBlockLayout(activeTaskId!, blockId)}
+                              onToggleStats={(blockId) => toggleBlockStats(activeTaskId!, blockId)}
+                              onUpdateLayout={(blockId, layout) => updateBlockLayout(activeTaskId!, blockId, layout)}
+                              onToggleGabarito={(blockId) => toggleBlockGabarito(activeTaskId!, blockId)}
+                              onMoveBlockStep={(blockId, direction) => moveBlockStep(activeTaskId!, blockId, direction)}
+                            />
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="flex-1">
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToWindowEdges]}>
                       <div className="grid grid-cols-12 gap-x-8 gap-y-4 pb-20">
@@ -513,6 +703,7 @@ function App() {
                                 onAutoSnap={() => autoSnapBlocks(activeTaskId!)}
                                 onRenameSection={handleRenameSection}
                                 onToggleGabarito={(blockId) => toggleBlockGabarito(activeTaskId!, blockId)}
+                                onMoveBlockStep={(blockId, direction) => moveBlockStep(activeTaskId!, blockId, direction)}
                               />
                             );
                           })}
@@ -520,18 +711,13 @@ function App() {
                       </div>
                     </DndContext>
                   </div>
+                  )}
                   <div className="flex justify-center gap-4 py-8">
                     <button onClick={() => openEditBlock()} className="flex items-center gap-2 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all border border-dashed border-white/10 hover:border-purple-500/50 font-black uppercase tracking-widest text-xs group">
                       <Plus className="w-5 h-5 group-hover:scale-110 transition-transform text-purple-500" /> Adicionar Bloco
                     </button>
                     <button 
-                      onClick={() => {
-                        const title = prompt('Título da Seção (ex: Aula 01):');
-                        if (title && activeTaskId) {
-                          addSectionHeader(activeTaskId, title);
-                          showToast('Seção criada!');
-                        }
-                      }} 
+                      onClick={() => setIsCreateSectionModalOpen(true)} 
                       className="flex items-center gap-2 px-8 py-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-2xl transition-all border border-dashed border-purple-500/30 hover:border-purple-500 font-black uppercase tracking-widest text-xs group"
                     >
                       <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" /> Criar Seção
@@ -586,6 +772,7 @@ function App() {
                         onToggleStats={(bid) => toggleBlockStats(viewingTaskId!, bid)}
                         onUpdateLayout={(bid, layout) => updateBlockLayout(viewingTaskId!, bid, layout)}
                         onToggleGabarito={(bid) => toggleBlockGabarito(viewingTaskId!, bid)}
+                        onMoveBlockStep={(bid, direction) => moveBlockStep(viewingTaskId!, bid, direction)}
                       />
                     ))}
                   </div>
@@ -597,6 +784,8 @@ function App() {
                   setHistoryPage={setHistoryPage}
                   onOpenTask={setViewingTaskId} 
                   onDeleteTask={setTaskToDelete} 
+                  onRestoreTask={(id) => { restoreTask(id); showToast('Tarefa restaurada!'); }}
+                  onPermanentlyDeleteTask={setTaskToPermanentlyDelete}
                 />
               )}
             </div>
@@ -641,10 +830,46 @@ function App() {
         onMerge={handlePasteMerge}
       />
 
+      <SectionCreateModal
+        isOpen={isCreateSectionModalOpen}
+        onClose={() => setIsCreateSectionModalOpen(false)}
+        onCreate={(title) => {
+          if (activeTaskId) {
+            addSectionHeader(activeTaskId, title);
+            showToast('Seção criada!');
+          }
+        }}
+      />
+
       <ConfirmModal
         isOpen={!!taskToDelete} onClose={() => setTaskToDelete(null)}
-        onConfirm={() => { deleteTask(taskToDelete!); setTaskToDelete(null); showToast('Excluída!'); }}
-        title="Excluir" message="Excluir?" confirmText="Excluir" isDestructive={true}
+        onConfirm={() => { deleteTask(taskToDelete!); setTaskToDelete(null); showToast('Movida para lixeira.'); }}
+        title="Mover para lixeira" message="A tarefa ficará na lixeira por 7 dias antes da limpeza automática." confirmText="Mover" isDestructive={true}
+      />
+
+      <ConfirmModal
+        isOpen={!!taskToPermanentlyDelete} onClose={() => setTaskToPermanentlyDelete(null)}
+        onConfirm={() => { permanentlyDeleteTask(taskToPermanentlyDelete!); setTaskToPermanentlyDelete(null); showToast('Excluída definitivamente.'); }}
+        title="Excluir definitivamente" message="Esta ação remove a tarefa da lixeira agora e não pode ser desfeita." confirmText="Excluir" isDestructive={true}
+      />
+
+      <SnapshotModal
+        isOpen={isSnapshotModalOpen}
+        onClose={() => setIsSnapshotModalOpen(false)}
+        history={snapshotHistory}
+        isLoading={isSnapshotLoading}
+        snapshotName={snapshotName}
+        setSnapshotName={setSnapshotName}
+        onCreate={createSnapshot}
+        onRestore={restoreSnapshot}
+        syncStatus={syncState.status}
+      />
+
+      <PostTaskSummaryModal
+        isOpen={isSummaryOpen}
+        task={summaryTask}
+        onClose={() => setIsSummaryOpen(false)}
+        onGenerateRevision={generateRevisionFromTask}
       />
 
       <AuthModal
@@ -660,6 +885,7 @@ function App() {
         syncStatus={syncState.status}
         onSyncNow={handleSyncNow}
         onAuth={() => setShowAuthModal(true)}
+        onOpenSnapshots={openSnapshots}
         inProgressCount={inProgressTasks.length}
       />
     </div>

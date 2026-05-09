@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { X, Mail, Lock, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -21,7 +22,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthCom
     setLoading(true);
 
     try {
-      const { supabase } = await import('../lib/supabase');
       if (!supabase) {
         onError('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.');
         setLoading(false);
@@ -53,8 +53,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthCom
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#333333] border border-[#404040] rounded-2xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-0 md:items-center md:p-4">
+      <div className="bg-[#333333] border border-[#404040] rounded-t-3xl w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200 md:max-w-md md:rounded-2xl md:p-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white uppercase tracking-widest">
             {isSignUp ? 'Criar Conta' : 'Login Cloud'}

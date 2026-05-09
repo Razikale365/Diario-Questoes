@@ -15,6 +15,7 @@ export interface SyncHistoryEntry {
   task_count: number;
   snapshot_at: string;
   source: 'auto' | 'manual';
+  snapshot_name?: string | null;
 }
 
 export interface SyncState {
@@ -22,4 +23,6 @@ export interface SyncState {
   lastSyncAt: string | null;
   lastError: string | null;
   pendingChanges: number;
+  lastConflictAt?: string | null;
+  lastConflictMessage?: string | null;
 }

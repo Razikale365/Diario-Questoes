@@ -27,8 +27,8 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4">
-      <div className="bg-[#1a1a1a] p-8 rounded-3xl w-full max-w-lg border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-end justify-center z-[100] p-0 md:items-center md:p-4">
+      <div className="bg-[#1a1a1a] p-5 w-full min-h-[88vh] rounded-t-3xl border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden md:min-h-0 md:max-w-lg md:rounded-3xl md:p-8">
         {/* Background Decor */}
         <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-500/10 blur-[80px] rounded-full" />
         <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-[#84cc16]/10 blur-[80px] rounded-full" />
