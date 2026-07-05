@@ -1,10 +1,12 @@
-import { BookOpen, CheckCircle2, History, Download, Upload, Plus, User, Clipboard, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BookOpen, CalendarDays, CheckCircle2, History, Download, Upload, Plus, User, Clipboard, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { SyncStatus } from '../types/sync';
 
+type ActiveTab = 'caderno' | 'planner' | 'revisao' | 'historico';
+
 interface SidebarProps {
-  activeTab: 'caderno' | 'revisao' | 'historico';
-  setActiveTab: React.Dispatch<React.SetStateAction<'caderno' | 'revisao' | 'historico'>>;
+  activeTab: ActiveTab;
+  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
   setHistoryPage: (page: number) => void;
   exportBackup: () => void;
   importBackup: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -79,6 +81,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {inProgressCount}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('planner')}
+          className={`w-full flex items-center gap-3 px-6 py-3 text-sm font-bold transition-all ${
+            activeTab === 'planner' ? 'bg-purple-800/50 text-white border-l-4 border-[#84cc16]' : 'text-purple-200 hover:bg-purple-800/30 hover:text-white border-l-4 border-transparent'
+          } ${isCollapsed ? 'px-0 justify-center border-l-0' : ''}`}
+          title={isCollapsed ? "Planner de Metas" : ""}
+        >
+          <CalendarDays className="w-5 h-5 flex-shrink-0" />
+          {!isCollapsed && <span>Planner de Metas</span>}
         </button>
         <button
           onClick={() => setActiveTab('revisao')}

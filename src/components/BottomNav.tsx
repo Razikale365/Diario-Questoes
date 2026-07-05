@@ -1,10 +1,12 @@
 import React from 'react';
-import { BookOpen, CheckCircle2, History, Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { BookOpen, CalendarDays, CheckCircle2, History, Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
 import { SyncStatus } from '../types/sync';
 
+type ActiveTab = 'caderno' | 'planner' | 'revisao' | 'historico';
+
 interface BottomNavProps {
-  activeTab: 'caderno' | 'revisao' | 'historico';
-  setActiveTab: (tab: 'caderno' | 'revisao' | 'historico') => void;
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
   syncStatus: SyncStatus;
   onSyncNow: () => void;
   onAuth: () => void;
@@ -48,6 +50,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           )}
         </div>
         <span className="text-[10px] font-bold uppercase tracking-tighter">Caderno</span>
+      </button>
+
+      <button
+        onClick={() => setActiveTab('planner')}
+        className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+          activeTab === 'planner' ? 'text-white' : 'text-purple-300'
+        }`}
+      >
+        <CalendarDays className="w-6 h-6" />
+        <span className="text-[10px] font-bold uppercase tracking-tighter">Planner</span>
       </button>
 
       <button

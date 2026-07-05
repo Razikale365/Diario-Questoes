@@ -3,6 +3,7 @@ import { FileText, Play } from 'lucide-react';
 import { StudyTask } from '../types';
 import { parseLSTask } from '../utils/parser';
 import { PLANEJAMENTOS, DISCIPLINAS, BANKS } from '../utils/constants';
+import { QuestionPdfImport } from './QuestionPdfImport';
 
 interface ImportAreaProps {
   onImport: (task: StudyTask) => void;
@@ -76,6 +77,11 @@ export const ImportArea: React.FC<ImportAreaProps> = ({ onImport, showToast }) =
         </h2>
       </div>
       <div className="p-6 space-y-6">
+        <QuestionPdfImport onImport={onImport} showToast={showToast} />
+        <div className="border-t border-[#404040]" />
+        <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
+          <FileText className="w-5 h-5 text-purple-400" /> Texto da LS
+        </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">Planejamento</label>

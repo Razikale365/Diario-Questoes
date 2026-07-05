@@ -1,3 +1,43 @@
+export type QuestionSourceKind = 'estrategia' | 'tec' | 'professor' | 'official' | 'other';
+
+export interface QuestionAlternative {
+  label: string;
+  text: string;
+}
+
+export interface QuestionAttempt {
+  answer: string;
+  isCorrect: boolean | null;
+  attemptedAt: string;
+}
+
+export interface QuestionBankItem {
+  id: string;
+  fingerprint: string;
+  sourceQuestionNumber?: number;
+  statement: string;
+  alternatives: QuestionAlternative[];
+  correctAnswer?: string;
+  isMultipleChoice?: boolean;
+  sourceKind: QuestionSourceKind;
+  sourceName: string;
+  sourceFileName?: string;
+  year?: number;
+  exam?: string;
+  institution?: string;
+  discipline: string;
+  lesson?: string;
+  taskTitle?: string;
+  bank: string;
+  tags: string[];
+  favorite: boolean;
+  hasDoubt: boolean;
+  observations?: string;
+  attempts: QuestionAttempt[];
+  importedAt: string;
+  updatedAt: string;
+}
+
 export interface Question {
   number: number;
   answer: string;
@@ -8,6 +48,17 @@ export interface Question {
   eliminated?: string[];
   observations?: string;
   doubtedAlts?: string[];
+  localId?: string;
+  sourceQuestionNumber?: number;
+  statement?: string;
+  alternatives?: QuestionAlternative[];
+  sourceKind?: QuestionSourceKind;
+  sourceName?: string;
+  year?: number;
+  exam?: string;
+  institution?: string;
+  favorite?: boolean;
+  attempts?: QuestionAttempt[];
 }
 
 export interface ActivityBlock {
@@ -42,6 +93,60 @@ export interface StudyTask {
   bank: string;
   blocks: ActivityBlock[];
   status: 'in_progress' | 'completed';
+}
+
+export type PlannerTaskStatus = 'pending' | 'completed' | 'started' | 'ignored' | 'archived';
+export type PlannerTaskSource = 'ls-meta-text' | 'ls-meta-pdf' | 'manual' | 'generated';
+export type PlannerMetaHistoryOrigin = 'ls' | 'generated';
+
+export interface PlannerTask {
+  id: string;
+  number: number;
+  metaNumber?: number;
+  planejamento?: string;
+  discipline: string;
+  format: string;
+  description: string;
+  details?: string;
+  tips?: string;
+  spentMinutes: number;
+  estimatedMinutes: number;
+  performance: number | null;
+  status: PlannerTaskStatus;
+  relevance: number;
+  scheduledDate?: string;
+  startTime?: string;
+  durationMinutes: number;
+  source: PlannerTaskSource;
+  linkedStudyTaskId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlannerMetaSummary {
+  id: string;
+  title: string;
+  planejamento?: string;
+  metaNumber?: number;
+  totalTasks: number;
+  totalDisciplines: number;
+  completedPercent: number;
+  completedTasks: number;
+  pendingTasks: number;
+  ignoredTasks: number;
+  startedTasks: number;
+  startedAt?: string;
+  nextMetaAt?: string;
+  importedAt: string;
+}
+
+export interface PlannerMetaHistoryEntry {
+  id: string;
+  meta: PlannerMetaSummary;
+  tasks: PlannerTask[];
+  archivedAt: string;
+  origin?: PlannerMetaHistoryOrigin;
+  relatedMetaId?: string;
 }
 
 export interface RevisionTaskModalState {

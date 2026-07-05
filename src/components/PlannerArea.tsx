@@ -1,0 +1,2093 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Archive,
+  AlertTriangle,
+  Ban,
+  BarChart3,
+  CalendarDays,
+  CalendarRange,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock as ClockIcon,
+  ClipboardList,
+  Database as DatabaseIcon,
+  FileUp,
+  GripVertical,
+  History,
+  LayoutDashboard,
+  ListChecks,
+  Loader2,
+  Layers,
+  Lightbulb,
+  Map as MapIcon,
+  Play,
+  RotateCcw,
+  Sparkles,
+  Table2,
+  Target,
+  Timer,
+} from 'lucide-react';
+
+import { PlannerMetaHistoryEntry, PlannerMetaHistoryOrigin, PlannerMetaSummary, PlannerTask, QuestionBankItem, StudyTask } from '../types';
+import {
+  autoSchedulePlannerTasks,
+  buildMonthGrid,
+  buildWeekDays,
+  formatMinutes,
+  mergePlannerTasks,
+  parseLsMetaText,
+  toIsoDate,
+} from '../utils/planner';
+import { extractPdfText } from '../utils/pdfQuestionImport';
+import {
+  generateNextMetaDraft,
+  materializeDraftTasks,
+  plannerDraftTaskKey,
+  PlannerDraft,
+  PlannerDraftTask,
+  summarizeDraftTasks,
+} from '../utils/plannerGenerator';
+import { buildPlannerInsights, PlannerDisciplineInsight, PlannerInsights } from '../utils/plannerInsights';
+import {
+  loadStoredQuestionBank,
+  matchQuestionBankItemsToPlannerTask,
+  mergeQuestionBankItems,
+  persistQuestionBank,
+  questionBankItemToQuestion,
+} from '../utils/questionBank';
+import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
+
+type PlannerView = 'month' | 'week';
+type PlannerSection = 'meta' | 'calendar' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
+type DraftTaskItem = { key: string; task: PlannerDraftTask };
+type DraftTaskEdit = Partial<Pick<PlannerDraftTask, 'description' | 'durationMinutes' | 'relevance'>>;
+
+interface PlannerAreaProps {
+  studyTasks: StudyTask[];
+  onOpenStudyTask: (taskId: string) => void;
+  onCreateStudyTask: (task: StudyTask) => void;
+  showToast: (message: string) => void;
+}
+
+const TASKS_KEY = 'ls_planner_tasks_v1';
+const META_KEY = 'ls_planner_meta_v1';
+const HISTORY_KEY = 'ls_planner_meta_history_v1';
+
+const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
+
+const SECTION_NAV: Array<{ id: PlannerSection; label: string; icon: React.ElementType }> = [
+  { id: 'meta', label: 'Meta Atual', icon: LayoutDashboard },
+  { id: 'calendar', label: 'Calendário', icon: CalendarDays },
+  { id: 'insights', label: 'Insights', icon: Lightbulb },
+  { id: 'generator', label: 'Gerador', icon: Sparkles },
+  { id: 'history', label: 'Histórico', icon: History },
+  { id: 'maps', label: 'Mapas', icon: MapIcon },
+  { id: 'list', label: 'Lista', icon: Table2 },
+  { id: 'discipline', label: 'Por Disciplina', icon: Layers },
+  { id: 'pending', label: 'Pendentes', icon: Target },
+  { id: 'ignored', label: 'Ignoradas', icon: Ban },
+  { id: 'archived', label: 'Arquivadas', icon: Archive },
+];
+
+const loadStoredTasks = () => {
+  try {
+    const stored = localStorage.getItem(TASKS_KEY);
+    return stored ? (JSON.parse(stored) as PlannerTask[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const loadStoredMeta = () => {
+  try {
+    const stored = localStorage.getItem(META_KEY);
+    return stored ? (JSON.parse(stored) as PlannerMetaSummary) : null;
+  } catch {
+    return null;
+  }
+};
+
+const loadStoredHistory = () => {
+  try {
+    const stored = localStorage.getItem(HISTORY_KEY);
+    return stored ? (JSON.parse(stored) as PlannerMetaHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const statusLabel: Record<PlannerTask['status'], string> = {
+  pending: 'Pendente',
+  completed: 'Concluída',
+  started: 'Iniciada',
+  ignored: 'Ignorada',
+  archived: 'Arquivada',
+};
+
+const statusClass: Record<PlannerTask['status'], string> = {
+  pending: 'border-purple-500/20 bg-purple-500/10 text-purple-200',
+  completed: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+  started: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
+  ignored: 'border-gray-500/20 bg-gray-500/10 text-gray-400',
+  archived: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
+};
+
+const historyOriginLabel: Record<PlannerMetaHistoryOrigin, string> = {
+  ls: 'LS',
+  generated: 'Gerada',
+};
+
+const historyOriginClass: Record<PlannerMetaHistoryOrigin, string> = {
+  ls: 'border-purple-500/20 bg-purple-500/10 text-purple-200',
+  generated: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+};
+
+const shiftMonth = (date: Date, delta: number) => new Date(date.getFullYear(), date.getMonth() + delta, 1);
+const shiftWeek = (date: Date, delta: number) => {
+  const next = new Date(date);
+  next.setDate(date.getDate() + delta * 7);
+  return next;
+};
+
+const groupTasksByDate = (tasks: PlannerTask[]) => {
+  return tasks.reduce<Record<string, PlannerTask[]>>((acc, task) => {
+    if (!task.scheduledDate) return acc;
+    acc[task.scheduledDate] ||= [];
+    acc[task.scheduledDate].push(task);
+    return acc;
+  }, {});
+};
+
+const taskMatchesFilter = (task: PlannerTask, discipline: string, hideDone: boolean) => {
+  if (task.status === 'archived') return false;
+  if (discipline && task.discipline !== discipline) return false;
+  if (hideDone && task.status === 'completed') return false;
+  return true;
+};
+
+const upsertHistoryEntry = (history: PlannerMetaHistoryEntry[], entry: PlannerMetaHistoryEntry) => {
+  const withoutCurrent = history.filter((item) => item.id !== entry.id);
+  return [entry, ...withoutCurrent].sort((a, b) => Date.parse(b.archivedAt) - Date.parse(a.archivedAt));
+};
+
+const inferHistoryOrigin = (tasks: PlannerTask[]): PlannerMetaHistoryOrigin =>
+  tasks.length > 0 && tasks.every((task) => task.source === 'generated') ? 'generated' : 'ls';
+
+const buildHistoryEntry = (
+  meta: PlannerMetaSummary,
+  tasks: PlannerTask[],
+  options: { origin?: PlannerMetaHistoryOrigin; relatedMetaId?: string } = {},
+): PlannerMetaHistoryEntry => ({
+  id: meta.id,
+  meta,
+  tasks: tasks.map((task) => ({ ...task })),
+  archivedAt: new Date().toISOString(),
+  origin: options.origin || inferHistoryOrigin(tasks),
+  relatedMetaId: options.relatedMetaId,
+});
+
+const getHistoryOrigin = (entry: PlannerMetaHistoryEntry): PlannerMetaHistoryOrigin => entry.origin || 'ls';
+
+const sumTaskMinutes = (tasks: PlannerTask[]) => tasks.reduce((sum, task) => sum + task.durationMinutes, 0);
+
+const countTaskDisciplines = (tasks: PlannerTask[]) => new Set(tasks.map((task) => task.discipline)).size;
+
+const averageRelevance = (tasks: PlannerTask[]) =>
+  Math.round(tasks.reduce((sum, task) => sum + task.relevance, 0) / Math.max(1, tasks.length));
+
+const formatSignedNumber = (value: number) => `${value > 0 ? '+' : ''}${value}`;
+
+const formatSignedMinutes = (value: number) => `${value > 0 ? '+' : value < 0 ? '-' : ''}${formatMinutes(Math.abs(value))}`;
+
+const formatDateTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: QuestionBankItem[] = []): StudyTask => {
+  const matchedQuestions = bankItems.map(questionBankItemToQuestion);
+  const bank = bankItems[0]?.bank || 'Outra';
+  const sourceNames = Array.from(new Set(bankItems.map((item) => item.sourceName))).slice(0, 2);
+  const title = `Tarefa ${plannerTask.number} - ${plannerTask.discipline}`;
+
+  return {
+    id: crypto.randomUUID(),
+    date: new Date().toISOString(),
+    planejamento: plannerTask.planejamento || 'Planner',
+    meta: plannerTask.metaNumber ? String(plannerTask.metaNumber) : '',
+    tarefa: String(plannerTask.number),
+    assunto: plannerTask.description,
+    discipline: plannerTask.discipline,
+    bank,
+    blocks: [
+      {
+        id: crypto.randomUUID(),
+        title,
+        lesson: sourceNames.length > 0 ? `${plannerTask.description} · ${sourceNames.join(', ')}` : plannerTask.description,
+        pages: matchedQuestions.length > 0 ? `${matchedQuestions.length} questões do banco` : '',
+        bank,
+        questions: matchedQuestions,
+        showStats: matchedQuestions.length > 0,
+        showGabarito: false,
+        layout: {
+          columns: 1,
+          rows: Math.min(Math.max(matchedQuestions.length || 1, 1), 8),
+          type: 'grid',
+          width: 12,
+          rowSpan: matchedQuestions.length > 0 ? 4 : undefined,
+        },
+      },
+    ],
+    status: 'in_progress',
+  };
+};
+
+export const PlannerArea: React.FC<PlannerAreaProps> = ({
+  studyTasks,
+  onOpenStudyTask,
+  onCreateStudyTask,
+  showToast,
+}) => {
+  const [plannerTasks, setPlannerTasks] = useState<PlannerTask[]>(loadStoredTasks);
+  const [metaSummary, setMetaSummary] = useState<PlannerMetaSummary | null>(loadStoredMeta);
+  const [metaHistory, setMetaHistory] = useState<PlannerMetaHistoryEntry[]>(loadStoredHistory);
+  const [importText, setImportText] = useState('');
+  const [activeSection, setActiveSection] = useState<PlannerSection>('meta');
+  const [view, setView] = useState<PlannerView>('month');
+  const [monthDate, setMonthDate] = useState(() => new Date());
+  const [weekDate, setWeekDate] = useState(() => new Date());
+  const [disciplineFilter, setDisciplineFilter] = useState('');
+  const [hideDone, setHideDone] = useState(true);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [maxTasksPerDay, setMaxTasksPerDay] = useState(4);
+  const [maxHoursPerDay, setMaxHoursPerDay] = useState(4);
+  const [draftWeeklyHours, setDraftWeeklyHours] = useState(18);
+  const [draftMaxTasks, setDraftMaxTasks] = useState(18);
+  const [draftTaskEdits, setDraftTaskEdits] = useState<Record<string, DraftTaskEdit>>({});
+  const [removedDraftKeys, setRemovedDraftKeys] = useState<string[]>([]);
+  const [startTime, setStartTime] = useState('08:00');
+  const [isReadingPdf, setIsReadingPdf] = useState(false);
+  const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(TASKS_KEY, JSON.stringify(plannerTasks));
+  }, [plannerTasks]);
+
+  useEffect(() => {
+    if (metaSummary) {
+      localStorage.setItem(META_KEY, JSON.stringify(metaSummary));
+    } else {
+      localStorage.removeItem(META_KEY);
+    }
+  }, [metaSummary]);
+
+  useEffect(() => {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(metaHistory));
+  }, [metaHistory]);
+
+  useEffect(() => {
+    if (metaSummary && plannerTasks.length > 0 && metaHistory.length === 0) {
+      setMetaHistory([buildHistoryEntry(metaSummary, plannerTasks)]);
+    }
+  }, [metaSummary, plannerTasks, metaHistory.length]);
+
+  useEffect(() => {
+    if (activeSection === 'maps') {
+      setQuestionBankItems(loadStoredQuestionBank());
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (selectedTaskId && !plannerTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(null);
+    }
+  }, [plannerTasks, selectedTaskId]);
+
+  const activePlannerTasks = useMemo(
+    () => plannerTasks.filter((task) => task.status !== 'archived'),
+    [plannerTasks]
+  );
+  const selectedTask = useMemo(
+    () => plannerTasks.find((task) => task.id === selectedTaskId) || null,
+    [plannerTasks, selectedTaskId]
+  );
+
+  const filteredTasks = useMemo(
+    () => activePlannerTasks.filter((task) => taskMatchesFilter(task, disciplineFilter, hideDone)),
+    [activePlannerTasks, disciplineFilter, hideDone]
+  );
+
+  const disciplines = useMemo(
+    () => Array.from(new Set(activePlannerTasks.map((task) => task.discipline))).sort(),
+    [activePlannerTasks]
+  );
+
+  const unscheduledTasks = useMemo(
+    () =>
+      filteredTasks
+        .filter((task) => !task.scheduledDate && (task.status === 'pending' || task.status === 'started'))
+        .sort((a, b) => b.relevance - a.relevance || a.number - b.number),
+    [filteredTasks]
+  );
+
+  const groupedByDate = useMemo(() => groupTasksByDate(filteredTasks), [filteredTasks]);
+  const monthDays = useMemo(() => buildMonthGrid(monthDate), [monthDate]);
+  const weekDays = useMemo(() => buildWeekDays(weekDate), [weekDate]);
+  const weekStartLabel = useMemo(() => {
+    const [year, month, day] = weekDays[0].date.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  }, [weekDays]);
+
+  const stats = useMemo(() => {
+    const total = activePlannerTasks.length;
+    const completed = activePlannerTasks.filter((task) => task.status === 'completed').length;
+    const scheduled = activePlannerTasks.filter((task) => task.scheduledDate).length;
+    const pending = activePlannerTasks.filter((task) => task.status === 'pending').length;
+    const archived = plannerTasks.filter((task) => task.status === 'archived').length;
+    const totalMinutes = activePlannerTasks.reduce((sum, task) => sum + task.durationMinutes, 0);
+    const scheduledMinutes = activePlannerTasks.filter((task) => task.scheduledDate).reduce((sum, task) => sum + task.durationMinutes, 0);
+    return { total, completed, scheduled, pending, archived, totalMinutes, scheduledMinutes };
+  }, [activePlannerTasks, plannerTasks]);
+
+  const tasksByDiscipline = useMemo(() => {
+    return disciplines.map((discipline) => {
+      const tasks = activePlannerTasks
+        .filter((task) => task.discipline === discipline)
+        .sort((a, b) => a.number - b.number);
+      return {
+        discipline,
+        tasks,
+        total: tasks.length,
+        pending: tasks.filter((task) => task.status === 'pending').length,
+        completed: tasks.filter((task) => task.status === 'completed').length,
+        relevance: Math.round(tasks.reduce((sum, task) => sum + task.relevance, 0) / Math.max(1, tasks.length)),
+        minutes: tasks.reduce((sum, task) => sum + task.durationMinutes, 0),
+      };
+    });
+  }, [disciplines, activePlannerTasks]);
+
+  const visibleListTasks = useMemo(() => {
+    if (activeSection === 'pending') {
+      return activePlannerTasks.filter((task) => task.status === 'pending' || task.status === 'started').sort((a, b) => a.number - b.number);
+    }
+    if (activeSection === 'ignored') {
+      return activePlannerTasks.filter((task) => task.status === 'ignored').sort((a, b) => a.number - b.number);
+    }
+    if (activeSection === 'archived') {
+      return plannerTasks.filter((task) => task.status === 'archived').sort((a, b) => a.number - b.number);
+    }
+    return [...activePlannerTasks].sort((a, b) => a.number - b.number);
+  }, [activeSection, activePlannerTasks, plannerTasks]);
+
+  const plannerInsights = useMemo(
+    () => buildPlannerInsights(activePlannerTasks, metaHistory, metaSummary?.id),
+    [activePlannerTasks, metaHistory, metaSummary?.id]
+  );
+
+  const baseNextMetaDraft = useMemo(
+    () => generateNextMetaDraft(activePlannerTasks, metaHistory, {
+      weeklyHours: draftWeeklyHours,
+      maxTasks: draftMaxTasks,
+      currentMetaId: metaSummary?.id,
+    }),
+    [activePlannerTasks, metaHistory, draftWeeklyHours, draftMaxTasks, metaSummary?.id]
+  );
+
+  const baseDraftSignature = useMemo(
+    () => baseNextMetaDraft.tasks.map((task) => plannerDraftTaskKey(task)).join('|'),
+    [baseNextMetaDraft.tasks]
+  );
+
+  useEffect(() => {
+    setDraftTaskEdits({});
+    setRemovedDraftKeys([]);
+  }, [baseDraftSignature]);
+
+  const draftItems = useMemo<DraftTaskItem[]>(() => {
+    return baseNextMetaDraft.tasks
+      .map((task) => {
+        const key = plannerDraftTaskKey(task);
+        const edit = draftTaskEdits[key] || {};
+        return {
+          key,
+          task: {
+            ...task,
+            ...edit,
+            description: edit.description ?? task.description,
+            durationMinutes: edit.durationMinutes ?? task.durationMinutes,
+            relevance: edit.relevance ?? task.relevance,
+          },
+        };
+      })
+      .filter((item) => !removedDraftKeys.includes(item.key));
+  }, [baseNextMetaDraft.tasks, draftTaskEdits, removedDraftKeys]);
+
+  const nextMetaDraft = useMemo(
+    () => summarizeDraftTasks(draftItems.map((item) => item.task), baseNextMetaDraft.warnings),
+    [draftItems, baseNextMetaDraft.warnings]
+  );
+
+  const hasDraftCustomizations = Object.keys(draftTaskEdits).length > 0 || removedDraftKeys.length > 0;
+
+  const importMetaText = (text: string, source: 'ls-meta-text' | 'ls-meta-pdf') => {
+    const weekSchedule = parseWeekScheduleImport(text);
+    if (weekSchedule) {
+      setImportText('');
+      applyWeekSchedule(weekSchedule);
+      return;
+    }
+
+    const studyPackage = parseStudyImportPackage(text);
+    if (studyPackage) {
+      const nextTasks = metaSummary?.id === studyPackage.meta.id
+        ? mergePlannerTasks(plannerTasks, studyPackage.tasks)
+        : studyPackage.tasks;
+      const mergedBank = mergeQuestionBankItems(loadStoredQuestionBank(), studyPackage.questionBankItems);
+
+      setPlannerTasks(nextTasks);
+      setMetaSummary(studyPackage.meta);
+      setMetaHistory((current) => upsertHistoryEntry(current, buildHistoryEntry(studyPackage.meta, nextTasks)));
+      persistQuestionBank(mergedBank.items);
+      setQuestionBankItems(mergedBank.items);
+      setImportText('');
+      showToast(`${nextTasks.length} tarefas; ${mergedBank.added} questões novas; ${mergedBank.duplicates} já existiam.`);
+      return;
+    }
+
+    const parsed = parseLsMetaText(text, source);
+    if (parsed.tasks.length === 0) {
+      showToast('Nenhuma tarefa da Meta Atual foi identificada.');
+      return;
+    }
+
+    setPlannerTasks((current) => (
+      metaSummary?.id === parsed.meta.id ? mergePlannerTasks(current, parsed.tasks) : parsed.tasks
+    ));
+    setMetaSummary(parsed.meta);
+    setMetaHistory((current) => upsertHistoryEntry(current, buildHistoryEntry(parsed.meta, parsed.tasks)));
+    setImportText('');
+    showToast(`${parsed.tasks.length} tarefas importadas para o planner.`);
+  };
+
+  const applyWeekSchedule = (weekSchedule: WeekScheduleImport) => {
+    const scheduleByNumber = new Map(weekSchedule.entries.map((entry) => [entry.number, entry]));
+    const nextTasks = plannerTasks.map((task) => {
+      const entry = scheduleByNumber.get(task.number);
+      const matchesMeta = !weekSchedule.metaNumber || task.metaNumber === weekSchedule.metaNumber;
+      if (!entry || !matchesMeta) return task;
+
+      return {
+        ...task,
+        scheduledDate: entry.date,
+        startTime: entry.startTime,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    const applied = nextTasks.filter((task, index) =>
+      task.scheduledDate !== plannerTasks[index]?.scheduledDate ||
+      task.startTime !== plannerTasks[index]?.startTime
+    ).length;
+
+    setPlannerTasks(nextTasks);
+    if (metaSummary) {
+      setMetaHistory((current) => upsertHistoryEntry(current, buildHistoryEntry(metaSummary, nextTasks)));
+    }
+    if (weekSchedule.startDate) {
+      const scheduleDate = new Date(`${weekSchedule.startDate}T00:00:00`);
+      setMonthDate(scheduleDate);
+      setWeekDate(scheduleDate);
+    }
+    setView('week');
+    setActiveSection('calendar');
+    showToast(`${applied} tarefa(s) agendada(s) na semana.`);
+  };
+
+  const restoreHistoryEntry = (entry: PlannerMetaHistoryEntry) => {
+    setMetaSummary(entry.meta);
+    setPlannerTasks(entry.tasks);
+    setActiveSection('meta');
+    showToast(`${entry.meta.title} restaurada.`);
+  };
+
+  const handlePdfImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsReadingPdf(true);
+    try {
+      const extracted = await extractPdfText(file);
+      importMetaText(extracted.text, 'ls-meta-pdf');
+    } catch (error) {
+      console.error('[Diário LS] Planner PDF import failed', error);
+      showToast('Erro ao ler PDF da meta.');
+    } finally {
+      setIsReadingPdf(false);
+      event.target.value = '';
+    }
+  };
+
+  const updatePlannerTask = (taskId: string, updates: Partial<PlannerTask>) => {
+    setPlannerTasks((current) =>
+      current.map((task) =>
+        task.id === taskId ? { ...task, ...updates, updatedAt: new Date().toISOString() } : task
+      )
+    );
+  };
+
+  const scheduleTask = (taskId: string, date: string, time?: string) => {
+    updatePlannerTask(taskId, {
+      scheduledDate: date,
+      startTime: time,
+    });
+  };
+
+  const clearSchedule = (taskId: string) => {
+    updatePlannerTask(taskId, {
+      scheduledDate: undefined,
+      startTime: undefined,
+    });
+  };
+
+  const archivePlannerTask = (taskId: string) => {
+    updatePlannerTask(taskId, {
+      status: 'archived',
+      scheduledDate: undefined,
+      startTime: undefined,
+    });
+  };
+
+  const restorePlannerTask = (taskId: string) => {
+    updatePlannerTask(taskId, {
+      status: 'pending',
+    });
+  };
+
+  const autoOrganize = () => {
+    setPlannerTasks((current) =>
+      autoSchedulePlannerTasks(current, {
+        maxTasksPerDay,
+        maxMinutesPerDay: maxHoursPerDay * 60,
+        startTime,
+        availableWeekdays: [1, 2, 3, 4, 5, 6],
+        monthDate,
+        startDate: new Date(),
+      })
+    );
+    setActiveSection('calendar');
+    showToast('Planner auto-organizado.');
+  };
+
+  const createOrOpenStudyTask = (task: PlannerTask) => {
+    if (task.linkedStudyTaskId && studyTasks.some((studyTask) => studyTask.id === task.linkedStudyTaskId)) {
+      onOpenStudyTask(task.linkedStudyTaskId);
+      return;
+    }
+
+    const matches = matchQuestionBankItemsToPlannerTask(task, loadStoredQuestionBank());
+    const studyTask = buildStudyTaskFromPlanner(task, matches);
+    onCreateStudyTask(studyTask);
+    updatePlannerTask(task.id, { linkedStudyTaskId: studyTask.id });
+    if (matches.length > 0) {
+      showToast(`${matches.length} questão(ões) do banco vinculadas à tarefa.`);
+    }
+  };
+
+  const updateDraftTask = (key: string, updates: DraftTaskEdit) => {
+    setDraftTaskEdits((current) => ({
+      ...current,
+      [key]: {
+        ...(current[key] || {}),
+        ...updates,
+      },
+    }));
+  };
+
+  const removeDraftTask = (key: string) => {
+    setRemovedDraftKeys((current) => current.includes(key) ? current : [...current, key]);
+  };
+
+  const resetDraftCustomizations = () => {
+    setDraftTaskEdits({});
+    setRemovedDraftKeys([]);
+    showToast('Rascunho restaurado.');
+  };
+
+  const applyGeneratedDraft = () => {
+    if (nextMetaDraft.tasks.length === 0) {
+      showToast('Sem sugestões para enviar ao planner.');
+      return;
+    }
+
+    const generated = materializeDraftTasks(nextMetaDraft.tasks, {
+      planejamento: 'Planner Gerado',
+      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
+    });
+    const now = new Date().toISOString();
+    const metaNumber = metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined;
+    const generatedMeta: PlannerMetaSummary = {
+      id: `generated_meta_${Date.now()}`,
+      title: metaNumber ? `Rascunho Meta (#${metaNumber})` : 'Rascunho da Próxima Meta',
+      planejamento: 'Planner Gerado',
+      metaNumber,
+      totalTasks: generated.length,
+      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
+      completedPercent: 0,
+      completedTasks: 0,
+      pendingTasks: generated.length,
+      ignoredTasks: 0,
+      startedTasks: 0,
+      importedAt: now,
+    };
+
+    setPlannerTasks(generated);
+    setMetaSummary(generatedMeta);
+    setMetaHistory((current) => {
+      const withCurrentMeta = metaSummary && plannerTasks.length > 0
+        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
+        : current;
+
+      return upsertHistoryEntry(
+        withCurrentMeta,
+        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
+      );
+    });
+    setActiveSection('calendar');
+    showToast(`${generated.length} sugestões viraram a meta gerada.`);
+  };
+
+  const onDropTask = (date: string, time?: string) => {
+    if (!draggingTaskId) return;
+    scheduleTask(draggingTaskId, date, time);
+    setDraggingTaskId(null);
+  };
+
+  const renderTaskCard = (task: PlannerTask, compact = false) => (
+    <div
+      key={task.id}
+      role="button"
+      tabIndex={0}
+      draggable
+      onClick={() => setSelectedTaskId(task.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          setSelectedTaskId(task.id);
+        }
+      }}
+      onDragStart={() => setDraggingTaskId(task.id)}
+      onDragEnd={() => setDraggingTaskId(null)}
+      className={`group rounded-lg border p-2 text-left shadow-sm transition-all hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-purple-500/60 ${
+        draggingTaskId === task.id ? 'cursor-grabbing' : 'cursor-pointer'
+      } ${statusClass[task.status]} ${
+        compact ? 'space-y-1' : 'space-y-2'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-widest text-white/60">
+            {task.number} - {task.discipline}
+          </p>
+          <p className={`${compact ? 'text-xs line-clamp-1' : 'text-sm line-clamp-2'} font-bold text-white`}>
+            {task.description}
+          </p>
+        </div>
+        <GripVertical className="w-4 h-4 flex-shrink-0 text-white/30" />
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-black uppercase tracking-widest">
+        <span className="rounded bg-black/20 px-2 py-0.5 text-white/70">Rel {task.relevance}</span>
+        <span className="rounded bg-black/20 px-2 py-0.5 text-white/70">{formatMinutes(task.durationMinutes)}</span>
+        {task.startTime && <span className="rounded bg-black/20 px-2 py-0.5 text-white/70">{task.startTime}</span>}
+      </div>
+      {!compact && (
+        <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+          <span className="text-[10px] font-bold text-white/50">{statusLabel[task.status]}</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                createOrOpenStudyTask(task);
+              }}
+              className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
+            >
+              Executar
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                archivePlannerTask(task.id);
+              }}
+              className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
+            >
+              Arquivar
+            </button>
+            {task.scheduledDate && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearSchedule(task.id);
+                }}
+                className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
+              >
+                Soltar
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderMonthTaskItem = (task: PlannerTask) => (
+    <button
+      key={task.id}
+      type="button"
+      draggable
+      onClick={() => setSelectedTaskId(task.id)}
+      onDragStart={() => setDraggingTaskId(task.id)}
+      onDragEnd={() => setDraggingTaskId(null)}
+      className={`w-full rounded border px-2 py-1.5 text-left text-[11px] shadow-sm transition hover:border-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500/60 ${statusClass[task.status]}`}
+      title={`${task.number} - ${task.discipline}: ${task.description}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate font-black text-white">
+          {task.startTime ? `${task.startTime} · ` : ''}{task.number} - {task.discipline}
+        </span>
+        <span className="shrink-0 rounded bg-black/20 px-1.5 py-0.5 text-[9px] font-black text-white/70">
+          {formatMinutes(task.durationMinutes)}
+        </span>
+      </div>
+      <p className="mt-0.5 line-clamp-2 font-bold leading-snug text-white/85">{task.description}</p>
+    </button>
+  );
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-purple-400">Metas de Estudo</p>
+          <h1 className="text-3xl font-black text-white">Planner</h1>
+          <p className="mt-1 max-w-2xl text-sm text-gray-400">
+            Meta atual, backlog e calendário no mesmo fluxo: importe a meta, distribua no mês e refine a semana por horário.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={autoOrganize}
+            disabled={plannerTasks.length === 0}
+            className="flex items-center gap-2 rounded bg-[#84cc16] px-4 py-3 text-sm font-black text-black shadow-lg shadow-black/20 transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Sparkles className="w-4 h-4" /> Auto-organizar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPlannerTasks([]);
+              setMetaSummary(null);
+              showToast('Planner limpo.');
+            }}
+            className="flex items-center gap-2 rounded border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+          >
+            <RotateCcw className="w-4 h-4" /> Limpar
+          </button>
+        </div>
+      </header>
+
+      <section className="rounded-lg border border-[#404040] bg-[#262626] p-2">
+        <div className="flex gap-2 overflow-x-auto">
+          {SECTION_NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveSection(item.id)}
+                className={`flex min-w-max items-center gap-2 rounded px-3 py-2 text-xs font-black uppercase tracking-widest transition ${
+                  activeSection === item.id
+                    ? 'bg-purple-600 text-white shadow-lg shadow-black/20'
+                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {activeSection === 'meta' && (
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <div className="rounded-lg border border-[#404040] bg-[#262626] p-5 xl:col-span-3">
+          <div className="mb-4 flex items-center gap-2">
+            <LayoutDashboard className="h-5 w-5 text-[#84cc16]" />
+            <h2 className="text-lg font-black text-white">Meta Atual</h2>
+          </div>
+          {metaSummary ? (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-widest text-purple-400">
+                  {metaSummary.planejamento || 'Planejamento'}
+                </p>
+                <h3 className="text-2xl font-black text-white">{metaSummary.title}</h3>
+                <p className="text-xs font-bold text-gray-500">
+                  Iniciada: {metaSummary.startedAt || '-'} · Próxima: {metaSummary.nextMetaAt || '-'}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
+                <Metric icon={ClipboardList} label="Tarefas" value={`${metaSummary.totalTasks || stats.total}`} />
+                <Metric icon={CheckCircle2} label="Concluídas" value={`${metaSummary.completedTasks || stats.completed}`} />
+                <Metric icon={Target} label="Pendentes" value={`${metaSummary.pendingTasks || stats.pending}`} />
+                <Metric icon={Timer} label="Planejado" value={formatMinutes(stats.scheduledMinutes)} />
+                <Metric icon={Archive} label="Arquivadas" value={`${stats.archived}`} />
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-black/30">
+                <div
+                  className="h-full rounded-full bg-[#84cc16]"
+                  style={{ width: `${Math.min(100, metaSummary.completedPercent || (stats.total ? (stats.completed / stats.total) * 100 : 0))}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded border border-dashed border-white/10 bg-[#1a1a1a] p-5 text-sm text-gray-400">
+              Importe o texto ou PDF da Meta Atual da LS para preencher o resumo e o backlog.
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-[#404040] bg-[#262626] p-5 xl:col-span-2">
+          <div className="mb-4 flex items-center gap-2">
+            <FileUp className="h-5 w-5 text-purple-400" />
+            <h2 className="text-lg font-black text-white">Importar Meta</h2>
+          </div>
+          <textarea
+            value={importText}
+            onChange={(event) => setImportText(event.target.value)}
+            placeholder="Cole aqui a tabela da Meta Atual ou texto extraído da LS..."
+            className="h-32 w-full resize-none rounded border border-[#525252] bg-[#404040] p-3 text-sm text-white outline-none transition focus:border-purple-500"
+          />
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase text-gray-200 transition hover:bg-white/10">
+              {isReadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+              PDF
+              <input type="file" accept="application/pdf,.pdf" onChange={handlePdfImport} className="hidden" />
+            </label>
+            <button
+              type="button"
+              onClick={() => importMetaText(importText, 'ls-meta-text')}
+              disabled={!importText.trim()}
+              className="flex items-center gap-2 rounded bg-purple-600 px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Play className="h-4 w-4" /> Importar Texto
+            </button>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {activeSection === 'calendar' && (
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="space-y-4">
+          <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+            <div className="mb-4 flex items-center gap-2">
+              <ListChecks className="h-5 w-5 text-[#84cc16]" />
+              <h2 className="text-base font-black text-white">Backlog</h2>
+              <span className="ml-auto rounded bg-black/30 px-2 py-1 text-[10px] font-black text-gray-400">{unscheduledTasks.length}</span>
+            </div>
+            <div className="grid gap-3">
+              <select
+                value={disciplineFilter}
+                onChange={(event) => setDisciplineFilter(event.target.value)}
+                className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+              >
+                <option value="">Todas as disciplinas</option>
+                {disciplines.map((discipline) => (
+                  <option key={discipline} value={discipline}>{discipline}</option>
+                ))}
+              </select>
+              <label className="flex items-center gap-2 text-xs font-bold text-gray-400">
+                <input type="checkbox" checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />
+                Ocultar concluídas
+              </label>
+              <div className="grid min-w-0 grid-cols-2 gap-2">
+                <NumberField label="Tarefas/dia" value={maxTasksPerDay} onChange={setMaxTasksPerDay} />
+                <NumberField label="Horas/dia" value={maxHoursPerDay} onChange={setMaxHoursPerDay} />
+              </div>
+              <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                Início padrão
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(event) => setStartTime(event.target.value)}
+                  className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => {
+              if (draggingTaskId) clearSchedule(draggingTaskId);
+              setDraggingTaskId(null);
+            }}
+            className="max-h-[640px] space-y-3 overflow-y-auto rounded-lg border border-dashed border-white/10 bg-[#1a1a1a] p-3"
+          >
+            {unscheduledTasks.length > 0 ? (
+              unscheduledTasks.map((task) => renderTaskCard(task))
+            ) : (
+              <p className="p-4 text-center text-sm font-bold text-gray-500">Sem tarefas soltas.</p>
+            )}
+          </div>
+        </aside>
+
+        <main className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 rounded-xl bg-[#1a1a1a] p-1">
+              <button
+                type="button"
+                onClick={() => setView('month')}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-black uppercase tracking-widest transition ${
+                  view === 'month' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <CalendarDays className="h-4 w-4" /> Mês
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('week')}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-black uppercase tracking-widest transition ${
+                  view === 'week' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <CalendarRange className="h-4 w-4" /> Semana
+              </button>
+            </div>
+            {view === 'month' ? (
+              <CalendarNav
+                label={monthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                onPrev={() => setMonthDate((current) => shiftMonth(current, -1))}
+                onNext={() => setMonthDate((current) => shiftMonth(current, 1))}
+              />
+            ) : (
+              <CalendarNav
+                label={`Semana de ${weekStartLabel}`}
+                onPrev={() => setWeekDate((current) => shiftWeek(current, -1))}
+                onNext={() => setWeekDate((current) => shiftWeek(current, 1))}
+              />
+            )}
+          </div>
+
+          {view === 'month' ? (
+            <div className="grid grid-cols-7 gap-2">
+              {WEEKDAYS.map((day) => (
+                <div key={day} className="px-2 py-1 text-center text-[10px] font-black uppercase tracking-widest text-gray-500">{day}</div>
+              ))}
+              {monthDays.map((day) => {
+                const tasksForDay = groupedByDate[day.date] || [];
+                return (
+                  <div
+                    key={day.date}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => onDropTask(day.date)}
+                    className={`min-h-[190px] rounded-lg border p-2 transition ${
+                      day.isCurrentMonth ? 'border-white/10 bg-[#1a1a1a]' : 'border-white/5 bg-[#1a1a1a]/40 opacity-50'
+                    } ${day.isToday ? 'ring-2 ring-[#84cc16]/50' : ''}`}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className={`text-xs font-black ${day.isCurrentMonth ? 'text-white' : 'text-gray-600'}`}>{day.dayNumber}</span>
+                      {tasksForDay.length > 0 && (
+                        <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-black text-gray-400">
+                          {formatMinutes(tasksForDay.reduce((sum, task) => sum + task.durationMinutes, 0))}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {tasksForDay
+                        .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '') || a.number - b.number)
+                        .map((task) => renderMonthTaskItem(task))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <div className="min-w-[980px]">
+                <div className="grid grid-cols-[72px_repeat(7,minmax(120px,1fr))] gap-1">
+                  <div />
+                  {weekDays.map((day) => (
+                    <div key={day.date} className="rounded bg-[#1a1a1a] px-3 py-2 text-center">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-purple-400">{day.label}</p>
+                      <p className="text-lg font-black text-white">{day.dayNumber}</p>
+                    </div>
+                  ))}
+                  {HOUR_SLOTS.map((slot) => (
+                    <React.Fragment key={slot}>
+                      <div className="sticky left-0 z-10 flex h-24 items-start justify-end bg-[#262626] pr-2 pt-2 text-[11px] font-black text-gray-500">
+                        {slot}
+                      </div>
+                      {weekDays.map((day) => {
+                        const tasksForSlot = (groupedByDate[day.date] || []).filter((task) => (task.startTime || '').startsWith(slot.slice(0, 2)));
+                        return (
+                          <div
+                            key={`${day.date}-${slot}`}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={() => onDropTask(day.date, slot)}
+                            className="min-h-24 rounded border border-white/5 bg-[#1a1a1a] p-2 transition hover:border-purple-500/40"
+                          >
+                            <div className="space-y-2">
+                              {tasksForSlot.map((task) => renderTaskCard(task, true))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </section>
+      )}
+
+      {selectedTask && (
+        <PlannerTaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTaskId(null)}
+          onExecute={() => createOrOpenStudyTask(selectedTask)}
+          onClearSchedule={() => clearSchedule(selectedTask.id)}
+          onArchive={() => {
+            archivePlannerTask(selectedTask.id);
+            setSelectedTaskId(null);
+          }}
+        />
+      )}
+
+      {activeSection === 'insights' && (
+        <PlannerInsightsPanel insights={plannerInsights} />
+      )}
+
+      {activeSection === 'generator' && (
+        <PlannerGeneratorPanel
+          draft={nextMetaDraft}
+          draftItems={draftItems}
+          weeklyHours={draftWeeklyHours}
+          maxTasks={draftMaxTasks}
+          onWeeklyHoursChange={setDraftWeeklyHours}
+          onMaxTasksChange={setDraftMaxTasks}
+          onUpdateTask={updateDraftTask}
+          onRemoveTask={removeDraftTask}
+          onResetDraft={resetDraftCustomizations}
+          hasCustomDraft={hasDraftCustomizations}
+          onApply={applyGeneratedDraft}
+        />
+      )}
+
+      {activeSection === 'history' && (
+        <MetaHistoryPanel
+          history={metaHistory}
+          currentMetaId={metaSummary?.id}
+          onRestore={restoreHistoryEntry}
+        />
+      )}
+
+      {activeSection === 'maps' && (
+        <PlannerMapsPanel
+          tasks={activePlannerTasks}
+          history={metaHistory}
+          questionBankItems={questionBankItems}
+        />
+      )}
+
+      {activeSection === 'list' && (
+        <TaskTable
+          title="Lista de Tarefas"
+          icon={Table2}
+          tasks={visibleListTasks}
+          onExecute={createOrOpenStudyTask}
+          onClearSchedule={clearSchedule}
+          onArchive={archivePlannerTask}
+          onRestore={restorePlannerTask}
+        />
+      )}
+
+      {activeSection === 'discipline' && (
+        <section className="space-y-4">
+          {tasksByDiscipline.length > 0 ? (
+            tasksByDiscipline.map((group) => (
+              <div key={group.discipline} className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <Layers className="h-5 w-5 text-[#84cc16]" />
+                  <h2 className="text-lg font-black text-white">{group.discipline}</h2>
+                  <span className="rounded bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                    {group.total} tarefas
+                  </span>
+                  <span className="rounded bg-purple-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-300">
+                    Rel média {group.relevance}
+                  </span>
+                  <span className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[#84cc16]">
+                    {formatMinutes(group.minutes)}
+                  </span>
+                </div>
+                <TaskRows
+                  tasks={group.tasks}
+                  onExecute={createOrOpenStudyTask}
+                  onClearSchedule={clearSchedule}
+                  onArchive={archivePlannerTask}
+                  onRestore={restorePlannerTask}
+                />
+              </div>
+            ))
+          ) : (
+            <EmptyPanel icon={Layers} title="Nenhuma disciplina importada" />
+          )}
+        </section>
+      )}
+
+      {activeSection === 'pending' && (
+        <TaskTable
+          title="Tarefas Pendentes"
+          icon={Target}
+          tasks={visibleListTasks}
+          onExecute={createOrOpenStudyTask}
+          onClearSchedule={clearSchedule}
+          onArchive={archivePlannerTask}
+          onRestore={restorePlannerTask}
+        />
+      )}
+
+      {activeSection === 'ignored' && (
+        <TaskTable
+          title="Tarefas Ignoradas"
+          icon={Ban}
+          tasks={visibleListTasks}
+          onExecute={createOrOpenStudyTask}
+          onClearSchedule={clearSchedule}
+          onArchive={archivePlannerTask}
+          onRestore={restorePlannerTask}
+        />
+      )}
+
+      {activeSection === 'archived' && (
+        <TaskTable
+          title="Tarefas Arquivadas"
+          icon={Archive}
+          tasks={visibleListTasks}
+          onExecute={createOrOpenStudyTask}
+          onClearSchedule={clearSchedule}
+          onArchive={archivePlannerTask}
+          onRestore={restorePlannerTask}
+        />
+      )}
+    </div>
+  );
+};
+
+const Metric: React.FC<{ icon: React.ElementType; label: string; value: string }> = ({ icon: Icon, label, value }) => (
+  <div className="rounded border border-white/5 bg-[#1a1a1a] p-3">
+    <Icon className="mb-2 h-4 w-4 text-purple-400" />
+    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{label}</p>
+    <p className="text-xl font-black text-white">{value}</p>
+  </div>
+);
+
+const NumberField: React.FC<{ label: string; value: number; onChange: (value: number) => void }> = ({ label, value, onChange }) => (
+  <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+    {label}
+    <input
+      type="number"
+      min={1}
+      value={value}
+      onChange={(event) => onChange(Math.max(1, Number(event.target.value) || 1))}
+      className="min-w-0 rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+    />
+  </label>
+);
+
+const CalendarNav: React.FC<{ label: string; onPrev: () => void; onNext: () => void }> = ({ label, onPrev, onNext }) => (
+  <div className="flex items-center gap-2">
+    <button type="button" onClick={onPrev} title="Anterior" className="rounded bg-white/5 px-3 py-2 text-sm font-black text-white hover:bg-white/10">
+      <ChevronLeft className="h-4 w-4" />
+    </button>
+    <span className="min-w-48 text-center text-sm font-black uppercase tracking-widest text-white">{label}</span>
+    <button type="button" onClick={onNext} title="Próximo" className="rounded bg-white/5 px-3 py-2 text-sm font-black text-white hover:bg-white/10">
+      <ChevronRight className="h-4 w-4" />
+    </button>
+  </div>
+);
+
+const formatPlannerDate = (value: string | undefined) => {
+  if (!value) return '-';
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+};
+
+const PlannerTaskDetailModal: React.FC<{
+  task: PlannerTask;
+  onClose: () => void;
+  onExecute: () => void;
+  onClearSchedule: () => void;
+  onArchive: () => void;
+}> = ({ task, onClose, onExecute, onClearSchedule, onArchive }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="w-full max-w-2xl rounded-lg border border-[#525252] bg-[#262626] shadow-2xl">
+      <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-[0.25em] text-purple-400">
+            Tarefa {task.number} - {task.discipline}
+          </p>
+          <h2 className="mt-1 text-xl font-black text-white">{task.description}</h2>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase text-gray-200 transition hover:bg-white/10"
+        >
+          Fechar
+        </button>
+      </div>
+
+      <div className="space-y-4 p-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Metric icon={CalendarDays} label="Data" value={formatPlannerDate(task.scheduledDate)} />
+          <Metric icon={Timer} label="Horário" value={task.startTime || '-'} />
+          <Metric icon={ClockIcon} label="Duração" value={formatMinutes(task.durationMinutes)} />
+          <Metric icon={Target} label="Rel." value={`${task.relevance}`} />
+        </div>
+
+        <div className="rounded border border-white/10 bg-[#1a1a1a] p-4">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Descrição</p>
+          <p className="whitespace-pre-wrap text-sm font-bold leading-relaxed text-white">{task.description}</p>
+        </div>
+
+        {task.details && (
+          <div className="rounded border border-white/10 bg-[#1a1a1a] p-4">
+            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Atividades e instruções</p>
+            <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-200">
+              {task.details}
+            </p>
+          </div>
+        )}
+
+        {task.tips && (
+          <div className="rounded border border-purple-400/20 bg-purple-500/5 p-4">
+            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-purple-200">Dicas e Bizus</p>
+            <p className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-100">
+              {task.tips}
+            </p>
+          </div>
+        )}
+
+        <div className="grid gap-2 rounded border border-white/10 bg-[#1a1a1a] p-4 text-sm text-gray-300 md:grid-cols-2">
+          <p><span className="font-black text-gray-500">Status:</span> {statusLabel[task.status]}</p>
+          <p><span className="font-black text-gray-500">Formato:</span> {task.format || '-'}</p>
+          <p><span className="font-black text-gray-500">Planejamento:</span> {task.planejamento || '-'}</p>
+          <p><span className="font-black text-gray-500">Meta:</span> {task.metaNumber || '-'}</p>
+          <p><span className="font-black text-gray-500">Desempenho:</span> {task.performance === null ? '-' : `${task.performance}%`}</p>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          {task.scheduledDate && (
+            <button
+              type="button"
+              onClick={onClearSchedule}
+              className="rounded border border-red-400/20 bg-red-500/10 px-4 py-2 text-xs font-black uppercase text-red-300 transition hover:bg-red-500/20"
+            >
+              Soltar
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onArchive}
+            className="rounded border border-yellow-400/20 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-300 transition hover:bg-yellow-400/20"
+          >
+            Arquivar
+          </button>
+          <button
+            type="button"
+            onClick={onExecute}
+            className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d]"
+          >
+            Executar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const TaskTable: React.FC<{
+  title: string;
+  icon: React.ElementType;
+  tasks: PlannerTask[];
+  onExecute: (task: PlannerTask) => void;
+  onClearSchedule: (taskId: string) => void;
+  onArchive: (taskId: string) => void;
+  onRestore: (taskId: string) => void;
+}> = ({ title, icon: Icon, tasks, onExecute, onClearSchedule, onArchive, onRestore }) => (
+  <section className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+    <div className="mb-4 flex items-center gap-2">
+      <Icon className="h-5 w-5 text-[#84cc16]" />
+      <h2 className="text-lg font-black text-white">{title}</h2>
+      <span className="ml-auto rounded bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">
+        {tasks.length}
+      </span>
+    </div>
+    {tasks.length > 0 ? (
+      <TaskRows
+        tasks={tasks}
+        onExecute={onExecute}
+        onClearSchedule={onClearSchedule}
+        onArchive={onArchive}
+        onRestore={onRestore}
+      />
+    ) : (
+      <EmptyPanel icon={Icon} title="Nenhuma tarefa nesta visão" />
+    )}
+  </section>
+);
+
+const TaskRows: React.FC<{
+  tasks: PlannerTask[];
+  onExecute: (task: PlannerTask) => void;
+  onClearSchedule: (taskId: string) => void;
+  onArchive: (taskId: string) => void;
+  onRestore: (taskId: string) => void;
+}> = ({ tasks, onExecute, onClearSchedule, onArchive, onRestore }) => (
+  <div className="overflow-x-auto">
+    <table className="w-full min-w-[880px] border-collapse text-left">
+      <thead>
+        <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+          <th className="px-3 py-3">Nº</th>
+          <th className="px-3 py-3">Disciplina</th>
+          <th className="px-3 py-3">Formato</th>
+          <th className="px-3 py-3">Descrição</th>
+          <th className="px-3 py-3">Tempo</th>
+          <th className="px-3 py-3">Desemp.</th>
+          <th className="px-3 py-3">Status</th>
+          <th className="px-3 py-3">Rel.</th>
+          <th className="px-3 py-3">Agenda</th>
+          <th className="px-3 py-3 text-right">Ação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {tasks.map((task) => (
+          <tr key={task.id} className="border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03]">
+            <td className="px-3 py-3 font-black text-white">{task.number}</td>
+            <td className="px-3 py-3 font-bold text-white">{task.discipline}</td>
+            <td className="px-3 py-3 text-gray-400">{task.format}</td>
+            <td className="max-w-sm px-3 py-3 text-gray-300">
+              <span className="line-clamp-2">{task.description}</span>
+            </td>
+            <td className="px-3 py-3 font-bold text-gray-300">{formatMinutes(task.durationMinutes)}</td>
+            <td className="px-3 py-3 font-bold text-gray-300">{task.performance ?? 0}%</td>
+            <td className="px-3 py-3">
+              <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${statusClass[task.status]}`}>
+                {statusLabel[task.status]}
+              </span>
+            </td>
+            <td className="px-3 py-3 font-black text-purple-300">{task.relevance}</td>
+            <td className="px-3 py-3 text-xs font-bold text-gray-400">
+              {task.scheduledDate ? `${task.scheduledDate}${task.startTime ? ` ${task.startTime}` : ''}` : '-'}
+            </td>
+            <td className="px-3 py-3">
+              <div className="flex justify-end gap-2">
+                {task.scheduledDate && task.status !== 'archived' && (
+                  <button
+                    type="button"
+                    onClick={() => onClearSchedule(task.id)}
+                    className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
+                  >
+                    Soltar
+                  </button>
+                )}
+                {task.status === 'archived' ? (
+                  <button
+                    type="button"
+                    onClick={() => onRestore(task.id)}
+                    className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20"
+                  >
+                    Restaurar
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onArchive(task.id)}
+                      className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
+                    >
+                      Arquivar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onExecute(task)}
+                      className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
+                    >
+                      Executar
+                    </button>
+                  </>
+                )}
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+const EmptyPanel: React.FC<{ icon: React.ElementType; title: string }> = ({ icon: Icon, title }) => (
+  <div className="rounded border border-dashed border-white/10 bg-[#1a1a1a] p-8 text-center">
+    <Icon className="mx-auto mb-3 h-6 w-6 text-gray-600" />
+    <p className="text-sm font-bold text-gray-500">{title}</p>
+  </div>
+);
+
+type MapRisk = 'high' | 'medium' | 'low';
+
+const mapRiskLabel: Record<MapRisk, string> = {
+  high: 'Crítico',
+  medium: 'Atenção',
+  low: 'Coberto',
+};
+
+const mapRiskClass: Record<MapRisk, string> = {
+  high: 'border-red-400/20 bg-red-400/10 text-red-300',
+  medium: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
+  low: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+};
+
+const PlannerMapsPanel: React.FC<{
+  tasks: PlannerTask[];
+  history: PlannerMetaHistoryEntry[];
+  questionBankItems: QuestionBankItem[];
+}> = ({ tasks, history, questionBankItems }) => {
+  const rows = useMemo(() => {
+    const disciplineNames = Array.from(new Set([
+      ...tasks.map((task) => task.discipline),
+      ...questionBankItems.map((item) => item.discipline),
+      ...history.flatMap((entry) => entry.tasks.map((task) => task.discipline)),
+    ])).sort();
+
+    return disciplineNames.map((discipline) => {
+      const taskItems = tasks.filter((task) => task.discipline === discipline);
+      const bankItems = questionBankItems.filter((item) => item.discipline === discipline);
+      const pending = taskItems.filter((task) => task.status === 'pending' || task.status === 'started').length;
+      const highRelevancePending = taskItems.filter((task) =>
+        (task.status === 'pending' || task.status === 'started') && task.relevance >= 9
+      ).length;
+      const scheduled = taskItems.filter((task) => task.scheduledDate).length;
+      const minutes = taskItems.reduce((sum, task) => sum + task.durationMinutes, 0);
+      const avgRelevance = averageRelevance(taskItems);
+      const historyAppearances = history.filter((entry) =>
+        entry.tasks.some((task) => task.discipline === discipline)
+      ).length;
+      const scheduleCoverage = taskItems.length ? scheduled / taskItems.length : 0;
+      const coverageScore = Math.min(100, Math.round(
+        (taskItems.length > 0 ? 25 : 0) +
+        (scheduleCoverage * 25) +
+        (bankItems.length > 0 ? 30 : 0) +
+        (highRelevancePending === 0 ? 20 : 8)
+      ));
+      const risk: MapRisk = highRelevancePending > 0 && bankItems.length === 0
+        ? 'high'
+        : pending > 0 || bankItems.length === 0
+          ? 'medium'
+          : 'low';
+      const recommendation = risk === 'high'
+        ? 'Importar PDF de questões antes de executar.'
+        : risk === 'medium'
+          ? 'Executar pendências e completar banco se houver PDF.'
+          : 'Pronta para execução/revisão.';
+
+      return {
+        discipline,
+        tasks: taskItems.length,
+        pending,
+        highRelevancePending,
+        scheduled,
+        minutes,
+        averageRelevance: avgRelevance,
+        bankQuestions: bankItems.length,
+        historyAppearances,
+        coverageScore,
+        risk,
+        recommendation,
+      };
+    }).sort((a, b) => {
+      const riskRank: Record<MapRisk, number> = { high: 0, medium: 1, low: 2 };
+      return riskRank[a.risk] - riskRank[b.risk] || b.highRelevancePending - a.highRelevancePending || b.pending - a.pending;
+    });
+  }, [tasks, history, questionBankItems]);
+
+  const highRisk = rows.filter((row) => row.risk === 'high').length;
+  const missingQuestions = rows.filter((row) => row.tasks > 0 && row.bankQuestions === 0).length;
+  const totalBankQuestions = questionBankItems.length;
+  const coveredDisciplines = rows.filter((row) => row.risk === 'low').length;
+
+  return (
+    <section className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric icon={MapIcon} label="Disciplinas" value={`${rows.length}`} />
+        <Metric icon={AlertTriangle} label="Críticas" value={`${highRisk}`} />
+        <Metric icon={DatabaseIcon} label="Sem Banco" value={`${missingQuestions}`} />
+        <Metric icon={CheckCircle2} label="Cobertas" value={`${coveredDisciplines}`} />
+      </div>
+
+      <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <MapIcon className="h-5 w-5 text-[#84cc16]" />
+          <h2 className="text-lg font-black text-white">Mapas de Cobertura</h2>
+          <span className="ml-auto rounded bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">
+            {totalBankQuestions} questões no banco
+          </span>
+        </div>
+
+        {rows.length > 0 ? (
+          <div className="grid gap-3">
+            {rows.map((row) => (
+              <article key={row.discipline} className="rounded border border-white/5 bg-[#1a1a1a] p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <h3 className="mr-auto text-sm font-black text-white">{row.discipline}</h3>
+                  <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${mapRiskClass[row.risk]}`}>
+                    {mapRiskLabel[row.risk]}
+                  </span>
+                  <span className="rounded bg-purple-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-200">
+                    Rel {row.averageRelevance || '-'}
+                  </span>
+                </div>
+
+                <div className="mb-3 h-2 overflow-hidden rounded-full bg-black/30">
+                  <div
+                    className={`h-full rounded-full ${row.risk === 'high' ? 'bg-red-400' : row.risk === 'medium' ? 'bg-yellow-400' : 'bg-[#84cc16]'}`}
+                    style={{ width: `${row.coverageScore}%` }}
+                  />
+                </div>
+
+                <div className="grid gap-2 text-[11px] font-black uppercase tracking-widest text-gray-400 sm:grid-cols-2 lg:grid-cols-6">
+                  <span className="rounded bg-white/5 px-2 py-1">{row.tasks} tarefa(s)</span>
+                  <span className="rounded bg-white/5 px-2 py-1">{row.pending} pendente(s)</span>
+                  <span className="rounded bg-white/5 px-2 py-1">{row.highRelevancePending} rel alta</span>
+                  <span className="rounded bg-white/5 px-2 py-1">{row.scheduled} agendada(s)</span>
+                  <span className="rounded bg-white/5 px-2 py-1">{formatMinutes(row.minutes)}</span>
+                  <span className="rounded bg-white/5 px-2 py-1">{row.bankQuestions} questão(ões)</span>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-gray-500">
+                  <span>{row.historyAppearances} aparição(ões) no histórico</span>
+                  <span className="text-gray-700">·</span>
+                  <span>{row.recommendation}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyPanel icon={MapIcon} title="Importe metas ou questões para gerar mapas" />
+        )}
+      </div>
+    </section>
+  );
+};
+
+const MetaHistoryPanel: React.FC<{
+  history: PlannerMetaHistoryEntry[];
+  currentMetaId?: string;
+  onRestore: (entry: PlannerMetaHistoryEntry) => void;
+}> = ({ history, currentMetaId, onRestore }) => {
+  const latest = history[0];
+  const previous = history[1];
+  const latestGenerated = history.find((entry) => getHistoryOrigin(entry) === 'generated');
+  const relatedOriginal = latestGenerated
+    ? (latestGenerated.relatedMetaId ? history.find((entry) => entry.id === latestGenerated.relatedMetaId) : undefined)
+      || history.find((entry) => getHistoryOrigin(entry) === 'ls')
+    : undefined;
+  const comparison = latestGenerated && relatedOriginal ? {
+    generatedTasks: latestGenerated.meta.totalTasks || latestGenerated.tasks.length,
+    originalTasks: relatedOriginal.meta.totalTasks || relatedOriginal.tasks.length,
+    generatedMinutes: sumTaskMinutes(latestGenerated.tasks),
+    originalMinutes: sumTaskMinutes(relatedOriginal.tasks),
+    generatedDisciplines: latestGenerated.meta.totalDisciplines || countTaskDisciplines(latestGenerated.tasks),
+    originalDisciplines: relatedOriginal.meta.totalDisciplines || countTaskDisciplines(relatedOriginal.tasks),
+    generatedRelevance: averageRelevance(latestGenerated.tasks),
+    originalRelevance: averageRelevance(relatedOriginal.tasks),
+    generatedTitle: latestGenerated.meta.title,
+    originalTitle: relatedOriginal.meta.title,
+  } : null;
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+        <div className="mb-4 flex items-center gap-2">
+          <History className="h-5 w-5 text-[#84cc16]" />
+          <h2 className="text-lg font-black text-white">Histórico de Metas</h2>
+          <span className="ml-auto rounded bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">
+            {history.length}
+          </span>
+        </div>
+
+        {comparison && (
+          <div className="mb-4 rounded-lg border border-[#84cc16]/20 bg-[#84cc16]/5 p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Sparkles className="h-5 w-5 text-[#84cc16]" />
+              <h3 className="text-sm font-black uppercase tracking-widest text-white">LS x Meta Gerada</h3>
+              <span className="rounded bg-purple-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-200">
+                LS: {comparison.originalTitle}
+              </span>
+              <span className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[#84cc16]">
+                Gerada: {comparison.generatedTitle}
+              </span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <ComparisonMetric
+                label="Tarefas"
+                value={`${comparison.generatedTasks}`}
+                baseline={`${comparison.originalTasks}`}
+                delta={formatSignedNumber(comparison.generatedTasks - comparison.originalTasks)}
+              />
+              <ComparisonMetric
+                label="Carga"
+                value={formatMinutes(comparison.generatedMinutes)}
+                baseline={formatMinutes(comparison.originalMinutes)}
+                delta={formatSignedMinutes(comparison.generatedMinutes - comparison.originalMinutes)}
+              />
+              <ComparisonMetric
+                label="Disciplinas"
+                value={`${comparison.generatedDisciplines}`}
+                baseline={`${comparison.originalDisciplines}`}
+                delta={formatSignedNumber(comparison.generatedDisciplines - comparison.originalDisciplines)}
+              />
+              <ComparisonMetric
+                label="Relevância média"
+                value={`${comparison.generatedRelevance}`}
+                baseline={`${comparison.originalRelevance}`}
+                delta={formatSignedNumber(comparison.generatedRelevance - comparison.originalRelevance)}
+              />
+            </div>
+          </div>
+        )}
+
+        {latest && previous && (
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <DeltaMetric label="Tarefas" value={latest.meta.totalTasks} previous={previous.meta.totalTasks} />
+            <DeltaMetric label="Pendentes" value={latest.meta.pendingTasks} previous={previous.meta.pendingTasks} invertGood />
+            <DeltaMetric label="Concluídas" value={latest.meta.completedTasks} previous={previous.meta.completedTasks} />
+            <DeltaMetric label="Relevância média" value={averageRelevance(latest.tasks)} previous={averageRelevance(previous.tasks)} />
+          </div>
+        )}
+
+        {history.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  <th className="px-3 py-3">Meta</th>
+                  <th className="px-3 py-3">Origem</th>
+                  <th className="px-3 py-3">Planejamento</th>
+                  <th className="px-3 py-3">Início</th>
+                  <th className="px-3 py-3">Próxima</th>
+                  <th className="px-3 py-3">Tarefas</th>
+                  <th className="px-3 py-3">Disc.</th>
+                  <th className="px-3 py-3">Concl.</th>
+                  <th className="px-3 py-3">Pend.</th>
+                  <th className="px-3 py-3">Ign.</th>
+                  <th className="px-3 py-3">Rel.</th>
+                  <th className="px-3 py-3">Importada</th>
+                  <th className="px-3 py-3 text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((entry) => {
+                  const origin = getHistoryOrigin(entry);
+
+                  return (
+                    <tr key={entry.id} className="border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03]">
+                      <td className="px-3 py-3">
+                        <div className="font-black text-white">{entry.meta.title}</div>
+                        {entry.id === currentMetaId && (
+                          <span className="mt-1 inline-block rounded bg-[#84cc16]/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#84cc16]">
+                            Atual
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${historyOriginClass[origin]}`}>
+                          {historyOriginLabel[origin]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 font-bold text-purple-300">{entry.meta.planejamento || '-'}</td>
+                      <td className="px-3 py-3">{entry.meta.startedAt || '-'}</td>
+                      <td className="px-3 py-3">{entry.meta.nextMetaAt || '-'}</td>
+                      <td className="px-3 py-3 font-black text-white">{entry.meta.totalTasks || entry.tasks.length}</td>
+                      <td className="px-3 py-3">{entry.meta.totalDisciplines || countTaskDisciplines(entry.tasks)}</td>
+                      <td className="px-3 py-3 text-[#84cc16]">{entry.meta.completedTasks}</td>
+                      <td className="px-3 py-3 text-purple-300">{entry.meta.pendingTasks}</td>
+                      <td className="px-3 py-3 text-gray-400">{entry.meta.ignoredTasks}</td>
+                      <td className="px-3 py-3 font-black text-purple-300">{averageRelevance(entry.tasks)}</td>
+                      <td className="px-3 py-3 text-xs text-gray-500">{formatDateTime(entry.archivedAt)}</td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onRestore(entry)}
+                          className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
+                        >
+                          Restaurar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyPanel icon={History} title="Nenhuma meta importada no histórico" />
+        )}
+      </div>
+    </section>
+  );
+};
+
+const DeltaMetric: React.FC<{ label: string; value: number; previous: number; invertGood?: boolean }> = ({
+  label,
+  value,
+  previous,
+  invertGood = false,
+}) => {
+  const delta = value - previous;
+  const isGood = invertGood ? delta <= 0 : delta >= 0;
+  const color = delta === 0 ? 'text-gray-400' : isGood ? 'text-[#84cc16]' : 'text-red-300';
+  const sign = delta > 0 ? '+' : '';
+
+  return (
+    <div className="rounded border border-white/5 bg-[#1a1a1a] p-3">
+      <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{label}</p>
+      <p className="text-xl font-black text-white">{value}</p>
+      <p className={`text-[11px] font-black uppercase tracking-widest ${color}`}>
+        {sign}{delta} vs anterior
+      </p>
+    </div>
+  );
+};
+
+const ComparisonMetric: React.FC<{ label: string; value: string; baseline: string; delta: string }> = ({
+  label,
+  value,
+  baseline,
+  delta,
+}) => (
+  <div className="rounded border border-white/5 bg-[#1a1a1a] p-3">
+    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{label}</p>
+    <p className="text-xl font-black text-white">{value}</p>
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-black uppercase tracking-widest">
+      <span className="text-gray-500">LS {baseline}</span>
+      <span className="text-[#84cc16]">{delta}</span>
+    </div>
+  </div>
+);
+
+const loadStateLabel: Record<PlannerDisciplineInsight['loadState'], string> = {
+  overloaded: 'Sobrecarga',
+  balanced: 'Equilibrada',
+  underloaded: 'Subcarga',
+  neglected: 'Sumiu',
+  new: 'Nova',
+};
+
+const trendLabel: Record<PlannerDisciplineInsight['trend'], string> = {
+  up: 'Subiu',
+  down: 'Caiu',
+  steady: 'Estável',
+  new: 'Nova',
+};
+
+const loadStateClass: Record<PlannerDisciplineInsight['loadState'], string> = {
+  overloaded: 'border-red-400/20 bg-red-400/10 text-red-300',
+  balanced: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+  underloaded: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
+  neglected: 'border-gray-500/20 bg-gray-500/10 text-gray-400',
+  new: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
+};
+
+const PlannerInsightsPanel: React.FC<{ insights: PlannerInsights }> = ({ insights }) => (
+  <section className="space-y-4">
+    <div className="grid gap-3 md:grid-cols-5">
+      <Metric icon={Timer} label="Carga Atual" value={formatMinutes(insights.totalMinutes)} />
+      <Metric icon={Target} label="Pend. Rel Alta" value={`${insights.highRelevancePending}`} />
+      <Metric icon={AlertTriangle} label="Sobrecargas" value={`${insights.overloadedCount}`} />
+      <Metric icon={Ban} label="Sumiram" value={`${insights.neglectedCount}`} />
+      <Metric icon={History} label="Repetidas" value={`${insights.repeatedDisciplines}`} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
+      <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+        <div className="mb-4 flex items-center gap-2">
+          <Lightbulb className="h-5 w-5 text-[#84cc16]" />
+          <h2 className="text-lg font-black text-white">Ajustes Sugeridos</h2>
+        </div>
+        {insights.recommendations.length > 0 ? (
+          <div className="space-y-3">
+            {insights.recommendations.map((recommendation) => (
+              <div key={recommendation} className="rounded border border-white/5 bg-[#1a1a1a] p-3">
+                <p className="text-sm font-bold leading-relaxed text-gray-200">{recommendation}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyPanel icon={Lightbulb} title="Sem ajustes críticos nesta meta" />
+        )}
+      </div>
+
+      <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+        <div className="mb-4 flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-purple-400" />
+          <h2 className="text-lg font-black text-white">Padrão Semanal por Disciplina</h2>
+        </div>
+        {insights.disciplineInsights.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  <th className="px-3 py-3">Disciplina</th>
+                  <th className="px-3 py-3">Atual</th>
+                  <th className="px-3 py-3">Carga</th>
+                  <th className="px-3 py-3">Hist.</th>
+                  <th className="px-3 py-3">Média LS</th>
+                  <th className="px-3 py-3">Rel.</th>
+                  <th className="px-3 py-3">Pend. Alta</th>
+                  <th className="px-3 py-3">Tend.</th>
+                  <th className="px-3 py-3">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insights.disciplineInsights.map((item) => (
+                  <tr key={item.discipline} className="border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03]">
+                    <td className="px-3 py-3 font-bold text-white">{item.discipline}</td>
+                    <td className="px-3 py-3 font-black text-white">{item.currentTasks}</td>
+                    <td className="px-3 py-3">{formatMinutes(item.currentMinutes)}</td>
+                    <td className="px-3 py-3">{item.historyAppearances} metas</td>
+                    <td className="px-3 py-3">
+                      {item.historicalAverageTasks} tarefa(s) · {formatMinutes(item.historicalAverageMinutes)}
+                    </td>
+                    <td className="px-3 py-3 font-black text-purple-300">{item.averageRelevance || '-'}</td>
+                    <td className="px-3 py-3 font-black text-white">{item.highRelevancePending}</td>
+                    <td className="px-3 py-3">{trendLabel[item.trend]}</td>
+                    <td className="px-3 py-3">
+                      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${loadStateClass[item.loadState]}`}>
+                        {loadStateLabel[item.loadState]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyPanel icon={BarChart3} title="Importe ao menos uma meta para gerar insights" />
+        )}
+      </div>
+    </div>
+  </section>
+);
+
+const draftReasonLabel: Record<PlannerDraftTask['reason'], string> = {
+  'carry-pending': 'Carregar pendência',
+  rebalance: 'Rebalancear',
+  retake: 'Retomar',
+  maintenance: 'Manutenção',
+};
+
+const draftReasonClass: Record<PlannerDraftTask['reason'], string> = {
+  'carry-pending': 'border-purple-400/20 bg-purple-400/10 text-purple-300',
+  rebalance: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
+  retake: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
+  maintenance: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+};
+
+const PlannerGeneratorPanel: React.FC<{
+  draft: PlannerDraft;
+  draftItems: DraftTaskItem[];
+  weeklyHours: number;
+  maxTasks: number;
+  onWeeklyHoursChange: (value: number) => void;
+  onMaxTasksChange: (value: number) => void;
+  onUpdateTask: (key: string, updates: DraftTaskEdit) => void;
+  onRemoveTask: (key: string) => void;
+  onResetDraft: () => void;
+  hasCustomDraft: boolean;
+  onApply: () => void;
+}> = ({
+  draft,
+  draftItems,
+  weeklyHours,
+  maxTasks,
+  onWeeklyHoursChange,
+  onMaxTasksChange,
+  onUpdateTask,
+  onRemoveTask,
+  onResetDraft,
+  hasCustomDraft,
+  onApply,
+}) => (
+  <section className="space-y-4">
+    <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="space-y-4 rounded-lg border border-[#404040] bg-[#262626] p-4">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-[#84cc16]" />
+          <h2 className="text-lg font-black text-white">Gerador da Próxima Meta</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Horas/semana" value={weeklyHours} onChange={onWeeklyHoursChange} />
+          <NumberField label="Tarefas" value={maxTasks} onChange={onMaxTasksChange} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Metric icon={Timer} label="Carga" value={formatMinutes(draft.totalMinutes)} />
+          <Metric icon={ClipboardList} label="Tarefas" value={`${draft.totalTasks}`} />
+        </div>
+        {draft.warnings.length > 0 && (
+          <div className="space-y-2">
+            {draft.warnings.map((warning) => (
+              <div key={warning} className="rounded border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-200">
+                {warning}
+              </div>
+            ))}
+          </div>
+        )}
+        {hasCustomDraft && (
+          <button
+            type="button"
+            onClick={onResetDraft}
+            className="flex w-full items-center justify-center gap-2 rounded border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-white/10"
+          >
+            <RotateCcw className="h-4 w-4" /> Resetar Rascunho
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={draft.tasks.length === 0}
+          className="flex w-full items-center justify-center gap-2 rounded bg-[#84cc16] px-4 py-3 text-sm font-black text-black transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Sparkles className="h-4 w-4" /> Usar como Meta Gerada
+        </button>
+      </aside>
+
+      <main className="space-y-4">
+        <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+          <div className="mb-4 flex items-center gap-2">
+            <Table2 className="h-5 w-5 text-purple-400" />
+            <h2 className="text-lg font-black text-white">Rascunho de Tarefas</h2>
+          </div>
+          {draftItems.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                    <th className="px-3 py-3">Nº</th>
+                    <th className="px-3 py-3">Disciplina</th>
+                    <th className="px-3 py-3">Formato</th>
+                    <th className="px-3 py-3">Descrição</th>
+                    <th className="px-3 py-3">Carga</th>
+                    <th className="px-3 py-3">Rel.</th>
+                    <th className="px-3 py-3">Motivo</th>
+                    <th className="px-3 py-3 text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftItems.map(({ key, task }, index) => (
+                    <tr key={key} className="border-b border-white/5 text-sm text-gray-300">
+                      <td className="px-3 py-3 font-black text-white">{index + 1}</td>
+                      <td className="px-3 py-3 font-bold text-white">{task.discipline}</td>
+                      <td className="px-3 py-3 text-gray-400">{task.format}</td>
+                      <td className="max-w-md px-3 py-3">
+                        <textarea
+                          value={task.description}
+                          onChange={(event) => onUpdateTask(key, { description: event.target.value })}
+                          className="h-16 w-full resize-none rounded border border-white/10 bg-[#1a1a1a] px-2 py-2 text-xs font-bold text-gray-100 outline-none focus:border-purple-500"
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <input
+                          type="number"
+                          min={15}
+                          max={240}
+                          step={15}
+                          value={task.durationMinutes}
+                          onChange={(event) => onUpdateTask(key, {
+                            durationMinutes: Math.min(240, Math.max(15, Number(event.target.value) || 15)),
+                          })}
+                          className="w-20 rounded border border-white/10 bg-[#1a1a1a] px-2 py-2 text-xs font-black text-white outline-none focus:border-purple-500"
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={task.relevance}
+                          onChange={(event) => onUpdateTask(key, {
+                            relevance: Math.min(10, Math.max(1, Number(event.target.value) || 1)),
+                          })}
+                          className="w-16 rounded border border-white/10 bg-[#1a1a1a] px-2 py-2 text-xs font-black text-purple-300 outline-none focus:border-purple-500"
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${draftReasonClass[task.reason]}`}>
+                          {draftReasonLabel[task.reason]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onRemoveTask(key)}
+                          className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
+                        >
+                          Remover
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyPanel icon={Sparkles} title="Importe metas ou ajuste os limites para gerar um rascunho" />
+          )}
+        </div>
+
+        <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
+          <div className="mb-4 flex items-center gap-2">
+            <BarChart3 className="h-5 w-5 text-[#84cc16]" />
+            <h2 className="text-lg font-black text-white">Distribuição do Rascunho</h2>
+          </div>
+          {draft.allocations.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {draft.allocations.map((allocation) => (
+                <div key={allocation.discipline} className="rounded border border-white/5 bg-[#1a1a1a] p-3">
+                  <p className="text-sm font-black text-white">{allocation.discipline}</p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
+                    <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{allocation.tasks} tarefa(s)</span>
+                    <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{formatMinutes(allocation.minutes)}</span>
+                    <span className="rounded bg-purple-500/10 px-2 py-1 text-purple-300">Rel {allocation.relevance}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyPanel icon={BarChart3} title="Sem distribuição calculada" />
+          )}
+        </div>
+      </main>
+    </div>
+  </section>
+);

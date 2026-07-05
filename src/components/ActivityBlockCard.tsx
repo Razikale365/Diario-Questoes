@@ -1,5 +1,5 @@
 import React, { memo, useRef, forwardRef, useState, useEffect } from 'react';
-import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare } from 'lucide-react';
+import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare, Star } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -20,6 +20,7 @@ interface PerformanceStats {
 interface ActivityBlockCardProps {
   block: ActivityBlock;
   index: number;
+  displayMode?: 'caderno' | 'questoes' | 'gabarito';
   onUpdateQuestion: (blockId: string, qNumber: number, updates: Partial<Question>) => void;
   onToggleLock: (blockId: string) => void;
   onEditBlock: (block?: ActivityBlock) => void;
@@ -80,6 +81,7 @@ const PerformanceBadge: React.FC<{ stats: PerformanceStats; compact?: boolean }>
 export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCardProps>((props, ref) => {
   const {
     block,
+    displayMode = 'caderno',
     onUpdateQuestion,
     onToggleLock,
     onEditBlock,
@@ -311,6 +313,176 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
   const accuracy = blockStatsRaw.answered > 0 ? (blockStatsRaw.correct / blockStatsRaw.answered) * 100 : 0;
   const currentBlockStats: PerformanceStats = { ...blockStatsRaw, accuracy };
 
+  const getDefaultAlternativeLabels = (question: Question) => {
+    const isMultipleChoice = question.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE');
+    return isMultipleChoice ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E'];
+  };
+
+  const toggleDoubtedAlternative = (question: Question, alternative: string) => {
+    if (block.isLocked) return;
+    const current = question.doubtedAlts || [];
+    const next = current.includes(alternative)
+      ? current.filter((item: string) => item !== alternative)
+      : [...current, alternative];
+    onUpdateQuestion(block.id, question.number, { doubtedAlts: next });
+  };
+
+  const toggleEliminatedAlternative = (question: Question, alternative: string) => {
+    if (block.isLocked) return;
+    const current = question.eliminated || [];
+    const next = current.includes(alternative)
+      ? current.filter((item: string) => item !== alternative)
+      : [...current, alternative];
+    onUpdateQuestion(block.id, question.number, { eliminated: next });
+  };
+
+  const updateCorrectAnswer = (question: Question, answer?: string) => {
+    if (block.isLocked) return;
+    onUpdateQuestion(block.id, question.number, { correctAnswer: answer || undefined });
+  };
+
+  const selectAlternative = (question: Question, alternative: string) => {
+    if (block.isLocked) return;
+    if (question.answer === alternative) {
+      onUpdateQuestion(block.id, question.number, { answer: '' });
+      return;
+    }
+
+    const newEliminated = (question.eliminated || []).filter((item: string) => item !== alternative);
+    onUpdateQuestion(block.id, question.number, {
+      answer: alternative,
+      eliminated: newEliminated.length > 0 ? newEliminated : undefined
+    });
+  };
+
+  const renderAlternativeControl = (question: Question, alternative: string, text?: string) => {
+    const isEliminated = (question.eliminated || []).includes(alternative);
+    const isDoubted = (question.doubtedAlts || []).includes(alternative);
+    const isSelected = question.answer === alternative;
+    const hasText = Boolean(text);
+
+    return (
+      <div key={alternative} className={`flex items-center gap-1 ${hasText ? 'w-full' : ''}`}>
+        <button
+          type="button"
+          onClick={() => selectAlternative(question, alternative)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            toggleDoubtedAlternative(question, alternative);
+          }}
+          onDoubleClick={() => toggleEliminatedAlternative(question, alternative)}
+          disabled={block.isLocked}
+          className={`${hasText ? 'flex min-h-[42px] w-full items-start gap-3 px-3 py-2 text-left' : 'min-w-[28px] h-7'} rounded text-[11px] font-black transition-all relative ${
+            isSelected
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
+              : isEliminated
+                ? 'line-through text-gray-700 bg-red-900/10 cursor-pointer hover:text-gray-500 hover:bg-red-900/20'
+                : isDoubted
+                  ? 'bg-amber-500/20 text-amber-500 ring-1 ring-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                  : 'text-gray-500 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          {hasText ? (
+            <>
+              <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-black/20 text-[11px]">{alternative}</span>
+              <span className="text-xs font-semibold leading-relaxed text-gray-200">{text}</span>
+            </>
+          ) : (
+            alternative
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleDoubtedAlternative(question, alternative)}
+          disabled={block.isLocked}
+          className={`relative flex h-7 w-6 items-center justify-center rounded transition-all ${
+            isDoubted
+              ? 'text-amber-400 bg-amber-500/10 ring-1 ring-amber-500/40'
+              : 'text-gray-700 hover:text-gray-300 hover:bg-white/5'
+          } ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+          title={isDoubted ? 'Remover alternativa considerada' : 'Marcar alternativa considerada'}
+          aria-label={isDoubted ? `Remover ${alternative} das alternativas consideradas` : `Marcar ${alternative} como alternativa considerada`}
+        >
+          <Flag className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  };
+
+  const renderQuestionActions = (question: Question) => (
+    <div className="flex items-center gap-1 ml-auto">
+      <button
+        onClick={() => setEditingObs(prev => ({ ...prev, [question.number]: !prev[question.number] }))}
+        disabled={block.isLocked}
+        className={`p-1.5 rounded-lg transition-all ${question.observations || editingObs[question.number] ? 'text-blue-400 bg-blue-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
+        title="Adicionar observação"
+      >
+        <MessageSquare className={`w-4 h-4 ${question.observations ? 'fill-blue-500/20' : ''}`} />
+      </button>
+      <button
+        onClick={() => onUpdateQuestion(block.id, question.number, { favorite: !question.favorite })}
+        disabled={block.isLocked}
+        className={`p-1.5 rounded-lg transition-all ${question.favorite ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
+        title="Favoritar"
+      >
+        <Star className={`w-4 h-4 ${question.favorite ? 'fill-yellow-400' : ''}`} />
+      </button>
+      <button onClick={() => onUpdateQuestion(block.id, question.number, { hasDoubt: !question.hasDoubt })} disabled={block.isLocked}
+        className={`p-1.5 rounded-lg transition-all ${question.hasDoubt ? 'text-orange-500 bg-orange-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
+        title="Marcar dúvida"
+      >
+        <Flag className={`w-4 h-4 ${question.hasDoubt ? 'fill-orange-500' : ''}`} />
+      </button>
+      <div className="w-[1px] h-4 bg-white/5 mx-1" />
+      <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: true })} disabled={block.isLocked}
+        className={`p-1.5 rounded-lg transition-all ${question.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-4 h-4" /></button>
+      <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: false })} disabled={block.isLocked}
+        className={`p-1.5 rounded-lg transition-all ${question.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-4 h-4" /></button>
+
+      {block.showGabarito && (
+        <div className="ml-2 pl-3 border-l border-white/5 flex flex-col items-center min-w-[36px]">
+          <span className="text-[8px] uppercase font-black text-gray-600 mb-0.5">GAB</span>
+          <span
+            onDoubleClick={() => {
+              if (block.isLocked) return;
+              const options = getDefaultAlternativeLabels(question);
+              const current = question.correctAnswer?.toUpperCase() || '';
+              const nextIdx = (options.indexOf(current) + 1) % options.length;
+              onUpdateQuestion(block.id, question.number, { correctAnswer: options[nextIdx] });
+            }}
+            className={`text-[10px] font-black px-1.5 rounded cursor-pointer select-none transition-all ${question.correctAnswer ? 'text-purple-400 hover:bg-purple-500/10' : 'text-gray-700 bg-white/5 hover:text-white hover:bg-white/10'}`}
+          >
+            {question.correctAnswer || '?'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderObservationEditor = (question: Question) => (
+    (editingObs[question.number] || question.observations) && (
+      <div className="px-1 py-1">
+        <textarea
+          value={question.observations || ''}
+          onChange={(event) => onUpdateQuestion(block.id, question.number, { observations: event.target.value })}
+          disabled={block.isLocked}
+          readOnly={block.isLocked}
+          placeholder="Dúvidas, alternativas possíveis..."
+          className={`w-full bg-[#0d0d0d] border border-white/5 rounded-lg p-2 text-[11px] text-gray-300 outline-none focus:border-blue-500/50 transition-all resize-none min-h-[40px] scrollbar-none ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+          rows={1}
+          onInput={(event) => {
+            const target = event.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            target.style.height = target.scrollHeight + 'px';
+          }}
+        />
+      </div>
+    )
+  );
+
+  const availableQuestions = (block.questions || []).filter((question) => question.statement && question.alternatives?.length);
+  const renderedQuestions = displayMode === 'questoes' ? availableQuestions : (block.questions || []);
+
   return (
     <div
       ref={setNodeRef}
@@ -379,161 +551,170 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
             </span>
           )}
           <span className="flex items-center gap-1.5 bg-[#1a1a1a] px-2 py-1 rounded" title="Total de questões">
-            <CheckSquare className="w-3 h-3 text-[#84cc16]" /> {(block.questions || []).length} questões
+            <CheckSquare className="w-3 h-3 text-[#84cc16]" /> {displayMode === 'questoes' ? availableQuestions.length : (block.questions || []).length} questões
           </span>
         </div>
 
+        {displayMode === 'questoes' && availableQuestions.length === 0 && (
+          <div className="flex-1 min-h-[120px] flex items-center justify-center rounded-xl border border-dashed border-white/10 bg-[#1a1a1a] px-4 text-center">
+            <p className="text-sm font-bold text-gray-500">Nenhuma questão completa disponível neste bloco.</p>
+          </div>
+        )}
+
+        {!(displayMode === 'questoes' && availableQuestions.length === 0) && (
         <div 
           className={`overflow-y-auto pr-1 flex-1 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent [--current-cols:var(--cols)] md:[--current-cols:var(--tablet-cols)] xl:[--current-cols:var(--desktop-cols)] ${getLayoutClasses()}`} 
           style={getDynamicStyles()}
         >
-          {(block.questions || []).map((q) => (
-            <div key={q.number} className="group/q flex flex-col gap-2 p-2 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
-              <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
-                {/* Left: Number */}
-                <div className="flex items-center gap-3">
-                  <span 
-                    onDoubleClick={() => onUpdateQuestion(block.id, q.number, { isMultipleChoice: !q.isMultipleChoice })}
-                    className={`text-[10px] p-2 font-black rounded-lg text-gray-400 w-6 h-6 flex items-center justify-center cursor-pointer select-none transition-all ${q.isMultipleChoice ? 'bg-purple-600/30 text-purple-400 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] hover:text-white hover:bg-purple-600/20'}`}
-                  >
-                    {q.number}
-                  </span>
-                </div>
-                
-                {/* Middle: Alternatives (Flexible) */}
-                <div className="flex-1 flex items-center justify-center min-w-fit">
-                  <div className="flex items-center gap-1 px-2 py-1 bg-[#1a1a1a] rounded-lg border border-white/5 overflow-x-auto no-scrollbar">
-                    {(q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E']).map((alt) => {
-                      const isEliminated = (q.eliminated || []).includes(alt);
-                      const isDoubted = (q.doubtedAlts || []).includes(alt);
+          {renderedQuestions.map((q) => {
+            const isObjectiveQuestion = displayMode === 'questoes' && Boolean(q.statement && q.alternatives?.length);
+            const displayNumber = q.sourceQuestionNumber ?? q.number;
 
-                      const toggleDoubted = (alternative: string) => {
-                        if (block.isLocked) return;
-                        const current = q.doubtedAlts || [];
-                        const next = current.includes(alternative)
-                          ? current.filter((a: string) => a !== alternative)
-                          : [...current, alternative];
-                        onUpdateQuestion(block.id, q.number, { doubtedAlts: next });
-                      };
+            if (displayMode === 'gabarito') {
+              const answerOptions = q.alternatives?.map((alternative) => alternative.label) || getDefaultAlternativeLabels(q);
 
-                      return (
-                        <div key={alt} className="flex items-center gap-0.5">
-                          <button 
-                            onClick={() => {
-                              if (q.answer === alt) {
-                                onUpdateQuestion(block.id, q.number, { answer: '' });
-                              } else {
-                                const newEliminated = (q.eliminated || []).filter((a: string) => a !== alt);
-                                onUpdateQuestion(block.id, q.number, { answer: alt, eliminated: newEliminated.length > 0 ? newEliminated : undefined });
-                              }
-                            }}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              toggleDoubted(alt);
-                            }}
-                            onDoubleClick={() => {
-                              if (block.isLocked) return;
-                              const current = q.eliminated || [];
-                              const next = current.includes(alt)
-                                ? current.filter((a: string) => a !== alt)
-                                : [...current, alt];
-                              onUpdateQuestion(block.id, q.number, { eliminated: next });
-                            }}
-                            disabled={block.isLocked}
-                            className={`min-w-[28px] h-7 rounded text-[11px] font-black transition-all relative ${
-                              q.answer === alt
-                                ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
-                                : isEliminated
-                                  ? 'line-through text-gray-700 bg-red-900/10 cursor-pointer hover:text-gray-500 hover:bg-red-900/20'
-                                  : isDoubted
-                                    ? 'bg-amber-500/20 text-amber-500 ring-1 ring-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
-                                    : 'text-gray-500 hover:text-white hover:bg-white/5'
-                            }`}>
-                            {alt}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleDoubted(alt)}
-                            disabled={block.isLocked}
-                            className={`relative flex h-7 w-6 items-center justify-center rounded transition-all ${
-                              isDoubted
-                                ? 'text-amber-400 bg-amber-500/10 ring-1 ring-amber-500/40'
-                                : 'text-gray-700 hover:text-gray-300 hover:bg-white/5'
-                            } ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
-                            title={isDoubted ? 'Remover alternativa considerada' : 'Marcar alternativa considerada'}
-                            aria-label={isDoubted ? `Remover ${alt} das alternativas consideradas` : `Marcar ${alt} como alternativa considerada`}
-                          >
-                            <Flag className="w-3 h-3" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Right: Actions */}
-                <div className="flex items-center gap-1 ml-auto">
-                  <button 
-                    onClick={() => setEditingObs(prev => ({ ...prev, [q.number]: !prev[q.number] }))} 
-                    disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.observations || editingObs[q.number] ? 'text-blue-400 bg-blue-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
-                    title="Adicionar observação"
-                  >
-                    <MessageSquare className={`w-4 h-4 ${q.observations ? 'fill-blue-500/20' : ''}`} />
-                  </button>
-                  <button onClick={() => onUpdateQuestion(block.id, q.number, { hasDoubt: !q.hasDoubt })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.hasDoubt ? 'text-orange-500 bg-orange-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
-                    title="Marcar dúvida"
-                  >
-                    <Flag className={`w-4 h-4 ${q.hasDoubt ? 'fill-orange-500' : ''}`} />
-                  </button>
-                  <div className="w-[1px] h-4 bg-white/5 mx-1" />
-                  <button onClick={() => onUpdateQuestion(block.id, q.number, { isCorrect: true })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-4 h-4" /></button>
-                  <button onClick={() => onUpdateQuestion(block.id, q.number, { isCorrect: false })} disabled={block.isLocked}
-                    className={`p-1.5 rounded-lg transition-all ${q.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-4 h-4" /></button>
-                  
-                  {block.showGabarito && (
-                    <div className="ml-2 pl-3 border-l border-white/5 flex flex-col items-center min-w-[36px]">
-                      <span className="text-[8px] uppercase font-black text-gray-600 mb-0.5">GAB</span>
-                      <span 
-                        onDoubleClick={() => {
-                          if (block.isLocked) return;
-                          const options = q.isMultipleChoice || (block.bank?.toUpperCase() !== 'CEBRASPE' && block.bank?.toUpperCase() !== 'CESPE') ? ['A', 'B', 'C', 'D', 'E'] : ['C', 'E'];
-                          const current = q.correctAnswer?.toUpperCase() || '';
-                          const nextIdx = (options.indexOf(current) + 1) % options.length;
-                          onUpdateQuestion(block.id, q.number, { correctAnswer: options[nextIdx] });
-                        }}
-                        className={`text-[10px] font-black px-1.5 rounded cursor-pointer select-none transition-all ${q.correctAnswer ? 'text-purple-400 hover:bg-purple-500/10' : 'text-gray-700 bg-white/5 hover:text-white hover:bg-white/10'}`}
-                      >
-                        {q.correctAnswer || '?'}
+              return (
+                <div key={q.localId || q.number} className="group/q flex flex-col gap-3 p-3 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="text-[10px] p-2 font-black rounded-lg text-gray-400 w-8 h-8 flex items-center justify-center bg-[#2d2d2d]">
+                        {displayNumber}
                       </span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black uppercase tracking-widest text-gray-500">
+                          {q.sourceName || block.title}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Resposta marcada: <span className="font-black text-white">{q.answer || '-'}</span>
+                          {q.isCorrect !== null && (
+                            <span className={`ml-2 font-black ${q.isCorrect ? 'text-[#84cc16]' : 'text-red-400'}`}>
+                              {q.isCorrect ? 'certa' : 'errada'}
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {answerOptions.map((alternative) => (
+                        <button
+                          key={alternative}
+                          type="button"
+                          onClick={() => updateCorrectAnswer(q, alternative)}
+                          disabled={block.isLocked}
+                          className={`h-8 min-w-8 rounded px-2 text-xs font-black transition-all ${
+                            q.correctAnswer === alternative
+                              ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20'
+                              : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
+                          } ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          {alternative}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => updateCorrectAnswer(q, 'ANULADA')}
+                        disabled={block.isLocked}
+                        className={`h-8 rounded px-3 text-[10px] font-black uppercase transition-all ${
+                          q.correctAnswer === 'ANULADA'
+                            ? 'bg-[#84cc16] text-black'
+                            : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
+                        } ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        Anulada
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateCorrectAnswer(q)}
+                        disabled={block.isLocked || !q.correctAnswer}
+                        className="h-8 rounded px-3 text-[10px] font-black uppercase bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  {q.statement && (
+                    <p className="line-clamp-2 text-xs leading-relaxed text-gray-500">{q.statement}</p>
                   )}
                 </div>
-              </div>
-              
-              {(editingObs[q.number] || q.observations) && (
-                <div className="px-1 py-1">
-                  <textarea
-                    value={q.observations || ''}
-                    onChange={(e) => onUpdateQuestion(block.id, q.number, { observations: e.target.value })}
-                    disabled={block.isLocked}
-                    readOnly={block.isLocked}
-                    placeholder="Dúvidas, alternativas possíveis..."
-                    className={`w-full bg-[#0d0d0d] border border-white/5 rounded-lg p-2 text-[11px] text-gray-300 outline-none focus:border-blue-500/50 transition-all resize-none min-h-[40px] scrollbar-none ${block.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    rows={1}
-                    onInput={(e) => {
-                      const target = e.target as HTMLTextAreaElement;
-                      target.style.height = 'auto';
-                      target.style.height = target.scrollHeight + 'px';
-                    }}
-                  />
+              );
+            }
+
+            if (isObjectiveQuestion && q.alternatives) {
+              return (
+                <div key={q.localId || q.number} className="group/q flex flex-col gap-4 p-4 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className={`text-[10px] p-2 font-black rounded-lg w-8 h-8 flex items-center justify-center select-none transition-all ${
+                        q.isCorrect === true
+                          ? 'bg-[#84cc16]/15 text-[#84cc16] ring-1 ring-[#84cc16]/30'
+                          : q.isCorrect === false
+                            ? 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20'
+                            : 'bg-[#2d2d2d] text-gray-400'
+                      }`}>
+                        {displayNumber}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          {q.sourceName && (
+                            <span className="max-w-[220px] truncate rounded bg-purple-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-purple-300">
+                              {q.sourceName}
+                            </span>
+                          )}
+                          {q.year && (
+                            <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] font-black text-gray-400">
+                              {q.year}
+                            </span>
+                          )}
+                          {block.showGabarito && q.correctAnswer && (
+                            <span className="rounded bg-[#84cc16]/10 px-2 py-0.5 text-[10px] font-black text-[#84cc16]">
+                              GAB {q.correctAnswer}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold leading-relaxed text-gray-100">{q.statement}</p>
+                      </div>
+                    </div>
+                    {renderQuestionActions(q)}
+                  </div>
+
+                  <div className="grid gap-2">
+                    {q.alternatives.map((alternative) => renderAlternativeControl(q, alternative.label, alternative.text))}
+                  </div>
+
+                  {renderObservationEditor(q)}
                 </div>
-              )}
-            </div>
-          ))}
+              );
+            }
+
+            return (
+              <div key={q.number} className="group/q flex flex-col gap-2 p-2 bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-white/10 transition-all">
+                <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
+                  <div className="flex items-center gap-3">
+                    <span
+                      onDoubleClick={() => onUpdateQuestion(block.id, q.number, { isMultipleChoice: !q.isMultipleChoice })}
+                      className={`text-[10px] p-2 font-black rounded-lg text-gray-400 w-6 h-6 flex items-center justify-center cursor-pointer select-none transition-all ${q.isMultipleChoice ? 'bg-purple-600/30 text-purple-400 ring-1 ring-purple-500/30' : 'bg-[#2d2d2d] hover:text-white hover:bg-purple-600/20'}`}
+                    >
+                      {q.number}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 flex items-center justify-center min-w-fit">
+                    <div className="flex items-center gap-1 px-2 py-1 bg-[#1a1a1a] rounded-lg border border-white/5 overflow-x-auto no-scrollbar">
+                      {getDefaultAlternativeLabels(q).map((alternative) => renderAlternativeControl(q, alternative))}
+                    </div>
+                  </div>
+
+                  {renderQuestionActions(q)}
+                </div>
+
+                {renderObservationEditor(q)}
+              </div>
+            );
+          })}
         </div>
+        )}
 
         {!block.isLocked && (
           <div 

@@ -1,6 +1,7 @@
 export const PLANEJAMENTOS = [
   'Planejamento Iniciante Fiscal [103971]',
   'Planejamento Iniciante Fiscal [115852]',
+  'SEFAZ CE Experiente [119790]',
   'SEFAZ SP POS EDITAL [110806]'
 ];
 
@@ -21,12 +22,15 @@ export const DISCIPLINAS = [
   'Direito Penal',
   'Direito Tributário',
   'Direito Tributário - Reforma Tributária',
+  'Discursivas',
   'Economia',
   'Economia e Finanças Públicas',
   'Estatística',
+  'Finanças Públicas',
   'Fluencia de dados',
   'Inglês',
   'Legis. Tribut. Estadual (ICMS)',
+  'Material Complementar',
   'Matemática Financeira',
   'Português',
   'Raciocínio Crítico',

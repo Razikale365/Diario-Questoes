@@ -2,8 +2,34 @@ import { useState, useEffect, useMemo } from 'react';
 import { StudyTask, ActivityBlock, Question } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
 import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
+import { syncStoredQuestionBankProgress } from '../utils/questionBank';
 
 const now = () => new Date().toISOString();
+
+const applyQuestionUpdate = (question: Question, updates: Partial<Question>) => {
+  const newQ = { ...question, ...updates };
+
+  if (('answer' in updates || 'correctAnswer' in updates) && newQ.correctAnswer) {
+    let userAns = newQ.answer.toUpperCase();
+    let correctAns = newQ.correctAnswer.toUpperCase();
+    if (userAns === 'CERTO') userAns = 'C';
+    if (userAns === 'ERRADO') userAns = 'E';
+    if (correctAns === 'CERTO') correctAns = 'C';
+    if (correctAns === 'ERRADO') correctAns = 'E';
+
+    if (correctAns === 'ANULADA') {
+      newQ.isCorrect = true;
+    } else if (newQ.answer) {
+      newQ.isCorrect = userAns === correctAns;
+    } else {
+      newQ.isCorrect = null;
+    }
+  } else if ('correctAnswer' in updates && !newQ.correctAnswer) {
+    newQ.isCorrect = null;
+  }
+
+  return newQ;
+};
 
 export const useTasks = () => {
   const [tasks, setTasks] = useState<StudyTask[]>(() => {
@@ -67,6 +93,13 @@ export const useTasks = () => {
   };
 
   const updateQuestion = (taskId: string, blockId: string, qNumber: number, updates: Partial<Question>) => {
+    const targetTask = tasks.find(task => task.id === taskId);
+    const targetBlock = targetTask?.blocks.find(block => block.id === blockId);
+    const targetQuestion = targetBlock?.questions.find(question => question.number === qNumber);
+    const nextQuestion = targetBlock && !targetBlock.isLocked && targetQuestion
+      ? applyQuestionUpdate(targetQuestion, updates)
+      : null;
+
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
       return {
@@ -79,31 +112,16 @@ export const useTasks = () => {
             ...block,
             questions: block.questions.map(q => {
               if (q.number !== qNumber) return q;
-              const newQ = { ...q, ...updates };
-              if (('answer' in updates || 'correctAnswer' in updates) && newQ.correctAnswer) {
-                let userAns = newQ.answer.toUpperCase();
-                let correctAns = newQ.correctAnswer.toUpperCase();
-                if (userAns === 'CERTO') userAns = 'C';
-                if (userAns === 'ERRADO') userAns = 'E';
-                if (correctAns === 'CERTO') correctAns = 'C';
-                if (correctAns === 'ERRADO') correctAns = 'E';
-
-                if (correctAns === 'ANULADA') {
-                  newQ.isCorrect = true;
-                } else if (newQ.answer) {
-                  newQ.isCorrect = userAns === correctAns;
-                } else {
-                  newQ.isCorrect = null;
-                }
-              } else if ('correctAnswer' in updates && !newQ.correctAnswer) {
-                newQ.isCorrect = null;
-              }
-              return newQ;
+              return applyQuestionUpdate(q, updates);
             })
           };
         })
       };
     }));
+
+    if (nextQuestion) {
+      syncStoredQuestionBankProgress(nextQuestion, updates);
+    }
   };
 
   const toggleLock = (taskId: string, blockId: string) => {

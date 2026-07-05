@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight } from 'lucide-react';
+import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight, ClipboardCheck, FileQuestion, Grid3X3 } from 'lucide-react';
 
 import { ActivityBlock, StudyTask, Question } from './types';
 import { useTasks } from './hooks/useTasks';
@@ -9,6 +9,7 @@ import { CreateTaskModal } from './components/CreateTaskModal';
 import { ImportArea } from './components/ImportArea';
 import { HistoryList } from './components/HistoryList';
 import { RevisionArea } from './components/RevisionArea';
+import { PlannerArea } from './components/PlannerArea';
 import { ActivityBlockCard } from './components/ActivityBlockCard';
 import { TaskHeader } from './components/TaskHeader';
 import { GabaritoModal } from './components/GabaritoModal';
@@ -38,6 +39,15 @@ import {
   rectSortingStrategy
 } from '@dnd-kit/sortable';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
+
+type TaskWorkTab = 'caderno' | 'questoes' | 'gabarito';
+type ActiveTab = 'caderno' | 'planner' | 'revisao' | 'historico';
+
+const taskHasAvailableQuestions = (task?: StudyTask | null) =>
+  Boolean(task?.blocks.some(block => block.questions.some(question => question.statement && question.alternatives?.length)));
+
+const getDefaultTaskWorkTab = (task?: StudyTask | null): TaskWorkTab =>
+  taskHasAvailableQuestions(task) ? 'questoes' : 'caderno';
 
 function App() {
   const {
@@ -152,7 +162,8 @@ function App() {
     showToast('Desconectado da nuvem.');
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'caderno' | 'revisao' | 'historico'>('caderno');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('caderno');
+  const [taskWorkTab, setTaskWorkTab] = useState<TaskWorkTab>('caderno');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -213,6 +224,12 @@ function App() {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  useEffect(() => {
+    if (taskWorkTab === 'questoes' && activeTask && !taskHasAvailableQuestions(activeTask)) {
+      setTaskWorkTab('caderno');
+    }
+  }, [activeTask, taskWorkTab]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -390,9 +407,32 @@ function App() {
     const { isOpen, ...taskData } = revisionTaskModal;
     addTask(taskData);
     setActiveTaskId(taskData.id);
+    setTaskWorkTab('caderno');
     setActiveTab('caderno');
     setRevisionTaskModal({ ...revisionTaskModal, isOpen: false });
     showToast('Revisão gerada!');
+  };
+
+  const handleOpenPlannerStudyTask = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) {
+      showToast('Tarefa vinculada não encontrada.');
+      return;
+    }
+
+    setViewingTaskId(null);
+    setTaskWorkTab(getDefaultTaskWorkTab(task));
+    setActiveTaskId(taskId);
+    setActiveTab('caderno');
+  };
+
+  const handleCreateStudyTaskFromPlanner = (task: StudyTask) => {
+    addTask(task);
+    setViewingTaskId(null);
+    setTaskWorkTab(getDefaultTaskWorkTab(task));
+    setActiveTaskId(task.id);
+    setActiveTab('caderno');
+    showToast('Tarefa criada a partir do planner.');
   };
 
   const viewingTask = useMemo(() => tasks.find(t => t.id === viewingTaskId), [tasks, viewingTaskId]);
@@ -440,7 +480,7 @@ function App() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {inProgressTasks.map(task => (
-                          <button key={task.id} onClick={() => setActiveTaskId(task.id)} className="bg-[#333333] border border-[#404040] hover:border-[#84cc16] p-6 rounded-2xl text-left transition-all group relative overflow-hidden shadow-lg hover:-translate-y-1">
+                          <button key={task.id} onClick={() => { setTaskWorkTab(getDefaultTaskWorkTab(task)); setActiveTaskId(task.id); }} className="bg-[#333333] border border-[#404040] hover:border-[#84cc16] p-6 rounded-2xl text-left transition-all group relative overflow-hidden shadow-lg hover:-translate-y-1">
                             <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0"><ChevronRight className="w-6 h-6 text-[#84cc16]" /></div>
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-[10px] uppercase font-black text-purple-400 tracking-[0.2em] bg-purple-500/10 px-2 py-0.5 rounded">{task.planejamento || 'Geral'}</span>
@@ -460,7 +500,7 @@ function App() {
                       </div>
                     </div>
                   )}
-                  <ImportArea onImport={(task) => { addTask(task); setActiveTaskId(task.id); showToast('Importado!'); }} showToast={showToast} />
+                  <ImportArea onImport={(task) => { addTask(task); setTaskWorkTab(getDefaultTaskWorkTab(task)); setActiveTaskId(task.id); showToast('Importado!'); }} showToast={showToast} />
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -470,6 +510,43 @@ function App() {
                     onPause={pauseTask} showStats={showStats} onToggleStats={() => setShowStats(!showStats)}
                     onUpdateAllLayouts={(layout) => updateTaskBlocksLayout(activeTaskId!, layout)}
                   />
+                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/5 bg-[#262626] p-2">
+                    <button
+                      type="button"
+                      onClick={() => setTaskWorkTab('caderno')}
+                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
+                        taskWorkTab === 'caderno'
+                          ? 'bg-[#84cc16] text-black'
+                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <Grid3X3 className="w-4 h-4" /> Caderno
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => taskHasAvailableQuestions(activeTask) && setTaskWorkTab('questoes')}
+                      disabled={!taskHasAvailableQuestions(activeTask)}
+                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
+                        taskWorkTab === 'questoes'
+                          ? 'bg-purple-600 text-white'
+                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400`}
+                      title={taskHasAvailableQuestions(activeTask) ? 'Executar questões completas disponíveis' : 'Nenhuma questão completa importada nesta tarefa'}
+                    >
+                      <FileQuestion className="w-4 h-4" /> Questões
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaskWorkTab('gabarito')}
+                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
+                        taskWorkTab === 'gabarito'
+                          ? 'bg-purple-600 text-white'
+                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <ClipboardCheck className="w-4 h-4" /> Gabarito
+                    </button>
+                  </div>
                   <div className="flex-1">
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToWindowEdges]}>
                       <div className="grid grid-cols-12 gap-x-8 gap-y-4 pb-20">
@@ -497,6 +574,7 @@ function App() {
                                 key={block.id}
                                 block={block}
                                 index={index}
+                                displayMode={taskWorkTab}
                                 globalShowStats={showStats}
                                 sectionStats={sectionStats}
                                 onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
@@ -564,6 +642,15 @@ function App() {
             />
           )}
 
+          {activeTab === 'planner' && (
+            <PlannerArea
+              studyTasks={tasks}
+              onOpenStudyTask={handleOpenPlannerStudyTask}
+              onCreateStudyTask={handleCreateStudyTaskFromPlanner}
+              showToast={showToast}
+            />
+          )}
+
           {activeTab === 'historico' && (
             <div className="space-y-6">
               {viewingTask ? (
@@ -573,7 +660,7 @@ function App() {
                     task={viewingTask} isEditing={isEditingTask} editForm={editForm} setEditForm={setEditForm}
                     onSave={saveTaskEdits} onCancel={() => setIsEditingTask(false)} onEditStart={startEditingTask} showDate={true}
                     showStats={showStats} onToggleStats={() => setShowStats(!showStats)}
-                    onReopen={() => { reopenTask(viewingTask.id); setViewingTaskId(null); setActiveTab('caderno'); showToast('Reaberta!'); }}
+                    onReopen={() => { reopenTask(viewingTask.id); setTaskWorkTab(getDefaultTaskWorkTab(viewingTask)); setViewingTaskId(null); setActiveTab('caderno'); showToast('Reaberta!'); }}
                   />
                   <div className="grid grid-cols-12 gap-8">
                     {viewingTask.blocks.map((block, index) => (
