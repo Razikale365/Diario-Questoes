@@ -50,6 +50,7 @@ import {
 } from '../utils/plannerGenerator';
 import { buildPlannerInsights, PlannerDisciplineInsight, PlannerInsights } from '../utils/plannerInsights';
 import {
+  isStudyTaskCompatibleWithPlannerTask,
   loadStoredQuestionBank,
   matchQuestionBankItemsToPlannerTask,
   mergeQuestionBankItems,
@@ -582,8 +583,12 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const createOrOpenStudyTask = (task: PlannerTask) => {
-    if (task.linkedStudyTaskId && studyTasks.some((studyTask) => studyTask.id === task.linkedStudyTaskId)) {
-      onOpenStudyTask(task.linkedStudyTaskId);
+    const linkedTask = task.linkedStudyTaskId
+      ? studyTasks.find((studyTask) => studyTask.id === task.linkedStudyTaskId)
+      : null;
+
+    if (linkedTask && isStudyTaskCompatibleWithPlannerTask(task, linkedTask)) {
+      onOpenStudyTask(linkedTask.id);
       return;
     }
 

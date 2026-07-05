@@ -669,6 +669,46 @@ export const matchQuestionBankItemsToPlannerTask = (
     .map(({ item }) => item);
 };
 
+export const isStudyTaskCompatibleWithPlannerTask = (plannerTask: PlannerTask, studyTask: StudyTask) => {
+  const plannerText = [
+    plannerTask.description,
+    plannerTask.format,
+    plannerTask.planejamento,
+    plannerTask.details,
+    plannerTask.tips,
+    plannerTask.metaNumber ? String(plannerTask.metaNumber) : '',
+  ].join(' ');
+  const studyTaskText = [
+    studyTask.planejamento,
+    studyTask.meta,
+    studyTask.tarefa ? `tarefa ${studyTask.tarefa}` : '',
+    studyTask.assunto,
+    studyTask.discipline,
+    studyTask.bank,
+    ...studyTask.blocks.flatMap((block) => [
+      block.title,
+      block.lesson,
+      block.pages,
+      block.bank,
+      ...block.questions.flatMap((question) => [
+        question.sourceName,
+        question.statement,
+      ]),
+    ]),
+  ].join(' ');
+  const plannerAulaNumbers = extractNumbersAfterLabel(plannerText, 'aula');
+  const studyTaskAulaNumbers = extractNumbersAfterLabel(studyTaskText, 'aula');
+  const studyTaskNumbers = extractNumbersAfterLabel(studyTaskText, 'tarefa');
+
+  if (studyTaskNumbers.size > 0 && !studyTaskNumbers.has(plannerTask.number)) return false;
+
+  return !(
+    plannerAulaNumbers.size > 0 &&
+    studyTaskAulaNumbers.size > 0 &&
+    !hasNumberIntersection(plannerAulaNumbers, studyTaskAulaNumbers)
+  );
+};
+
 export const questionBankItemToQuestion = (item: QuestionBankItem, index: number): Question => ({
   number: index + 1,
   sourceQuestionNumber: item.sourceQuestionNumber,

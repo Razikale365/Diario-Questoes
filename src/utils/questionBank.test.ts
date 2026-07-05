@@ -9,6 +9,7 @@ import {
   filterQuestionBankItems,
   importQuestionBankBackup,
   getQuestionBankAnswerOptions,
+  isStudyTaskCompatibleWithPlannerTask,
   matchQuestionBankItemsToPlannerTask,
   mergeQuestionBankItems,
   parseQuestionBankBackup,
@@ -293,6 +294,48 @@ test('matchQuestionBankItemsToPlannerTask keeps professor Aula 04 questions off 
 
   assert.equal(task29Matches.length, 0);
   assert.equal(task31Matches.length, 2);
+});
+
+test('isStudyTaskCompatibleWithPlannerTask rejects a stale Aula 04 execution link for the Aula 03 planner task', () => {
+  const aula04 = buildQuestionBankItems(importedQuestions, {
+    sourceKind: 'professor',
+    sourceName: 'Professor Raphael Senra - Aula 04 - Lei 18.665/2023',
+    discipline: 'Legis. Tribut. Estadual (ICMS)',
+    lesson: 'Lei 18.665/2023',
+    taskTitle: 'Lei 18.665/2023 - Aula 04',
+    bank: 'Professor',
+    tags: ['Meta 46', 'Lei 18.665/2023', 'Aula 04'],
+  });
+  const studyTask = createStudyTaskFromQuestionBankItems(aula04, {
+    title: 'Tarefa 31 - Legis. Tribut. Estadual (ICMS)',
+    lesson: 'Professor Raphael Senra - Aula 04 - Lei 18.665/2023',
+  });
+
+  assert.ok(studyTask);
+  assert.equal(
+    isStudyTaskCompatibleWithPlannerTask(
+      {
+        id: 'planner-29',
+        number: 29,
+        metaNumber: 46,
+        discipline: 'Legis. Tribut. Estadual (ICMS)',
+        format: 'Revisao e Exercicios',
+        description: 'Lei 18.665/2023 - Arts. 01 ao 06 (Revisão)',
+        details: '- Clique em Aula 03 - Lei 18.665/2023',
+        spentMinutes: 0,
+        estimatedMinutes: 80,
+        performance: null,
+        status: 'pending',
+        relevance: 10,
+        durationMinutes: 80,
+        source: 'ls-meta-pdf',
+        createdAt: '2026-07-04T00:00:00.000Z',
+        updatedAt: '2026-07-04T00:00:00.000Z',
+      },
+      studyTask,
+    ),
+    false,
+  );
 });
 
 test('createQuestionBankBackup exports a versioned portable question bank file', () => {
