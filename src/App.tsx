@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight, ClipboardCheck, FileQuestion, Grid3X3 } from 'lucide-react';
+import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight } from 'lucide-react';
 
 import { ActivityBlock, StudyTask, Question } from './types';
 import { useTasks } from './hooks/useTasks';
@@ -11,6 +11,8 @@ import { HistoryList } from './components/HistoryList';
 import { RevisionArea } from './components/RevisionArea';
 import { PlannerArea } from './components/PlannerArea';
 import { ActivityBlockCard } from './components/ActivityBlockCard';
+import { QuestionCardDeck } from './components/QuestionCardDeck';
+import { TaskWorkModeTabs } from './components/TaskWorkModeTabs';
 import { TaskHeader } from './components/TaskHeader';
 import { GabaritoModal } from './components/GabaritoModal';
 import { BlockEditModal } from './components/BlockEditModal';
@@ -19,6 +21,16 @@ import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
 import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/parser';
+import {
+  QUESTION_BANK_BACKUP_SCHEMA,
+  QUESTION_BANK_UPDATED_EVENT,
+  importQuestionBankBackup,
+  loadStoredQuestionBank,
+  persistQuestionBank,
+} from './utils/questionBank';
+import { loadStoredExternalAnswerBatches, persistExternalAnswerBatches } from './utils/externalAnswers';
+import { TaskWorkTab, getDefaultTaskWorkTab, normalizeTaskWorkTabForTask } from './utils/taskWorkModes';
+import { mergeStudyTaskBackup, parseStudyTaskBackup } from './utils/taskBackup';
 import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
@@ -40,14 +52,13 @@ import {
 } from '@dnd-kit/sortable';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 
-type TaskWorkTab = 'caderno' | 'questoes' | 'gabarito';
 type ActiveTab = 'caderno' | 'planner' | 'revisao' | 'historico';
 
-const taskHasAvailableQuestions = (task?: StudyTask | null) =>
-  Boolean(task?.blocks.some(block => block.questions.some(question => question.statement && question.alternatives?.length)));
-
-const getDefaultTaskWorkTab = (task?: StudyTask | null): TaskWorkTab =>
-  taskHasAvailableQuestions(task) ? 'questoes' : 'caderno';
+const isQuestionBankBackupPayload = (value: unknown) =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  (value as { schema?: unknown }).schema === QUESTION_BANK_BACKUP_SCHEMA;
 
 function App() {
   const {
@@ -225,12 +236,6 @@ function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  useEffect(() => {
-    if (taskWorkTab === 'questoes' && activeTask && !taskHasAvailableQuestions(activeTask)) {
-      setTaskWorkTab('caderno');
-    }
-  }, [activeTask, taskWorkTab]);
-
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id && activeTaskId) {
@@ -351,15 +356,21 @@ function App() {
 
   const importBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        setTasks(parsed);
+        const rawBackup = event.target?.result as string;
+        const parsed = JSON.parse(rawBackup);
+        if (isQuestionBankBackupPayload(parsed)) {
+          importQuestionBankHistoryBackup(rawBackup);
+          return;
+        }
+        setTasks(parseStudyTaskBackup(parsed));
         showToast('Backup importado!');
-      } catch {
-        alert('Erro ao importar.');
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Erro ao importar.');
       }
     };
     reader.readAsText(file);
@@ -367,39 +378,72 @@ function App() {
 
   const mergeBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const incoming = JSON.parse(event.target?.result as string);
-        setTasks(prev => [...prev, ...incoming.filter((t1: any) => !prev.some(t2 => t2.id === t1.id))]);
-        showToast('Backup mesclado!');
-      } catch {
-        alert('Erro ao mesclar.');
+        const rawBackup = event.target?.result as string;
+        const incoming = JSON.parse(rawBackup);
+        if (isQuestionBankBackupPayload(incoming)) {
+          importQuestionBankHistoryBackup(rawBackup);
+          return;
+        }
+        const incomingTasks = parseStudyTaskBackup(incoming);
+        const merged = mergeStudyTaskBackup(tasks, incomingTasks);
+        setTasks(merged.tasks);
+        showToast(`${merged.added} tarefa(s) adicionada(s); ${merged.duplicates} já existiam.`);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Erro ao mesclar.');
       }
     };
     reader.readAsText(file);
   };
 
+  const importQuestionBankHistoryBackup = (rawBackup: string) => {
+    const currentItems = loadStoredQuestionBank();
+    const currentExternalAnswerBatches = loadStoredExternalAnswerBatches();
+    const imported = importQuestionBankBackup(currentItems, rawBackup, currentExternalAnswerBatches);
+
+    persistQuestionBank(imported.items);
+    persistExternalAnswerBatches(imported.externalAnswerBatches);
+    window.dispatchEvent(new CustomEvent(QUESTION_BANK_UPDATED_EVENT));
+    showToast(
+      `${imported.added} novas; ${imported.duplicates} já existiam; ${imported.externalAnswerBatchesImported} lote(s) TEC importados.`
+    );
+  };
+
   const handlePasteImport = (json: string) => {
     try {
       const parsed = JSON.parse(json);
-      setTasks(parsed);
+      if (isQuestionBankBackupPayload(parsed)) {
+        importQuestionBankHistoryBackup(json);
+        setIsPasteModalOpen(false);
+        return;
+      }
+      setTasks(parseStudyTaskBackup(parsed));
       setIsPasteModalOpen(false);
       showToast('Backup restaurado!');
-    } catch {
-      alert('JSON inválido.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'JSON inválido.');
     }
   };
 
   const handlePasteMerge = (json: string) => {
     try {
       const incoming = JSON.parse(json);
-      setTasks(prev => [...prev, ...incoming.filter((t1: any) => !prev.some(t2 => t2.id === t1.id))]);
+      if (isQuestionBankBackupPayload(incoming)) {
+        importQuestionBankHistoryBackup(json);
+        setIsPasteModalOpen(false);
+        return;
+      }
+      const incomingTasks = parseStudyTaskBackup(incoming);
+      const merged = mergeStudyTaskBackup(tasks, incomingTasks);
+      setTasks(merged.tasks);
+      showToast(`${merged.added} tarefa(s) adicionada(s); ${merged.duplicates} já existiam.`);
       setIsPasteModalOpen(false);
-      showToast('Backup mesclado!');
-    } catch {
-      alert('JSON inválido.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'JSON inválido.');
     }
   };
 
@@ -435,7 +479,23 @@ function App() {
     showToast('Tarefa criada a partir do planner.');
   };
 
+  const handleOpenHistoryTask = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      setTaskWorkTab(getDefaultTaskWorkTab(task));
+    }
+    setViewingTaskId(taskId);
+  };
+
   const viewingTask = useMemo(() => tasks.find(t => t.id === viewingTaskId), [tasks, viewingTaskId]);
+  const taskWorkContextTask = activeTab === 'historico' && viewingTask ? viewingTask : activeTask;
+
+  useEffect(() => {
+    const normalizedTab = normalizeTaskWorkTabForTask(taskWorkContextTask, taskWorkTab);
+    if (normalizedTab !== taskWorkTab) {
+      setTaskWorkTab(normalizedTab);
+    }
+  }, [taskWorkContextTask, taskWorkTab]);
 
   return (
     <div className="flex h-screen bg-[#1a1a1a] text-gray-100 font-sans selection:bg-purple-500/30 overflow-hidden">
@@ -510,93 +570,65 @@ function App() {
                     onPause={pauseTask} showStats={showStats} onToggleStats={() => setShowStats(!showStats)}
                     onUpdateAllLayouts={(layout) => updateTaskBlocksLayout(activeTaskId!, layout)}
                   />
-                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/5 bg-[#262626] p-2">
-                    <button
-                      type="button"
-                      onClick={() => setTaskWorkTab('caderno')}
-                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
-                        taskWorkTab === 'caderno'
-                          ? 'bg-[#84cc16] text-black'
-                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                      }`}
-                    >
-                      <Grid3X3 className="w-4 h-4" /> Caderno
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => taskHasAvailableQuestions(activeTask) && setTaskWorkTab('questoes')}
-                      disabled={!taskHasAvailableQuestions(activeTask)}
-                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
-                        taskWorkTab === 'questoes'
-                          ? 'bg-purple-600 text-white'
-                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400`}
-                      title={taskHasAvailableQuestions(activeTask) ? 'Executar questões completas disponíveis' : 'Nenhuma questão completa importada nesta tarefa'}
-                    >
-                      <FileQuestion className="w-4 h-4" /> Questões
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTaskWorkTab('gabarito')}
-                      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest transition-all ${
-                        taskWorkTab === 'gabarito'
-                          ? 'bg-purple-600 text-white'
-                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                      }`}
-                    >
-                      <ClipboardCheck className="w-4 h-4" /> Gabarito
-                    </button>
-                  </div>
+                  <TaskWorkModeTabs task={activeTask} activeTab={taskWorkTab} onChange={setTaskWorkTab} />
                   <div className="flex-1">
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToWindowEdges]}>
-                      <div className="grid grid-cols-12 gap-x-8 gap-y-4 pb-20">
-                        <SortableContext items={activeTask.blocks.map(b => b.id)} strategy={rectSortingStrategy}>
-                          {activeTask.blocks.map((block, index) => {
-                            let sectionStats = undefined;
-                            if (block.isSection) {
-                              const sectionBlocks = activeTask.blocks.filter(b => 
-                                !b.isSection && b.lesson.trim().toLowerCase() === block.title.trim().toLowerCase()
-                              );
-                              const allQs = sectionBlocks.flatMap(b => b.questions);
-                              const answered = allQs.filter(q => q.answer).length;
-                              const correct = allQs.filter(q => q.isCorrect === true).length;
-                              const incorrect = allQs.filter(q => q.isCorrect === false).length;
-                              const doubts = allQs.filter(q => q.hasDoubt).length;
-                              const doubtsCorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === true).length;
-                              const doubtsIncorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === false).length;
-                              const total = allQs.length;
-                              const accuracy = answered > 0 ? (correct / answered) * 100 : 0;
-                              sectionStats = { total, answered, correct, incorrect, doubts, accuracy, doubtsCorrect, doubtsIncorrect };
-                            }
+                    {taskWorkTab === 'cards' ? (
+                      <QuestionCardDeck
+                        task={activeTask}
+                        onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
+                        onFinishTask={finishTask}
+                      />
+                    ) : (
+                      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToWindowEdges]}>
+                        <div className="grid grid-cols-12 gap-x-8 gap-y-4 pb-20">
+                          <SortableContext items={activeTask.blocks.map(b => b.id)} strategy={rectSortingStrategy}>
+                            {activeTask.blocks.map((block, index) => {
+                              let sectionStats = undefined;
+                              if (block.isSection) {
+                                const sectionBlocks = activeTask.blocks.filter(b =>
+                                  !b.isSection && b.lesson.trim().toLowerCase() === block.title.trim().toLowerCase()
+                                );
+                                const allQs = sectionBlocks.flatMap(b => b.questions);
+                                const answered = allQs.filter(q => q.answer).length;
+                                const correct = allQs.filter(q => q.isCorrect === true).length;
+                                const incorrect = allQs.filter(q => q.isCorrect === false).length;
+                                const doubts = allQs.filter(q => q.hasDoubt).length;
+                                const doubtsCorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === true).length;
+                                const doubtsIncorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === false).length;
+                                const total = allQs.length;
+                                const accuracy = answered > 0 ? (correct / answered) * 100 : 0;
+                                sectionStats = { total, answered, correct, incorrect, doubts, accuracy, doubtsCorrect, doubtsIncorrect };
+                              }
 
-                            return (
-                              <ActivityBlockCard
-                                key={block.id}
-                                block={block}
-                                index={index}
-                                displayMode={taskWorkTab}
-                                globalShowStats={showStats}
-                                sectionStats={sectionStats}
-                                onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
-                                onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
-                                onEditBlock={openEditBlock}
-                                onDeleteBlock={handleDeleteBlock}
-                                onImportGabarito={setGabaritoModal}
-                                onToggleLayout={(blockId) => toggleBlockLayout(activeTaskId!, blockId)}
-                                onToggleStats={(blockId) => toggleBlockStats(activeTaskId!, blockId)}
-                                onToggleSectionLock={(title) => toggleSectionLock(activeTaskId!, title)}
-                                onToggleSectionStats={(title) => toggleSectionStats(activeTaskId!, title)}
-                                onUpdateLayout={(blockId, layout) => updateBlockLayout(activeTaskId!, blockId, layout)}
-                                onEditSection={handleEditSection}
-                                onAutoSnap={() => autoSnapBlocks(activeTaskId!)}
-                                onRenameSection={handleRenameSection}
-                                onToggleGabarito={(blockId) => toggleBlockGabarito(activeTaskId!, blockId)}
-                              />
-                            );
-                          })}
-                        </SortableContext>
-                      </div>
-                    </DndContext>
+                              return (
+                                <ActivityBlockCard
+                                  key={block.id}
+                                  block={block}
+                                  index={index}
+                                  displayMode={taskWorkTab}
+                                  globalShowStats={showStats}
+                                  sectionStats={sectionStats}
+                                  onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
+                                  onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
+                                  onEditBlock={openEditBlock}
+                                  onDeleteBlock={handleDeleteBlock}
+                                  onImportGabarito={setGabaritoModal}
+                                  onToggleLayout={(blockId) => toggleBlockLayout(activeTaskId!, blockId)}
+                                  onToggleStats={(blockId) => toggleBlockStats(activeTaskId!, blockId)}
+                                  onToggleSectionLock={(title) => toggleSectionLock(activeTaskId!, title)}
+                                  onToggleSectionStats={(title) => toggleSectionStats(activeTaskId!, title)}
+                                  onUpdateLayout={(blockId, layout) => updateBlockLayout(activeTaskId!, blockId, layout)}
+                                  onEditSection={handleEditSection}
+                                  onAutoSnap={() => autoSnapBlocks(activeTaskId!)}
+                                  onRenameSection={handleRenameSection}
+                                  onToggleGabarito={(blockId) => toggleBlockGabarito(activeTaskId!, blockId)}
+                                />
+                              );
+                            })}
+                          </SortableContext>
+                        </div>
+                      </DndContext>
+                    )}
                   </div>
                   <div className="flex justify-center gap-4 py-8">
                     <button onClick={() => openEditBlock()} className="flex items-center gap-2 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all border border-dashed border-white/10 hover:border-purple-500/50 font-black uppercase tracking-widest text-xs group">
@@ -662,27 +694,61 @@ function App() {
                     showStats={showStats} onToggleStats={() => setShowStats(!showStats)}
                     onReopen={() => { reopenTask(viewingTask.id); setTaskWorkTab(getDefaultTaskWorkTab(viewingTask)); setViewingTaskId(null); setActiveTab('caderno'); showToast('Reaberta!'); }}
                   />
-                  <div className="grid grid-cols-12 gap-8">
-                    {viewingTask.blocks.map((block, index) => (
-                      <ActivityBlockCard
-                        key={block.id} block={block} index={index}
-                        onUpdateQuestion={(bid, qn, upd) => updateQuestion(viewingTaskId!, bid, qn, upd)}
-                        onToggleLock={(bid) => toggleLock(viewingTaskId!, bid)}
-                        onEditBlock={openEditBlock} onDeleteBlock={handleDeleteBlock} onImportGabarito={setGabaritoModal}
-                        onToggleLayout={(bid) => toggleBlockLayout(viewingTaskId!, bid)} globalShowStats={showStats}
-                        onToggleStats={(bid) => toggleBlockStats(viewingTaskId!, bid)}
-                        onUpdateLayout={(bid, layout) => updateBlockLayout(viewingTaskId!, bid, layout)}
-                        onToggleGabarito={(bid) => toggleBlockGabarito(viewingTaskId!, bid)}
-                      />
-                    ))}
-                  </div>
+                  <TaskWorkModeTabs task={viewingTask} activeTab={taskWorkTab} onChange={setTaskWorkTab} />
+                  {taskWorkTab === 'cards' ? (
+                    <QuestionCardDeck
+                      task={viewingTask}
+                      onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(viewingTask.id, blockId, qNumber, updates)}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-12 gap-8">
+                      {viewingTask.blocks.map((block, index) => {
+                        let sectionStats = undefined;
+                        if (block.isSection) {
+                          const sectionBlocks = viewingTask.blocks.filter(b =>
+                            !b.isSection && b.lesson.trim().toLowerCase() === block.title.trim().toLowerCase()
+                          );
+                          const allQs = sectionBlocks.flatMap(b => b.questions);
+                          const answered = allQs.filter(q => q.answer).length;
+                          const correct = allQs.filter(q => q.isCorrect === true).length;
+                          const incorrect = allQs.filter(q => q.isCorrect === false).length;
+                          const doubts = allQs.filter(q => q.hasDoubt).length;
+                          const doubtsCorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === true).length;
+                          const doubtsIncorrect = allQs.filter(q => q.hasDoubt && q.isCorrect === false).length;
+                          const total = allQs.length;
+                          const accuracy = answered > 0 ? (correct / answered) * 100 : 0;
+                          sectionStats = { total, answered, correct, incorrect, doubts, accuracy, doubtsCorrect, doubtsIncorrect };
+                        }
+
+                        return (
+                          <ActivityBlockCard
+                            key={block.id}
+                            block={block}
+                            index={index}
+                            displayMode={taskWorkTab}
+                            globalShowStats={showStats}
+                            sectionStats={sectionStats}
+                            onUpdateQuestion={(bid, qn, upd) => updateQuestion(viewingTask.id, bid, qn, upd)}
+                            onToggleLock={(bid) => toggleLock(viewingTask.id, bid)}
+                            onEditBlock={openEditBlock}
+                            onDeleteBlock={handleDeleteBlock}
+                            onImportGabarito={setGabaritoModal}
+                            onToggleLayout={(bid) => toggleBlockLayout(viewingTask.id, bid)}
+                            onToggleStats={(bid) => toggleBlockStats(viewingTask.id, bid)}
+                            onUpdateLayout={(bid, layout) => updateBlockLayout(viewingTask.id, bid, layout)}
+                            onToggleGabarito={(bid) => toggleBlockGabarito(viewingTask.id, bid)}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <HistoryList 
                   tasks={tasks} 
                   historyPage={historyPage}
                   setHistoryPage={setHistoryPage}
-                  onOpenTask={setViewingTaskId} 
+                  onOpenTask={handleOpenHistoryTask}
                   onDeleteTask={setTaskToDelete} 
                 />
               )}

@@ -45,11 +45,11 @@ export const PasteBackupModal: React.FC<PasteBackupModalProps> = ({
           </button>
         </div>
         <p className="text-sm text-gray-400 mb-4">
-          Cole o conteúdo JSON do seu backup abaixo para restaurar ou mesclado suas tarefas.
+          Cole o JSON de tarefas ou do banco de questões para restaurar, mesclar ou importar histórico.
         </p>
         <textarea
           className="w-full h-48 bg-[#1a1a1a] border border-[#404040] rounded-lg p-4 text-white font-mono text-sm mb-6 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none"
-          placeholder='[ { "id": "...", "date": "...", ... } ]'
+          placeholder='[ { "id": "...", "date": "...", ... } ] ou { "schema": "diario-questoes.question-bank", ... }'
           value={text}
           onChange={e => setText(e.target.value)}
         />

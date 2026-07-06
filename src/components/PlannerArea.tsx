@@ -55,8 +55,10 @@ import {
   matchQuestionBankItemsToPlannerTask,
   mergeQuestionBankItems,
   persistQuestionBank,
+  QUESTION_BANK_UPDATED_EVENT,
   questionBankItemToQuestion,
 } from '../utils/questionBank';
+import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 
 type PlannerView = 'month' | 'week';
@@ -301,6 +303,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       setQuestionBankItems(loadStoredQuestionBank());
     }
   }, [activeSection]);
+
+  useEffect(() => {
+    const refreshQuestionBank = () => {
+      setQuestionBankItems(loadStoredQuestionBank());
+    };
+
+    window.addEventListener(QUESTION_BANK_UPDATED_EVENT, refreshQuestionBank);
+    return () => window.removeEventListener(QUESTION_BANK_UPDATED_EVENT, refreshQuestionBank);
+  }, []);
 
   useEffect(() => {
     if (selectedTaskId && !plannerTasks.some((task) => task.id === selectedTaskId)) {
@@ -1246,13 +1257,16 @@ const PlannerTaskDetailModal: React.FC<{
   onArchive: () => void;
 }> = ({ task, onClose, onExecute, onClearSchedule, onArchive }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-    <div className="w-full max-w-2xl rounded-lg border border-[#525252] bg-[#262626] shadow-2xl">
-      <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
+    <div
+      className="flex flex-col rounded-2xl border border-[#525252] bg-[#262626] shadow-2xl"
+      style={createPlannerTaskModalStyle()}
+    >
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 p-5">
         <div className="min-w-0">
           <p className="text-[11px] font-black uppercase tracking-[0.25em] text-purple-400">
             Tarefa {task.number} - {task.discipline}
           </p>
-          <h2 className="mt-1 text-xl font-black text-white">{task.description}</h2>
+          <h2 className="mt-1 text-xl font-black leading-tight text-white md:text-2xl">{task.description}</h2>
         </div>
         <button
           type="button"
@@ -1263,70 +1277,77 @@ const PlannerTaskDetailModal: React.FC<{
         </button>
       </div>
 
-      <div className="space-y-4 p-5">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Metric icon={CalendarDays} label="Data" value={formatPlannerDate(task.scheduledDate)} />
-          <Metric icon={Timer} label="Horário" value={task.startTime || '-'} />
-          <Metric icon={ClockIcon} label="Duração" value={formatMinutes(task.durationMinutes)} />
-          <Metric icon={Target} label="Rel." value={`${task.relevance}`} />
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_340px]">
+          <section className="min-h-0 space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Metric icon={CalendarDays} label="Data" value={formatPlannerDate(task.scheduledDate)} />
+              <Metric icon={Timer} label="Horário" value={task.startTime || '-'} />
+              <Metric icon={ClockIcon} label="Duração" value={formatMinutes(task.durationMinutes)} />
+              <Metric icon={Target} label="Rel." value={`${task.relevance}`} />
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#1a1a1a] p-4">
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Descrição</p>
+              <p className="whitespace-pre-wrap text-sm font-bold leading-relaxed text-white">{task.description}</p>
+            </div>
+
+            {task.details && (
+              <div className="rounded-xl border border-white/10 bg-[#1a1a1a] p-4">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Atividades e instruções</p>
+                <p className="max-h-[28vh] overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-200 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                  {task.details}
+                </p>
+              </div>
+            )}
+
+            {task.tips && (
+              <div className="rounded-xl border border-purple-400/20 bg-purple-500/5 p-4">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-purple-200">Dicas e Bizus</p>
+                <p className="max-h-[28vh] overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-100 scrollbar-thin scrollbar-thumb-purple-400/20 scrollbar-track-transparent">
+                  {task.tips}
+                </p>
+              </div>
+            )}
+          </section>
+
+          <aside className="space-y-4 rounded-xl border border-white/10 bg-[#1a1a1a] p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Resumo</p>
+            <div className="grid gap-3 text-sm text-gray-300">
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Status</span>{statusLabel[task.status]}</p>
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Formato</span>{task.format || '-'}</p>
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Planejamento</span>{task.planejamento || '-'}</p>
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Meta</span>{task.metaNumber || '-'}</p>
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Desempenho</span>{task.performance === null ? '-' : `${task.performance}%`}</p>
+            </div>
+          </aside>
         </div>
+      </div>
 
-        <div className="rounded border border-white/10 bg-[#1a1a1a] p-4">
-          <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Descrição</p>
-          <p className="whitespace-pre-wrap text-sm font-bold leading-relaxed text-white">{task.description}</p>
-        </div>
-
-        {task.details && (
-          <div className="rounded border border-white/10 bg-[#1a1a1a] p-4">
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Atividades e instruções</p>
-            <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-200">
-              {task.details}
-            </p>
-          </div>
-        )}
-
-        {task.tips && (
-          <div className="rounded border border-purple-400/20 bg-purple-500/5 p-4">
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-purple-200">Dicas e Bizus</p>
-            <p className="max-h-[42vh] overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-100">
-              {task.tips}
-            </p>
-          </div>
-        )}
-
-        <div className="grid gap-2 rounded border border-white/10 bg-[#1a1a1a] p-4 text-sm text-gray-300 md:grid-cols-2">
-          <p><span className="font-black text-gray-500">Status:</span> {statusLabel[task.status]}</p>
-          <p><span className="font-black text-gray-500">Formato:</span> {task.format || '-'}</p>
-          <p><span className="font-black text-gray-500">Planejamento:</span> {task.planejamento || '-'}</p>
-          <p><span className="font-black text-gray-500">Meta:</span> {task.metaNumber || '-'}</p>
-          <p><span className="font-black text-gray-500">Desempenho:</span> {task.performance === null ? '-' : `${task.performance}%`}</p>
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2">
-          {task.scheduledDate && (
-            <button
-              type="button"
-              onClick={onClearSchedule}
-              className="rounded border border-red-400/20 bg-red-500/10 px-4 py-2 text-xs font-black uppercase text-red-300 transition hover:bg-red-500/20"
-            >
-              Soltar
-            </button>
+      <div className="flex shrink-0 flex-wrap justify-end gap-2 rounded-b-2xl border-t border-white/10 bg-[#1a1a1a] p-5">
+        {task.scheduledDate && (
+          <button
+            type="button"
+            onClick={onClearSchedule}
+            className="rounded border border-red-400/20 bg-red-500/10 px-4 py-2 text-xs font-black uppercase text-red-300 transition hover:bg-red-500/20"
+          >
+            Soltar
+          </button>
           )}
-          <button
-            type="button"
-            onClick={onArchive}
-            className="rounded border border-yellow-400/20 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-300 transition hover:bg-yellow-400/20"
-          >
-            Arquivar
-          </button>
-          <button
-            type="button"
-            onClick={onExecute}
-            className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d]"
-          >
-            Executar
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onArchive}
+          className="rounded border border-yellow-400/20 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-300 transition hover:bg-yellow-400/20"
+        >
+          Arquivar
+        </button>
+        <button
+          type="button"
+          onClick={onExecute}
+          className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d]"
+        >
+          Executar
+        </button>
       </div>
     </div>
   </div>

@@ -235,6 +235,7 @@ test('matchQuestionBankItemsToPlannerTask prefers exact task-title matches when 
   assert.ok(task29Matches.every((item) => item.taskTitle?.includes('Tarefa 29')));
   assert.equal(task31Matches.length, 2);
   assert.ok(task31Matches.every((item) => item.taskTitle?.includes('Tarefa 31')));
+  assert.deepEqual(task31Matches.map((item) => item.sourceQuestionNumber), [1, 2]);
 });
 
 test('matchQuestionBankItemsToPlannerTask keeps professor Aula 04 questions off the Aula 03 task', () => {

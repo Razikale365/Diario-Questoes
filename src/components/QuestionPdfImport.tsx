@@ -57,6 +57,7 @@ import {
   loadStoredQuestionBank,
   mergeQuestionBankItems,
   persistQuestionBank,
+  QUESTION_BANK_UPDATED_EVENT,
   questionBankItemToQuestion,
   resetQuestionBankItemAttempts,
   resolveMergedQuestionBankItems,
@@ -146,6 +147,20 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
       null,
     [externalAnswerBatches, externalAnswerBatchState.selectedBatchId]
   );
+
+  useEffect(() => {
+    const refreshQuestionBank = () => {
+      setQuestionBank(loadStoredQuestionBank());
+      const batches = loadStoredExternalAnswerBatches();
+      setExternalAnswerBatchState({
+        batches,
+        selectedBatchId: batches[0]?.id || '',
+      });
+    };
+
+    window.addEventListener(QUESTION_BANK_UPDATED_EVENT, refreshQuestionBank);
+    return () => window.removeEventListener(QUESTION_BANK_UPDATED_EVENT, refreshQuestionBank);
+  }, []);
 
   const detected = useMemo(() => {
     const questions = result?.questions || [];

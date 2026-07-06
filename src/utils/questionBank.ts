@@ -5,6 +5,7 @@ import { ImportedObjectiveQuestion } from './objectiveQuestionParser';
 export const QUESTION_BANK_STORAGE_KEY = 'ls_question_bank_v1';
 export const QUESTION_BANK_BACKUP_SCHEMA = 'diario-questoes.question-bank';
 export const QUESTION_BANK_BACKUP_VERSION = 1;
+export const QUESTION_BANK_UPDATED_EVENT = 'diario_question_bank_updated';
 
 export interface QuestionBankImportContext {
   sourceKind: QuestionSourceKind;
@@ -656,9 +657,19 @@ export const matchQuestionBankItemsToPlannerTask = (
     .filter(({ score }) => score > 0);
 
   const directMatches = ranked.filter(({ directTaskNumber }) => directTaskNumber);
-  const candidates = directMatches.length > 0 ? directMatches : ranked;
+  if (directMatches.length > 0) {
+    return directMatches
+      .sort((a, b) =>
+        (a.item.sourceQuestionNumber || 0) - (b.item.sourceQuestionNumber || 0) ||
+        b.score - a.score ||
+        Number(b.item.favorite) - Number(a.item.favorite) ||
+        (b.item.year || 0) - (a.item.year || 0)
+      )
+      .slice(0, limit)
+      .map(({ item }) => item);
+  }
 
-  return candidates
+  return ranked
     .sort((a, b) =>
       b.score - a.score ||
       Number(b.item.favorite) - Number(a.item.favorite) ||
