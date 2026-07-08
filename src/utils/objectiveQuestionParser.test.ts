@@ -85,3 +85,46 @@ Gabarito: A
   assert.doesNotMatch(result.questions[0].statement, /ALIMENTAÇÃO E BEBIDAS/);
   assert.equal(result.questions[0].answerKey, 'A');
 });
+
+test('parseObjectiveQuestions accepts bare and padded question headings', () => {
+  const cases = [
+    {
+      heading: '02 (INÉDITAS - PROFESSOR) Sobre benefícios fiscais, assinale a alternativa correta.',
+      expectedNumber: 2,
+      expectedStatement: /Sobre benefícios fiscais/,
+    },
+    {
+      heading: '002 Sobre importação de máquinas, assinale a alternativa correta.',
+      expectedNumber: 2,
+      expectedStatement: /^Sobre importação/,
+    },
+    {
+      heading: 'Questão 002\nSobre contribuições, assinale a alternativa correta.',
+      expectedNumber: 2,
+      expectedStatement: /^Sobre contribuições/,
+    },
+    {
+      heading: '3 - Sobre exportação, assinale a alternativa correta.',
+      expectedNumber: 3,
+      expectedStatement: /^Sobre exportação/,
+    },
+  ];
+
+  for (const { heading, expectedNumber, expectedStatement } of cases) {
+    const result = parseObjectiveQuestions(`
+${heading}
+A) Alternativa incorreta.
+B) Alternativa correta.
+C) Alternativa incorreta.
+D) Alternativa incorreta.
+E) Alternativa incorreta.
+Gabarito: B
+`);
+
+    assert.equal(result.rejectedBlocks, 0);
+    assert.equal(result.questions.length, 1);
+    assert.equal(result.questions[0].number, expectedNumber);
+    assert.doesNotMatch(result.questions[0].statement, /^0*\d+\b/);
+    assert.match(result.questions[0].statement, expectedStatement);
+  }
+});

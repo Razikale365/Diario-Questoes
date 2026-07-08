@@ -101,7 +101,7 @@ const stripTail = (block: string) => {
 };
 
 const removeQuestionHeader = (block: string, number: number) => {
-  const headerRe = new RegExp(`^\\s*(?:(?:quest(?:ão|ao)|q)\\s*)?${number}\\s*(?:[.)\\-–:]|\\b)\\s*`, 'iu');
+  const headerRe = new RegExp(`^\\s*(?:(?:quest(?:ão|ao)|q)\\s*)?0*${number}\\s*(?:[.)\\-–:]|\\b)\\s*`, 'iu');
   return block.replace(headerRe, '').trim();
 };
 

@@ -134,8 +134,8 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
   }
 
   return (
-    <section ref={deckRef} className="mx-auto max-w-5xl space-y-4 pb-20">
-      <div className="rounded-2xl border border-white/5 bg-[#262626] p-3 md:p-4">
+    <section ref={deckRef} className="mx-auto w-full max-w-[1520px] space-y-4 pb-20">
+      <div className="rounded-2xl border border-white/5 bg-[#262626] p-3 md:p-4 lg:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +153,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
               </span>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30">
-              <div className="h-full rounded-full bg-[#84cc16] transition-all" style={{ width: `${answeredPercent}%` }} />
+              <div className="h-full rounded-full bg-[#84cc16] transition-[width]" style={{ width: `${answeredPercent}%` }} />
             </div>
           </div>
 
@@ -162,7 +162,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
               type="button"
               onClick={goPrevious}
               disabled={currentIndex === 0}
-              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-all hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               title="Questao anterior"
             >
               <ChevronLeft className="h-5 w-5" />
@@ -174,7 +174,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
               type="button"
               onClick={goNext}
               disabled={currentIndex >= cards.length - 1}
-              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-all hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               title="Proxima questao"
             >
               <ChevronRight className="h-5 w-5" />
@@ -183,9 +183,9 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
         </div>
       </div>
 
-      <div className="relative min-h-[560px] md:min-h-[620px]">
-        <div className="absolute inset-x-4 top-5 z-0 h-[calc(100%-20px)] rounded-2xl border border-white/5 bg-[#202020]" />
-        <div className="absolute inset-x-8 top-10 z-0 h-[calc(100%-40px)] rounded-2xl border border-white/5 bg-[#1d1d1d]" />
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-x-3 bottom-0 top-4 z-0 rounded-2xl border border-white/5 bg-[#202020]" />
+        <div className="pointer-events-none absolute inset-x-6 bottom-0 top-8 z-0 hidden rounded-2xl border border-white/5 bg-[#1d1d1d] sm:block" />
 
         <AnimatePresence mode="wait" custom={direction}>
           {currentCard && currentQuestion && (
@@ -200,7 +200,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
               animate={{ opacity: 1, x: 0, rotate: 0 }}
               exit={{ opacity: 0, x: direction >= 0 ? -48 : 48, rotate: direction >= 0 ? -2 : 2 }}
               transition={{ duration: 0.18 }}
-              className="absolute inset-0 z-10 flex flex-col rounded-2xl border border-white/10 bg-[#262626] p-4 shadow-2xl shadow-black/30 md:p-6"
+              className="relative z-10 flex min-h-[420px] flex-col rounded-2xl border border-white/10 bg-[#262626] p-4 shadow-2xl shadow-black/30 md:p-5 xl:p-6"
             >
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
@@ -237,7 +237,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     type="button"
                     onClick={() => updateCurrentQuestion({ favorite: !currentQuestion.favorite })}
                     disabled={currentCard.blockIsLocked}
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                       currentQuestion.favorite
                         ? 'bg-yellow-500/10 text-yellow-300'
                         : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
@@ -250,7 +250,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     type="button"
                     onClick={() => updateCurrentQuestion({ hasDoubt: !currentQuestion.hasDoubt })}
                     disabled={currentCard.blockIsLocked}
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                       currentQuestion.hasDoubt
                         ? 'bg-orange-500/10 text-orange-300'
                         : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
@@ -263,7 +263,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     type="button"
                     onClick={() => setIsEditingObservation((previous) => !previous)}
                     disabled={currentCard.blockIsLocked}
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                       currentQuestion.observations || isEditingObservation
                         ? 'bg-blue-500/10 text-blue-300'
                         : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
@@ -275,12 +275,12 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
-                <p className="text-base font-semibold leading-relaxed text-gray-100 md:text-lg">
+              <div className="min-h-0 flex-1">
+                <p className="max-w-[118ch] text-[15px] font-semibold leading-7 text-gray-100 [text-wrap:pretty] md:text-base lg:text-[17px] lg:leading-8">
                   {currentQuestion.statement}
                 </p>
 
-                <div className="mt-6 grid gap-2">
+                <div className="mt-5 grid gap-2.5 lg:gap-3">
                   {currentQuestion.alternatives?.map((alternative) => {
                     const isSelected = currentQuestion.answer === alternative.label;
                     const isEliminated = (currentQuestion.eliminated || []).includes(alternative.label);
@@ -292,7 +292,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                           type="button"
                           onClick={() => selectAlternative(alternative.label)}
                           disabled={currentCard.blockIsLocked}
-                          className={`flex min-h-[52px] flex-1 items-start gap-3 rounded-xl px-3 py-3 text-left transition-all ${
+                          className={`flex min-h-[52px] flex-1 items-start gap-3 rounded-xl px-3 py-3 text-left transition-[background-color,box-shadow,color,opacity] ${
                             isSelected
                               ? currentQuestion.isCorrect === true
                                 ? 'bg-[#84cc16]/15 text-white ring-1 ring-[#84cc16]/50'
@@ -309,14 +309,14 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/25 text-xs font-black">
                             {alternative.label}
                           </span>
-                          <span className="text-sm font-semibold leading-relaxed">{alternative.text}</span>
+                          <span className="text-sm font-semibold leading-relaxed [text-wrap:pretty] lg:text-[15px]">{alternative.text}</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => toggleAlternativeList('doubtedAlts', alternative.label)}
                           disabled={currentCard.blockIsLocked}
-                          className={`flex w-11 shrink-0 items-center justify-center rounded-xl transition-all ${
+                          className={`flex w-11 shrink-0 items-center justify-center rounded-xl transition-colors ${
                             isDoubted
                               ? 'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/40'
                               : 'bg-white/5 text-gray-600 hover:bg-white/10 hover:text-white'
@@ -329,7 +329,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                           type="button"
                           onClick={() => toggleAlternativeList('eliminated', alternative.label)}
                           disabled={currentCard.blockIsLocked}
-                          className={`flex w-11 shrink-0 items-center justify-center rounded-xl transition-all ${
+                          className={`flex w-11 shrink-0 items-center justify-center rounded-xl transition-colors ${
                             isEliminated
                               ? 'bg-red-500/10 text-red-300 ring-1 ring-red-500/40'
                               : 'bg-white/5 text-gray-600 hover:bg-white/10 hover:text-white'
@@ -350,7 +350,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     disabled={currentCard.blockIsLocked}
                     placeholder="Observacao"
                     rows={3}
-                    className="mt-4 min-h-[88px] w-full resize-none rounded-xl border border-white/10 bg-[#111111] p-3 text-sm font-semibold text-gray-200 outline-none transition-all focus:border-blue-400/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-4 min-h-[88px] w-full resize-none rounded-xl border border-white/10 bg-[#111111] p-3 text-sm font-semibold text-gray-200 outline-none transition-colors focus:border-blue-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 )}
               </div>
@@ -368,7 +368,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     <button
                       type="button"
                       onClick={onFinishTask}
-                      className="flex h-11 items-center gap-2 rounded-xl bg-[#84cc16] px-4 text-xs font-black uppercase tracking-widest text-black transition-all hover:bg-[#a3e635]"
+                      className="flex h-11 items-center gap-2 rounded-xl bg-[#84cc16] px-4 text-xs font-black uppercase tracking-widest text-black transition-colors hover:bg-[#a3e635]"
                     >
                       <Check className="h-4 w-4" />
                       Concluir
@@ -378,7 +378,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                     type="button"
                     onClick={goNext}
                     disabled={currentIndex >= cards.length - 1}
-                    className="flex h-11 items-center gap-2 rounded-xl bg-purple-600 px-4 text-xs font-black uppercase tracking-widest text-white transition-all hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex h-11 items-center gap-2 rounded-xl bg-purple-600 px-4 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Próxima
                     <ChevronRight className="h-4 w-4" />
