@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildTargetDecisionRows,
   buildStudyDayPlan,
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
+  formatStudyTargetProfileTable,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
+  parseStudyTargetProfileTable,
   seedCoverageForTarget,
   type StudyCoverageRow,
 } from './studyPlannerCore';
@@ -208,6 +211,55 @@ test('formatStudyCoverageTable round-trips editable manual target coverage rows'
 
   assert.match(formatted.split('\n')[0], /target \| discipline \| topic/);
   assert.deepEqual(parsed, seed.map((row) => ({ ...row, materialSource: '', notes: '' })));
+});
+
+test('formatStudyTargetProfileTable round-trips editable target profiles', () => {
+  const seed = DEFAULT_STUDY_TARGET_PROFILES.slice(0, 2).map((target, index) => ({
+    ...target,
+    active: index === 1,
+    priorityScore: index === 1 ? 92 : target.priorityScore,
+    sourceUrls: ['https://example.com/edital'],
+  }));
+
+  const formatted = formatStudyTargetProfileTable(seed);
+  const parsed = parseStudyTargetProfileTable(formatted);
+
+  assert.match(formatted.split('\n')[0], /slug \| name \| institution/);
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[1].slug, 'rfb_auditor');
+  assert.equal(parsed[1].active, true);
+  assert.equal(parsed[1].priorityScore, 92);
+  assert.deepEqual(parsed[1].sourceUrls, ['https://example.com/edital']);
+});
+
+test('buildTargetDecisionRows ranks targets from editable profile and current coverage signals', () => {
+  const profiles = parseStudyTargetProfileTable(`
+slug | name | institution | role | organizer | phase | priority | cost_benefit | banca_fit | course | ls | active | vagas | notes | urls
+bacen_economia_financas | BACEN Economia | BCB | Analista | CEBRASPE | pre_edital | 88 | 10 | 9 | yes | no | yes | 50 vagas | edital recente | https://www.bcb.gov.br
+rfb_auditor | RFB Auditor | Receita Federal | Auditor | FGV | pre_edital | 72 | 6 | 7 | no | yes | no | 230 vagas | fiscal clássico | https://www.gov.br/receitafederal
+sefaz_ce | SEFAZ CE | SEFAZ CE | Auditor | CEBRASPE | pos_edital | 70 | 5 | 8 | yes | yes | no | edital aberto | pós-edital |
+`);
+  const rows = buildTargetDecisionRows({
+    targetProfiles: profiles,
+    coverageRows: [
+      ...seedCoverageForTarget('bacen_economia_financas'),
+      ...seedCoverageForTarget('sefaz_ce'),
+    ],
+    feedbackRows: [
+      { discipline: 'Economia', topic: 'Macroeconomia', weaknessScore: 7 },
+      { discipline: 'Direito Tributário', topic: 'ICMS', weaknessScore: 8 },
+    ],
+    sourceItems: [
+      { id: 'ls-1', sourceKind: 'ls', targetSlug: 'sefaz_ce', discipline: 'Direito Tributário', topic: 'ICMS', sourceTrust: 9 },
+    ],
+    activeTargetSlug: 'bacen_economia_financas',
+  });
+
+  assert.equal(rows[0].targetSlug, 'bacen_economia_financas');
+  assert.ok(rows[0].recommendationScore > rows.find((row) => row.targetSlug === 'rfb_auditor')!.recommendationScore);
+  assert.ok(rows.find((row) => row.targetSlug === 'sefaz_ce')!.lsAvailability > rows[0].lsAvailability);
+  assert.ok(rows[0].coverageRows > 0);
+  assert.ok(rows[0].reasons.some((reason) => /custo-beneficio/i.test(reason)));
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

@@ -30,6 +30,37 @@ export interface ExamTargetProfile {
   costBenefit: number;
 }
 
+export interface TargetDecisionRow {
+  targetSlug: string;
+  name: string;
+  institution: string;
+  role: string;
+  organizer: string;
+  phase: StudyPlanPhase;
+  vagasNotes: string;
+  active: boolean;
+  priorityScore: number;
+  costBenefit: number;
+  bancaFit: number;
+  coverageRows: number;
+  weaknessRows: number;
+  overlapRows: number;
+  courseAvailability: number;
+  lsAvailability: number;
+  editalTiming: number;
+  recommendationScore: number;
+  recommendationLabel: string;
+  reasons: string[];
+}
+
+export interface BuildTargetDecisionRowsInput {
+  targetProfiles: ExamTargetProfile[];
+  coverageRows: StudyCoverageRow[];
+  feedbackRows: TopicFeedback[];
+  sourceItems: StudySourceItem[];
+  activeTargetSlug?: string;
+}
+
 export interface StudyCoverageRow {
   targetSlug: string;
   discipline: string;
@@ -448,6 +479,148 @@ export const formatStudyCoverageTable = (rows: StudyCoverageRow[]): string => {
   return [header, ...body].join('\n');
 };
 
+export const parseStudyTargetProfileTable = (text: string): ExamTargetProfile[] => {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && line.includes('|'))
+    .filter((line) => !/^slug\s*\|/i.test(line))
+    .map((line) => line.split('|').map((cell) => cell.trim()))
+    .map((cells) => {
+      const [
+        slug,
+        name,
+        institution,
+        role,
+        organizer,
+        rawPhase,
+        rawPriority,
+        rawCostBenefit,
+        rawBancaFit,
+        rawCourseAvailable,
+        rawLsAvailable,
+        rawActive,
+        vagasNotes,
+        editalNotes,
+        rawSourceUrls,
+      ] = cells;
+
+      return {
+        slug: normalizeTargetSlug(slug),
+        name: name || slug || 'Target',
+        institution: institution || '',
+        role: role || '',
+        organizer: organizer || '',
+        phase: rawPhase === 'pos_edital' ? 'pos_edital' : 'pre_edital',
+        sourceUrls: parseUrls(rawSourceUrls),
+        editalNotes: editalNotes || '',
+        vagasNotes: vagasNotes || '',
+        defaultDailyQuota: 4,
+        priorityScore: clamp(Math.round(toNumber(rawPriority, 50)), 0, 100),
+        active: toBoolean(rawActive),
+        courseAvailable: toBoolean(rawCourseAvailable),
+        lsAvailable: toBoolean(rawLsAvailable),
+        bancaFit: clamp(Math.round(toNumber(rawBancaFit, 5)), 0, 10),
+        costBenefit: clamp(Math.round(toNumber(rawCostBenefit, 5)), 0, 10),
+      } satisfies ExamTargetProfile;
+    })
+    .filter((target) => Boolean(target.slug && target.name));
+};
+
+export const formatStudyTargetProfileTable = (profiles: ExamTargetProfile[]): string => {
+  const header = 'slug | name | institution | role | organizer | phase | priority | cost_benefit | banca_fit | course | ls | active | vagas | notes | urls';
+  const body = profiles.map((target) =>
+    [
+      target.slug,
+      target.name,
+      target.institution,
+      target.role,
+      target.organizer,
+      target.phase,
+      target.priorityScore,
+      target.costBenefit,
+      target.bancaFit,
+      formatBoolean(target.courseAvailable),
+      formatBoolean(target.lsAvailable),
+      formatBoolean(target.active),
+      target.vagasNotes,
+      target.editalNotes,
+      target.sourceUrls.join(', '),
+    ].map(tableCell).join(' | '),
+  );
+  return [header, ...body].join('\n');
+};
+
+export const buildTargetDecisionRows = ({
+  targetProfiles,
+  coverageRows,
+  feedbackRows,
+  sourceItems,
+  activeTargetSlug,
+}: BuildTargetDecisionRowsInput): TargetDecisionRow[] => {
+  const activeSlug = normalizeTargetSlug(activeTargetSlug || targetProfiles.find((target) => target.active)?.slug || '');
+  return targetProfiles
+    .map((target) => {
+      const rowsForTarget = targetRows(coverageRows, target.slug);
+      const targetFeedback = feedbackRows.filter((feedback) =>
+        rowsForTarget.some((row) => sameDiscipline(row, feedback) && topicMatches(row.topic, feedback.topic)),
+      );
+      const overlappingSources = targetRows(sourceItems, target.slug);
+      const lsSources = overlappingSources.filter((item) => item.sourceKind === 'ls');
+      const lsAvailability = (target.lsAvailable ? 8 : 0) + Math.min(7, lsSources.length * 2);
+      const courseAvailability = target.courseAvailable ? 10 : 0;
+      const editalTiming = target.phase === 'pos_edital' ? 10 : 5;
+      const coverageScore = Math.min(20, rowsForTarget.length * 2);
+      const weaknessScore = Math.min(12, targetFeedback.reduce((sum, row) => sum + row.weaknessScore, 0) / Math.max(1, targetFeedback.length || 1));
+      const overlapScore = Math.min(12, overlappingSources.length * 2);
+      const activeBonus = target.slug === activeSlug ? 6 : 0;
+      const recommendationScore = round(
+        target.priorityScore +
+          target.costBenefit * 5 +
+          target.bancaFit * 3 +
+          coverageScore +
+          weaknessScore +
+          overlapScore +
+          courseAvailability +
+          lsAvailability +
+          editalTiming +
+          activeBonus,
+      );
+      const reasons = [
+        target.costBenefit >= 8 ? `custo-beneficio ${target.costBenefit}/10` : '',
+        rowsForTarget.length > 0 ? `${rowsForTarget.length} linha(s) de cobertura` : '',
+        targetFeedback.length > 0 ? `${targetFeedback.length} fraqueza(s) atuais` : '',
+        target.lsAvailable || lsSources.length > 0 ? 'LS/trilha disponível como baseline' : '',
+        target.courseAvailable ? 'curso/material disponível' : '',
+        target.phase === 'pos_edital' ? 'pressão pós-edital' : '',
+      ].filter(Boolean);
+
+      return {
+        targetSlug: target.slug,
+        name: target.name,
+        institution: target.institution,
+        role: target.role,
+        organizer: target.organizer,
+        phase: target.phase,
+        vagasNotes: target.vagasNotes,
+        active: target.slug === activeSlug,
+        priorityScore: target.priorityScore,
+        costBenefit: target.costBenefit,
+        bancaFit: target.bancaFit,
+        coverageRows: rowsForTarget.length,
+        weaknessRows: targetFeedback.length,
+        overlapRows: overlappingSources.length,
+        courseAvailability,
+        lsAvailability,
+        editalTiming,
+        recommendationScore,
+        recommendationLabel: recommendationScore >= 150 ? 'Forte' : recommendationScore >= 120 ? 'Viável' : 'Fraco',
+        reasons,
+      } satisfies TargetDecisionRow;
+    })
+    .sort((a, b) => b.recommendationScore - a.recommendationScore || a.name.localeCompare(b.name));
+};
+
 export const materializeStudyBlocksAsPlannerTasks = (
   blocks: DailyStudyBlock[],
   options: { planejamento: string; scheduledDate?: string; metaNumber?: number },
@@ -777,8 +950,8 @@ function findCoverage(candidate: Candidate, rows: StudyCoverageRow[]): StudyCove
   return rows.find((row) => sameDiscipline(row, candidate) && topicMatches(candidate.topic, row.topic));
 }
 
-function sameDiscipline(row: { discipline: string }, candidate: Candidate): boolean {
-  return normalize(row.discipline) === normalize(candidate.discipline);
+function sameDiscipline(left: { discipline: string }, right: { discipline: string }): boolean {
+  return normalize(left.discipline) === normalize(right.discipline);
 }
 
 function topicMatches(left: string, right: string): boolean {
@@ -807,6 +980,26 @@ function toCoverageStatus(value: string | undefined): CoverageStatus {
 function toNumber(value: string | undefined, fallback: number): number {
   const parsed = Number.parseFloat(String(value || '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toBoolean(value: string | undefined): boolean {
+  const normalized = normalize(value || '');
+  return ['1', 'true', 'yes', 'sim', 's', 'y'].includes(normalized);
+}
+
+function formatBoolean(value: boolean): string {
+  return value ? 'yes' : 'no';
+}
+
+function parseUrls(value: string | undefined): string[] {
+  return String(value || '')
+    .split(/[,;]/)
+    .map((url) => url.trim())
+    .filter(Boolean);
+}
+
+function tableCell(value: string | number): string {
+  return String(value ?? '').replace(/\|/g, '/').trim();
 }
 
 function round(value: number): number {

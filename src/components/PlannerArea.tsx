@@ -61,13 +61,16 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
+  buildTargetDecisionRows,
   buildStudyDayPlan,
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
+  formatStudyTargetProfileTable,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
+  parseStudyTargetProfileTable,
   seedCoverageForTarget,
   DailyStudyBlock,
   ExamTargetProfile,
@@ -76,6 +79,7 @@ import {
   StudyScoreboardRow,
   StudySourceItem,
   StudyWeekPlan,
+  TargetDecisionRow,
   TopicFeedback,
 } from '../utils/studyPlannerCore';
 
@@ -97,6 +101,7 @@ const HISTORY_KEY = 'ls_planner_meta_history_v1';
 const STUDY_OS_TARGET_KEY = 'study_os_target_v1';
 const STUDY_OS_PHASE_KEY = 'study_os_phase_v1';
 const STUDY_OS_COVERAGE_KEY = 'study_os_coverage_table_v1';
+const STUDY_OS_TARGET_PROFILES_KEY = 'study_os_target_profiles_v1';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
@@ -142,11 +147,24 @@ const loadStoredHistory = () => {
   }
 };
 
-const defaultStudyOsTarget = () => DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.active)?.slug || 'bacen_economia_financas';
+const defaultStudyOsTarget = (profiles = DEFAULT_STUDY_TARGET_PROFILES) =>
+  profiles.find((target) => target.active)?.slug || profiles[0]?.slug || 'bacen_economia_financas';
+
+const loadStoredStudyOsTargetProfiles = () => {
+  try {
+    const stored = localStorage.getItem(STUDY_OS_TARGET_PROFILES_KEY);
+    const parsed = stored ? parseStudyTargetProfileTable(stored) : [];
+    return parsed.length > 0 ? parsed : DEFAULT_STUDY_TARGET_PROFILES;
+  } catch {
+    return DEFAULT_STUDY_TARGET_PROFILES;
+  }
+};
 
 const loadStoredStudyOsTarget = () => {
   try {
-    return localStorage.getItem(STUDY_OS_TARGET_KEY) || defaultStudyOsTarget();
+    const profiles = loadStoredStudyOsTargetProfiles();
+    const stored = localStorage.getItem(STUDY_OS_TARGET_KEY);
+    return profiles.some((target) => target.slug === stored) ? stored! : defaultStudyOsTarget(profiles);
   } catch {
     return defaultStudyOsTarget();
   }
@@ -386,6 +404,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [studyOsTargetProfiles, setStudyOsTargetProfiles] = useState<ExamTargetProfile[]>(loadStoredStudyOsTargetProfiles);
+  const [studyOsTargetProfileDraft, setStudyOsTargetProfileDraft] = useState(() =>
+    formatStudyTargetProfileTable(loadStoredStudyOsTargetProfiles()),
+  );
   const [studyOsTarget, setStudyOsTarget] = useState(loadStoredStudyOsTarget);
   const [studyOsPhase, setStudyOsPhase] = useState<StudyPlanPhase>(loadStoredStudyOsPhase);
   const [studyOsCoverageDraft, setStudyOsCoverageDraft] = useState(loadStoredStudyOsCoverage);
@@ -419,6 +441,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   useEffect(() => {
     localStorage.setItem(STUDY_OS_COVERAGE_KEY, studyOsCoverageDraft);
   }, [studyOsCoverageDraft]);
+
+  useEffect(() => {
+    localStorage.setItem(STUDY_OS_TARGET_PROFILES_KEY, formatStudyTargetProfileTable(studyOsTargetProfiles));
+  }, [studyOsTargetProfiles]);
 
   useEffect(() => {
     if (metaSummary && plannerTasks.length > 0 && metaHistory.length === 0) {
@@ -573,10 +599,21 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
   const hasDraftCustomizations = Object.keys(draftTaskEdits).length > 0 || removedDraftKeys.length > 0;
   const studyOsActiveTarget = useMemo(
-    () => DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.slug === studyOsTarget),
-    [studyOsTarget]
+    () => studyOsTargetProfiles.find((target) => target.slug === studyOsTarget),
+    [studyOsTarget, studyOsTargetProfiles]
   );
   const studyOsWeekStartDate = weekDays[1]?.date || toIsoDate(new Date());
+  const studyOsTargetDecisionRows = useMemo(
+    () =>
+      buildTargetDecisionRows({
+        targetProfiles: studyOsTargetProfiles,
+        coverageRows: parseStudyCoverageTable(studyOsCoverageDraft),
+        feedbackRows: buildStudyOsFeedbackRows(questionBankItems),
+        sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+        activeTargetSlug: studyOsTarget,
+      }),
+    [activePlannerTasks, questionBankItems, studyOsCoverageDraft, studyOsTarget, studyOsTargetProfiles],
+  );
 
   const importMetaText = (text: string, source: 'ls-meta-text' | 'ls-meta-pdf') => {
     const weekSchedule = parseWeekScheduleImport(text);
@@ -809,12 +846,41 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const selectStudyOsTarget = (targetSlug: string) => {
-    const target = DEFAULT_STUDY_TARGET_PROFILES.find((item) => item.slug === targetSlug);
+    const target = studyOsTargetProfiles.find((item) => item.slug === targetSlug);
     setStudyOsTarget(targetSlug);
     setStudyOsPhase(target?.phase || 'pre_edital');
     setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+  };
+
+  const saveStudyOsTargetProfiles = () => {
+    const parsed = parseStudyTargetProfileTable(studyOsTargetProfileDraft);
+    if (parsed.length === 0) {
+      showToast('Nenhum perfil de target válido.');
+      return;
+    }
+
+    const nextTarget = parsed.find((target) => target.slug === studyOsTarget) || parsed.find((target) => target.active) || parsed[0];
+    setStudyOsTargetProfiles(parsed);
+    setStudyOsTargetProfileDraft(formatStudyTargetProfileTable(parsed));
+    setStudyOsTarget(nextTarget.slug);
+    setStudyOsPhase(nextTarget.phase);
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    showToast(`${parsed.length} perfil(is) Study OS salvo(s).`);
+  };
+
+  const resetStudyOsTargetProfiles = () => {
+    const formatted = formatStudyTargetProfileTable(DEFAULT_STUDY_TARGET_PROFILES);
+    const nextTarget = defaultStudyOsTarget(DEFAULT_STUDY_TARGET_PROFILES);
+    setStudyOsTargetProfiles(DEFAULT_STUDY_TARGET_PROFILES);
+    setStudyOsTargetProfileDraft(formatted);
+    setStudyOsTarget(nextTarget);
+    setStudyOsPhase(DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.slug === nextTarget)?.phase || 'pre_edital');
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    showToast('Perfis base restaurados.');
   };
 
   const seedStudyOsCoverage = (targetSlug = studyOsTarget) => {
@@ -837,6 +903,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       coverageRows,
       feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
       sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+      targetProfiles: studyOsTargetProfiles,
     });
     setStudyOsPlan(plan);
     setStudyOsWeekPlan(null);
@@ -858,6 +925,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       coverageRows,
       feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
       sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+      targetProfiles: studyOsTargetProfiles,
     });
     setStudyOsPlan(null);
     setStudyOsWeekPlan(plan);
@@ -1374,11 +1442,13 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       {activeSection === 'generator' && (
         <div className="space-y-5">
           <StudyOSPlannerPanel
-            targetProfiles={DEFAULT_STUDY_TARGET_PROFILES}
+            targetProfiles={studyOsTargetProfiles}
             activeTarget={studyOsActiveTarget}
             targetSlug={studyOsTarget}
             phase={studyOsPhase}
             coverageDraft={studyOsCoverageDraft}
+            targetProfileDraft={studyOsTargetProfileDraft}
+            targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
             weekPlan={studyOsWeekPlan}
             weekStartDate={studyOsWeekStartDate}
@@ -1393,6 +1463,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               setStudyOsPlan(null);
               setStudyOsWeekPlan(null);
             }}
+            onTargetProfileDraftChange={setStudyOsTargetProfileDraft}
+            onSaveTargetProfiles={saveStudyOsTargetProfiles}
+            onResetTargetProfiles={resetStudyOsTargetProfiles}
             onSeedCoverage={seedStudyOsCoverage}
             onGenerate={generateStudyOsPlan}
             onApply={applyStudyOsPlan}
@@ -2265,12 +2338,17 @@ const StudyOSPlannerPanel: React.FC<{
   targetSlug: string;
   phase: StudyPlanPhase;
   coverageDraft: string;
+  targetProfileDraft: string;
+  targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
   weekPlan: StudyWeekPlan | null;
   weekStartDate: string;
   onTargetChange: (targetSlug: string) => void;
   onPhaseChange: (phase: StudyPlanPhase) => void;
   onCoverageDraftChange: (value: string) => void;
+  onTargetProfileDraftChange: (value: string) => void;
+  onSaveTargetProfiles: () => void;
+  onResetTargetProfiles: () => void;
   onSeedCoverage: (targetSlug?: string) => void;
   onGenerate: () => void;
   onApply: () => void;
@@ -2282,12 +2360,17 @@ const StudyOSPlannerPanel: React.FC<{
   targetSlug,
   phase,
   coverageDraft,
+  targetProfileDraft,
+  targetDecisionRows,
   plan,
   weekPlan,
   weekStartDate,
   onTargetChange,
   onPhaseChange,
   onCoverageDraftChange,
+  onTargetProfileDraftChange,
+  onSaveTargetProfiles,
+  onResetTargetProfiles,
   onSeedCoverage,
   onGenerate,
   onApply,
@@ -2411,10 +2494,40 @@ const StudyOSPlannerPanel: React.FC<{
               </button>
             ))}
           </div>
+
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Perfis</p>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={onSaveTargetProfiles}
+                  className="rounded bg-[#84cc16] px-2 py-1 text-[10px] font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d]"
+                >
+                  Salvar
+                </button>
+                <button
+                  type="button"
+                  onClick={onResetTargetProfiles}
+                  className="rounded border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={targetProfileDraft}
+              onChange={(event) => onTargetProfileDraftChange(event.target.value)}
+              className="min-h-[150px] w-full resize-y rounded border border-white/10 bg-[#111] p-2 font-mono text-[10px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
+              spellCheck={false}
+            />
+          </div>
         </aside>
 
         <main className="grid gap-4 2xl:grid-cols-[minmax(0,0.95fr)_minmax(560px,1.05fr)]">
           <div className="space-y-4">
+            <TargetDecisionTable rows={targetDecisionRows} activeSlug={targetSlug} onSelect={onTargetChange} />
+
             <textarea
               value={coverageDraft}
               onChange={(event) => onCoverageDraftChange(event.target.value)}
@@ -2524,6 +2637,63 @@ const StudyOSPlannerPanel: React.FC<{
     </section>
   );
 };
+
+const TargetDecisionTable: React.FC<{
+  rows: TargetDecisionRow[];
+  activeSlug: string;
+  onSelect: (targetSlug: string) => void;
+}> = ({ rows, activeSlug, onSelect }) => (
+  <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/15">
+    {rows.length > 0 ? (
+      <table className="w-full min-w-[760px] border-collapse text-left">
+        <thead>
+          <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+            <th className="px-3 py-3">Target</th>
+            <th className="px-3 py-3">Score</th>
+            <th className="px-3 py-3">Vagas</th>
+            <th className="px-3 py-3">Cob.</th>
+            <th className="px-3 py-3">LS</th>
+            <th className="px-3 py-3">Curso</th>
+            <th className="px-3 py-3">Banca</th>
+            <th className="px-3 py-3">Sinal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.targetSlug}
+              className={`border-b border-white/5 text-xs transition ${
+                row.targetSlug === activeSlug ? 'bg-[#84cc16]/10 text-white' : 'text-gray-300 hover:bg-white/[0.03]'
+              }`}
+            >
+              <td className="px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(row.targetSlug)}
+                  className="text-left font-black text-white transition hover:text-[#bef264]"
+                >
+                  {row.name}
+                </button>
+                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">{row.organizer} · {row.phase === 'pos_edital' ? 'Pós' : 'Pré'}</p>
+              </td>
+              <td className="px-3 py-2">
+                <span className="rounded bg-[#84cc16]/10 px-2 py-1 font-black text-[#84cc16]">{row.recommendationScore}</span>
+              </td>
+              <td className="max-w-[160px] truncate px-3 py-2">{row.vagasNotes || '-'}</td>
+              <td className="px-3 py-2 font-black text-white">{row.coverageRows}</td>
+              <td className="px-3 py-2">{row.lsAvailability}</td>
+              <td className="px-3 py-2">{row.courseAvailability}</td>
+              <td className="px-3 py-2">{row.bancaFit}</td>
+              <td className="max-w-[220px] truncate px-3 py-2">{row.reasons[0] || row.recommendationLabel}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <EmptyPanel icon={Target} title="Sem targets válidos" />
+    )}
+  </div>
+);
 
 const StudyScoreRow: React.FC<{ row: StudyScoreboardRow }> = ({ row }) => (
   <tr className={`border-b border-white/5 text-xs transition ${row.chosen ? 'bg-[#84cc16]/10 text-white' : 'text-gray-300 hover:bg-white/[0.03]'}`}>
