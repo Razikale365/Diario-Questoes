@@ -66,12 +66,15 @@ import {
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
+  formatStudySourceTable,
   formatStudyTargetProfileTable,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
+  parseStudySourceTable,
   parseStudyTargetProfileTable,
   seedCoverageForTarget,
+  seedSourceSignalsForTarget,
   DailyStudyBlock,
   ExamTargetProfile,
   StudyDayPlan,
@@ -102,6 +105,7 @@ const STUDY_OS_TARGET_KEY = 'study_os_target_v1';
 const STUDY_OS_PHASE_KEY = 'study_os_phase_v1';
 const STUDY_OS_COVERAGE_KEY = 'study_os_coverage_table_v1';
 const STUDY_OS_TARGET_PROFILES_KEY = 'study_os_target_profiles_v1';
+const STUDY_OS_SOURCE_SIGNALS_KEY = 'study_os_source_signals_v1';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
@@ -185,6 +189,15 @@ const loadStoredStudyOsCoverage = () => {
     return stored || formatStudyCoverageTable(seedCoverageForTarget(loadStoredStudyOsTarget()));
   } catch {
     return formatStudyCoverageTable(seedCoverageForTarget(defaultStudyOsTarget()));
+  }
+};
+
+const loadStoredStudyOsSourceSignals = () => {
+  try {
+    const stored = localStorage.getItem(STUDY_OS_SOURCE_SIGNALS_KEY);
+    return stored || formatStudySourceTable(seedSourceSignalsForTarget(loadStoredStudyOsTarget()));
+  } catch {
+    return formatStudySourceTable(seedSourceSignalsForTarget(defaultStudyOsTarget()));
   }
 };
 
@@ -411,6 +424,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsTarget, setStudyOsTarget] = useState(loadStoredStudyOsTarget);
   const [studyOsPhase, setStudyOsPhase] = useState<StudyPlanPhase>(loadStoredStudyOsPhase);
   const [studyOsCoverageDraft, setStudyOsCoverageDraft] = useState(loadStoredStudyOsCoverage);
+  const [studyOsSourceDraft, setStudyOsSourceDraft] = useState(loadStoredStudyOsSourceSignals);
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
 
@@ -441,6 +455,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   useEffect(() => {
     localStorage.setItem(STUDY_OS_COVERAGE_KEY, studyOsCoverageDraft);
   }, [studyOsCoverageDraft]);
+
+  useEffect(() => {
+    localStorage.setItem(STUDY_OS_SOURCE_SIGNALS_KEY, studyOsSourceDraft);
+  }, [studyOsSourceDraft]);
 
   useEffect(() => {
     localStorage.setItem(STUDY_OS_TARGET_PROFILES_KEY, formatStudyTargetProfileTable(studyOsTargetProfiles));
@@ -603,16 +621,24 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     [studyOsTarget, studyOsTargetProfiles]
   );
   const studyOsWeekStartDate = weekDays[1]?.date || toIsoDate(new Date());
+  const studyOsManualSourceItems = useMemo(
+    () => parseStudySourceTable(studyOsSourceDraft),
+    [studyOsSourceDraft],
+  );
+  const studyOsCombinedSourceItems = useMemo(
+    () => [...buildStudyOsSourceItems(activePlannerTasks, studyOsTarget), ...studyOsManualSourceItems],
+    [activePlannerTasks, studyOsManualSourceItems, studyOsTarget],
+  );
   const studyOsTargetDecisionRows = useMemo(
     () =>
       buildTargetDecisionRows({
         targetProfiles: studyOsTargetProfiles,
         coverageRows: parseStudyCoverageTable(studyOsCoverageDraft),
         feedbackRows: buildStudyOsFeedbackRows(questionBankItems),
-        sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+        sourceItems: studyOsCombinedSourceItems,
         activeTargetSlug: studyOsTarget,
       }),
-    [activePlannerTasks, questionBankItems, studyOsCoverageDraft, studyOsTarget, studyOsTargetProfiles],
+    [questionBankItems, studyOsCombinedSourceItems, studyOsCoverageDraft, studyOsTarget, studyOsTargetProfiles],
   );
 
   const importMetaText = (text: string, source: 'ls-meta-text' | 'ls-meta-pdf') => {
@@ -850,6 +876,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsTarget(targetSlug);
     setStudyOsPhase(target?.phase || 'pre_edital');
     setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
+    setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
   };
@@ -890,6 +917,13 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     showToast('Cobertura base carregada.');
   };
 
+  const seedStudyOsSources = (targetSlug = studyOsTarget) => {
+    setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    showToast('Fontes base carregadas.');
+  };
+
   const generateStudyOsPlan = () => {
     const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
     if (coverageRows.length === 0) {
@@ -902,7 +936,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       phase: studyOsPhase,
       coverageRows,
       feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
-      sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+      sourceItems: studyOsCombinedSourceItems,
       targetProfiles: studyOsTargetProfiles,
     });
     setStudyOsPlan(plan);
@@ -924,7 +958,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       days: 5,
       coverageRows,
       feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
-      sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+      sourceItems: studyOsCombinedSourceItems,
       targetProfiles: studyOsTargetProfiles,
     });
     setStudyOsPlan(null);
@@ -1448,6 +1482,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             phase={studyOsPhase}
             coverageDraft={studyOsCoverageDraft}
             targetProfileDraft={studyOsTargetProfileDraft}
+            sourceDraft={studyOsSourceDraft}
+            sourceItemCount={studyOsManualSourceItems.length}
             targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
             weekPlan={studyOsWeekPlan}
@@ -1464,9 +1500,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               setStudyOsWeekPlan(null);
             }}
             onTargetProfileDraftChange={setStudyOsTargetProfileDraft}
+            onSourceDraftChange={(value) => {
+              setStudyOsSourceDraft(value);
+              setStudyOsPlan(null);
+              setStudyOsWeekPlan(null);
+            }}
             onSaveTargetProfiles={saveStudyOsTargetProfiles}
             onResetTargetProfiles={resetStudyOsTargetProfiles}
             onSeedCoverage={seedStudyOsCoverage}
+            onSeedSources={seedStudyOsSources}
             onGenerate={generateStudyOsPlan}
             onApply={applyStudyOsPlan}
             onGenerateWeek={generateStudyOsWeekPlan}
@@ -2339,6 +2381,8 @@ const StudyOSPlannerPanel: React.FC<{
   phase: StudyPlanPhase;
   coverageDraft: string;
   targetProfileDraft: string;
+  sourceDraft: string;
+  sourceItemCount: number;
   targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
   weekPlan: StudyWeekPlan | null;
@@ -2347,9 +2391,11 @@ const StudyOSPlannerPanel: React.FC<{
   onPhaseChange: (phase: StudyPlanPhase) => void;
   onCoverageDraftChange: (value: string) => void;
   onTargetProfileDraftChange: (value: string) => void;
+  onSourceDraftChange: (value: string) => void;
   onSaveTargetProfiles: () => void;
   onResetTargetProfiles: () => void;
   onSeedCoverage: (targetSlug?: string) => void;
+  onSeedSources: (targetSlug?: string) => void;
   onGenerate: () => void;
   onApply: () => void;
   onGenerateWeek: () => void;
@@ -2361,6 +2407,8 @@ const StudyOSPlannerPanel: React.FC<{
   phase,
   coverageDraft,
   targetProfileDraft,
+  sourceDraft,
+  sourceItemCount,
   targetDecisionRows,
   plan,
   weekPlan,
@@ -2369,9 +2417,11 @@ const StudyOSPlannerPanel: React.FC<{
   onPhaseChange,
   onCoverageDraftChange,
   onTargetProfileDraftChange,
+  onSourceDraftChange,
   onSaveTargetProfiles,
   onResetTargetProfiles,
   onSeedCoverage,
+  onSeedSources,
   onGenerate,
   onApply,
   onGenerateWeek,
@@ -2470,7 +2520,9 @@ const StudyOSPlannerPanel: React.FC<{
 
           <div className="grid grid-cols-2 gap-2">
             <Metric icon={ClipboardList} label="Cobertura" value={`${coverageRows.length}`} />
+            <Metric icon={DatabaseIcon} label="Fontes" value={`${sourceItemCount}`} />
             <Metric icon={ListChecks} label="Score" value={`${(plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
+            <Metric icon={Target} label="Targets" value={`${targetProfiles.length}`} />
           </div>
 
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
@@ -2534,6 +2586,28 @@ const StudyOSPlannerPanel: React.FC<{
               className="min-h-[220px] w-full resize-y rounded-lg border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
               spellCheck={false}
             />
+
+            <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-[#84cc16]">Fontes concorrentes</p>
+                  <p className="mt-1 text-[11px] font-bold text-gray-500">Trilha, aulas, TEC, Andréty ou manual entram como sinais do score.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSeedSources(targetSlug)}
+                  className="rounded border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10"
+                >
+                  Seed fontes
+                </button>
+              </div>
+              <textarea
+                value={sourceDraft}
+                onChange={(event) => onSourceDraftChange(event.target.value)}
+                className="min-h-[170px] w-full resize-y rounded border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
+                spellCheck={false}
+              />
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               {plan?.blocks.length ? (

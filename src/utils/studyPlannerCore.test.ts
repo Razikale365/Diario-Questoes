@@ -7,11 +7,14 @@ import {
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
+  formatStudySourceTable,
   formatStudyTargetProfileTable,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
+  parseStudySourceTable,
   parseStudyTargetProfileTable,
+  seedSourceSignalsForTarget,
   seedCoverageForTarget,
   type StudyCoverageRow,
 } from './studyPlannerCore';
@@ -260,6 +263,67 @@ sefaz_ce | SEFAZ CE | SEFAZ CE | Auditor | CEBRASPE | pos_edital | 70 | 5 | 8 | 
   assert.ok(rows.find((row) => row.targetSlug === 'sefaz_ce')!.lsAvailability > rows[0].lsAvailability);
   assert.ok(rows[0].coverageRows > 0);
   assert.ok(rows[0].reasons.some((reason) => /custo-beneficio/i.test(reason)));
+});
+
+test('formatStudySourceTable round-trips editable LS replacement source signals', () => {
+  const formatted = formatStudySourceTable([
+    {
+      id: 'tec-macro',
+      sourceKind: 'tec_incidence',
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      incidence: 9,
+      editalWeight: 2,
+      priorityHint: 95,
+      sourceTrust: 9,
+      sourceOrder: 2,
+      lesson: 'TEC CEBRASPE',
+      taskText: 'Mais cai em macroeconomia',
+    },
+  ]);
+  const parsed = parseStudySourceTable(formatted);
+
+  assert.match(formatted.split('\n')[0], /kind \| target \| discipline/);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].sourceKind, 'tec_incidence');
+  assert.equal(parsed[0].targetSlug, 'bacen_economia_financas');
+  assert.equal(parsed[0].incidence, 9);
+  assert.equal(parsed[0].priorityHint, 95);
+  assert.equal(parsed[0].sourceTrust, 9);
+  assert.equal(parsed[0].sourceOrder, 2);
+  assert.equal(parsed[0].lesson, 'TEC CEBRASPE');
+});
+
+test('buildStudyDayPlan can generate a four-block day from source signals without LS coverage', () => {
+  const sourceItems = parseStudySourceTable(`
+kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
+estrategia_aulas | bacen_economia_financas | Economia | Macroeconomia | 8 | 2 | 90 | 8 | 1 | Aula Estratégia | ordem do curso
+tec_incidence | bacen_economia_financas | Economia | Microeconomia | 10 | 2 | 98 | 9 | 2 | TEC CEBRASPE | mais cai
+tec_incidence | bacen_economia_financas | Sistema Financeiro | SFN | 9 | 1.5 | 96 | 9 | 3 | TEC CEBRASPE | mais cai
+guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 | 82 | 7 | 4 | Guia Andrety | revisão dirigida
+`);
+
+  const plan = buildStudyDayPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    coverageRows: [],
+    feedbackRows: [],
+    sourceItems,
+  });
+
+  assert.equal(plan.blocks.length, 4);
+  assert.deepEqual(plan.blocks.map((block) => block.kind), ['theory', 'questions', 'questions', 'review']);
+  assert.ok(plan.blocks.some((block) => /Microeconomia|SFN/.test(block.topic)));
+  assert.ok(plan.scoreboard.some((row) => row.materialHint.includes('TEC CEBRASPE') && row.incidence > 0));
+});
+
+test('seedSourceSignalsForTarget gives editable defaults for BACEN external planning sources', () => {
+  const seed = seedSourceSignalsForTarget('bacen_economia_financas');
+
+  assert.ok(seed.some((item) => item.sourceKind === 'tec_incidence'));
+  assert.ok(seed.some((item) => item.sourceKind === 'estrategia_aulas'));
+  assert.ok(seed.every((item) => item.targetSlug === 'bacen_economia_financas' || item.targetSlug === 'shared'));
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

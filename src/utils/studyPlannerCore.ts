@@ -316,11 +316,29 @@ const DEFAULT_STUDY_COVERAGE: StudyCoverageRow[] = [
   coverage('sefaz_ce', 'Direito Tributário', 'ICMS', 'weak', 2, 9, 1, 'LS/trilha'),
 ];
 
+const DEFAULT_STUDY_SOURCE_SIGNALS: StudySourceItem[] = [
+  sourceSignal('estrategia_aulas', 'bacen_economia_financas', 'Economia', 'Macroeconomia', 8, 2, 90, 8, 1, 'Aula Estratégia', 'ordem do curso'),
+  sourceSignal('tec_incidence', 'bacen_economia_financas', 'Economia', 'Microeconomia', 10, 2, 98, 9, 2, 'TEC CEBRASPE', 'mais cai'),
+  sourceSignal('tec_incidence', 'bacen_economia_financas', 'Sistema Financeiro', 'Sistema Financeiro Nacional', 9, 1.5, 96, 9, 3, 'TEC CEBRASPE', 'mais cai'),
+  sourceSignal('guia_andrety', 'bacen_economia_financas', 'Estatística', 'Probabilidade e estatística', 7, 1.5, 82, 7, 4, 'Guia Andrety', 'revisão dirigida'),
+  sourceSignal('estrategia_aulas', 'rfb_auditor', 'Direito Tributário', 'Crédito Tributário', 9, 2, 92, 8, 1, 'Aula Estratégia', 'ordem do curso'),
+  sourceSignal('tec_incidence', 'rfb_auditor', 'Contabilidade', 'Demonstrações Contábeis', 8, 1.5, 88, 8, 2, 'TEC FGV', 'mais cai'),
+  sourceSignal('trilha_estrategica', 'sefaz_ce', 'Direito Tributário', 'ICMS', 9, 2, 91, 8, 1, 'Trilha Estratégica', 'baseline SEFAZ CE'),
+  sourceSignal('tec_incidence', 'sefaz_ce', 'Finanças Públicas', 'Orçamento Público', 8, 2, 87, 8, 2, 'TEC CEBRASPE', 'mais cai'),
+];
+
 export const seedCoverageForTarget = (targetSlug: string): StudyCoverageRow[] => {
   const normalizedTarget = normalizeTargetSlug(targetSlug);
   return DEFAULT_STUDY_COVERAGE
     .filter((row) => row.targetSlug === normalizedTarget || row.targetSlug === 'shared')
     .map((row) => ({ ...row }));
+};
+
+export const seedSourceSignalsForTarget = (targetSlug: string): StudySourceItem[] => {
+  const normalizedTarget = normalizeTargetSlug(targetSlug);
+  return DEFAULT_STUDY_SOURCE_SIGNALS
+    .filter((item) => item.targetSlug === normalizedTarget || item.targetSlug === 'shared')
+    .map((item) => ({ ...item }));
 };
 
 export const buildStudyDayPlan = ({
@@ -475,6 +493,54 @@ export const formatStudyCoverageTable = (rows: StudyCoverageRow[]): string => {
       row.materialSource || '',
       row.notes || '',
     ].join(' | '),
+  );
+  return [header, ...body].join('\n');
+};
+
+export const parseStudySourceTable = (text: string): StudySourceItem[] => {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && line.includes('|'))
+    .filter((line) => !/^kind\s*\|/i.test(line))
+    .map((line, index) => ({ cells: line.split('|').map((cell) => cell.trim()), index }))
+    .map(({ cells, index }) => {
+      const [rawKind, targetSlug, discipline, topic, rawIncidence, rawEditalWeight, rawPriority, rawTrust, rawOrder, lesson, taskText] = cells;
+      const sourceKind = toStudySourceKind(rawKind);
+      return {
+        id: `source_${index + 1}_${normalizeTargetSlug(targetSlug)}_${normalize(discipline).replace(/\s+/g, '_')}_${normalize(topic).replace(/\s+/g, '_')}`,
+        sourceKind,
+        targetSlug: normalizeTargetSlug(targetSlug),
+        discipline,
+        topic,
+        incidence: toNumber(rawIncidence, 0),
+        editalWeight: toNumber(rawEditalWeight, 1),
+        priorityHint: toNumber(rawPriority, 0),
+        sourceTrust: clamp(Math.round(toNumber(rawTrust, defaultSourceTrust(sourceKind))), 0, 10),
+        sourceOrder: Math.max(0, Math.round(toNumber(rawOrder, index + 1))),
+        lesson: lesson || '',
+        taskText: taskText || '',
+      } satisfies StudySourceItem;
+    })
+    .filter((item) => Boolean(item.targetSlug && item.discipline && item.topic));
+};
+
+export const formatStudySourceTable = (items: StudySourceItem[]): string => {
+  const header = 'kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text';
+  const body = items.map((item) =>
+    [
+      item.sourceKind,
+      item.targetSlug,
+      item.discipline,
+      item.topic,
+      item.incidence || 0,
+      item.editalWeight || 1,
+      item.priorityHint || 0,
+      item.sourceTrust,
+      item.sourceOrder || 0,
+      item.lesson || '',
+      item.taskText || '',
+    ].map(tableCell).join(' | '),
   );
   return [header, ...body].join('\n');
 };
@@ -685,6 +751,35 @@ function coverage(
   return { targetSlug, discipline, topic, status, editalWeight, incidence, tier, materialHint };
 }
 
+function sourceSignal(
+  sourceKind: StudySourceKind,
+  targetSlug: string,
+  discipline: string,
+  topic: string,
+  incidence: number,
+  editalWeight: number,
+  priorityHint: number,
+  sourceTrust: number,
+  sourceOrder: number,
+  lesson: string,
+  taskText: string,
+): StudySourceItem {
+  return {
+    id: `seed_${sourceKind}_${normalizeTargetSlug(targetSlug)}_${normalize(discipline).replace(/\s+/g, '_')}_${normalize(topic).replace(/\s+/g, '_')}`,
+    sourceKind,
+    targetSlug,
+    discipline,
+    topic,
+    incidence,
+    editalWeight,
+    priorityHint,
+    sourceTrust,
+    sourceOrder,
+    lesson,
+    taskText,
+  };
+}
+
 function buildCandidates(rows: StudyCoverageRow[], sourceItems: StudySourceItem[], targetSlug: string): Candidate[] {
   const candidates = new Map<string, Candidate>();
 
@@ -727,7 +822,7 @@ function buildCandidates(rows: StudyCoverageRow[], sourceItems: StudySourceItem[
       discipline: item.discipline,
       topic: item.topic,
       kind,
-      materialHint: item.taskText || item.lesson || item.sourceKind,
+      materialHint: [item.lesson, item.taskText || item.sourceKind].filter(Boolean).join(' · '),
       plannedQuestions: kind === 'questions' ? 20 : kind === 'review' ? 15 : undefined,
       sourceItemIds: [...(previous?.sourceItemIds || []), item.id],
     });
@@ -975,6 +1070,32 @@ function toCoverageStatus(value: string | undefined): CoverageStatus {
     return normalized;
   }
   return 'stale';
+}
+
+function toStudySourceKind(value: string | undefined): StudySourceKind {
+  const normalized = normalize(value || '').replace(/-/g, '_');
+  if (
+    normalized === 'ls' ||
+    normalized === 'trilha_estrategica' ||
+    normalized === 'estrategia_aulas' ||
+    normalized === 'guia_andrety' ||
+    normalized === 'tec_incidence' ||
+    normalized === 'manual'
+  ) {
+    return normalized;
+  }
+  return 'manual';
+}
+
+function defaultSourceTrust(sourceKind: StudySourceKind): number {
+  return {
+    ls: 8,
+    trilha_estrategica: 8,
+    estrategia_aulas: 8,
+    guia_andrety: 7,
+    tec_incidence: 9,
+    manual: 5,
+  }[sourceKind];
 }
 
 function toNumber(value: string | undefined, fallback: number): number {
