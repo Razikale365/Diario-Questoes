@@ -9,6 +9,7 @@ import {
   formatStudyCoverageTable,
   formatStudySourceTable,
   formatStudyTargetProfileTable,
+  inferStudySourceSignalsFromText,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
@@ -324,6 +325,43 @@ test('seedSourceSignalsForTarget gives editable defaults for BACEN external plan
   assert.ok(seed.some((item) => item.sourceKind === 'tec_incidence'));
   assert.ok(seed.some((item) => item.sourceKind === 'estrategia_aulas'));
   assert.ok(seed.every((item) => item.targetSlug === 'bacen_economia_financas' || item.targetSlug === 'shared'));
+});
+
+test('inferStudySourceSignalsFromText converts TEC incidence paste into source rows', () => {
+  const rows = inferStudySourceSignalsFromText(
+    `
+TEC mais cai
+Economia - Macroeconomia - incidencia 9 - peso 2 - prioridade 96
+Sistema Financeiro: SFN incidencia 8 peso 1.5
+`,
+    { targetSlug: 'bacen_economia_financas', sourceKind: 'tec_incidence' },
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].sourceKind, 'tec_incidence');
+  assert.equal(rows[0].discipline, 'Economia');
+  assert.equal(rows[0].topic, 'Macroeconomia');
+  assert.equal(rows[0].incidence, 9);
+  assert.equal(rows[0].editalWeight, 2);
+  assert.equal(rows[0].priorityHint, 96);
+  assert.equal(rows[0].sourceTrust, 9);
+});
+
+test('inferStudySourceSignalsFromText detects Estratégia aula order and Andréty review hints', () => {
+  const rows = inferStudySourceSignalsFromText(
+    `
+Aula 03 - Direito Tributário - Crédito Tributário
+Aula 04: Contabilidade > Demonstrações Contábeis
+Andrety revisão: Auditoria - Procedimentos de auditoria - prioridade 88
+`,
+    { targetSlug: 'rfb_auditor' },
+  );
+
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((row) => row.sourceKind), ['estrategia_aulas', 'estrategia_aulas', 'guia_andrety']);
+  assert.deepEqual(rows.map((row) => row.sourceOrder), [3, 4, 3]);
+  assert.equal(rows[2].priorityHint, 88);
+  assert.match(rows[2].lesson || '', /Andrety/i);
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

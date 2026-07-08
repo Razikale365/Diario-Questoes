@@ -61,6 +61,11 @@ export interface BuildTargetDecisionRowsInput {
   activeTargetSlug?: string;
 }
 
+export interface InferStudySourceSignalsOptions {
+  targetSlug: string;
+  sourceKind?: StudySourceKind;
+}
+
 export interface StudyCoverageRow {
   targetSlug: string;
   discipline: string;
@@ -543,6 +548,41 @@ export const formatStudySourceTable = (items: StudySourceItem[]): string => {
     ].map(tableCell).join(' | '),
   );
   return [header, ...body].join('\n');
+};
+
+export const inferStudySourceSignalsFromText = (
+  text: string,
+  options: InferStudySourceSignalsOptions,
+): StudySourceItem[] => {
+  const targetSlug = normalizeTargetSlug(options.targetSlug);
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !isSourceContextOnlyLine(line))
+    .map((line, index): StudySourceItem | null => {
+      const sourceKind = options.sourceKind || inferSourceKindFromLine(line);
+      const sourceOrder = inferSourceOrder(line, index + 1);
+      const cleaned = stripSourceMetadata(line);
+      const { discipline, topic } = inferDisciplineAndTopic(cleaned);
+
+      if (!discipline || !topic) return null;
+
+      return {
+        id: `infer_${index + 1}_${sourceKind}_${targetSlug}_${normalize(discipline).replace(/\s+/g, '_')}_${normalize(topic).replace(/\s+/g, '_')}`,
+        sourceKind,
+        targetSlug,
+        discipline,
+        topic,
+        incidence: inferNumberAfterLabels(line, ['incidencia', 'incidência', 'inc']) || defaultIncidence(sourceKind),
+        editalWeight: inferNumberAfterLabels(line, ['peso', 'weight']) || 1,
+        priorityHint: inferNumberAfterLabels(line, ['prioridade', 'priority', 'prior']) || defaultPriority(sourceKind),
+        sourceTrust: defaultSourceTrust(sourceKind),
+        sourceOrder,
+        lesson: inferLesson(sourceKind, line),
+        taskText: line,
+      } satisfies StudySourceItem;
+    })
+    .filter((item): item is StudySourceItem => item !== null);
 };
 
 export const parseStudyTargetProfileTable = (text: string): ExamTargetProfile[] => {
@@ -1096,6 +1136,82 @@ function defaultSourceTrust(sourceKind: StudySourceKind): number {
     tec_incidence: 9,
     manual: 5,
   }[sourceKind];
+}
+
+function inferSourceKindFromLine(line: string): StudySourceKind {
+  const normalized = normalize(line);
+  if (normalized.includes('tec')) return 'tec_incidence';
+  if (normalized.includes('andrety') || normalized.includes('guia')) return 'guia_andrety';
+  if (normalized.includes('trilha')) return 'trilha_estrategica';
+  if (normalized.includes('aula')) return 'estrategia_aulas';
+  return 'manual';
+}
+
+function defaultIncidence(sourceKind: StudySourceKind): number {
+  return sourceKind === 'tec_incidence' ? 8 : 0;
+}
+
+function defaultPriority(sourceKind: StudySourceKind): number {
+  return {
+    ls: 80,
+    trilha_estrategica: 82,
+    estrategia_aulas: 76,
+    guia_andrety: 78,
+    tec_incidence: 88,
+    manual: 50,
+  }[sourceKind];
+}
+
+function isSourceContextOnlyLine(line: string): boolean {
+  const normalized = normalize(line);
+  return ['tec mais cai', 'mais cai', 'trilha estrategica', 'guia andrety', 'andrety', 'estrategia'].includes(normalized);
+}
+
+function inferSourceOrder(line: string, fallback: number): number {
+  const aula = line.match(/\baula\s*(\d{1,3})\b/i);
+  if (aula) return Number.parseInt(aula[1], 10);
+  return fallback;
+}
+
+function stripSourceMetadata(line: string): string {
+  return line
+    .replace(/\baula\s*\d{1,3}\b/gi, '')
+    .replace(/\b(?:tec|trilha\s+estrat[eé]gica|estrat[eé]gia|andrety|guia|revis[aã]o)\b\s*:?\s*/gi, '')
+    .replace(/\b(?:incid[eê]ncia|inc|peso|weight|prioridade|priority|prior)\s*[:=]?\s*\d+(?:[,.]\d+)?\b/gi, '')
+    .replace(/\s+-\s*$/g, '')
+    .trim();
+}
+
+function inferDisciplineAndTopic(line: string): { discipline: string; topic: string } {
+  const parts = line
+    .split(/\s*(?:-|>|:|;)\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !/^\d+(?:[,.]\d+)?$/.test(part));
+
+  if (parts.length >= 2) {
+    return { discipline: parts[0], topic: parts.slice(1).join(' - ') };
+  }
+
+  return { discipline: '', topic: '' };
+}
+
+function inferNumberAfterLabels(line: string, labels: string[]): number | undefined {
+  const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const match = line.match(new RegExp(`\\b(?:${escaped})\\b\\s*[:=]?\\s*(\\d+(?:[,.]\\d+)?)`, 'i'));
+  if (!match) return undefined;
+  return toNumber(match[1], 0);
+}
+
+function inferLesson(sourceKind: StudySourceKind, line: string): string {
+  if (sourceKind === 'tec_incidence') return 'TEC incidência';
+  if (sourceKind === 'guia_andrety') return 'Guia Andrety';
+  if (sourceKind === 'trilha_estrategica') return 'Trilha Estratégica';
+  if (sourceKind === 'estrategia_aulas') {
+    const aula = line.match(/\baula\s*(\d{1,3})\b/i);
+    return aula ? `Aula ${aula[1].padStart(2, '0')} Estratégia` : 'Aula Estratégia';
+  }
+  return 'Manual';
 }
 
 function toNumber(value: string | undefined, fallback: number): number {

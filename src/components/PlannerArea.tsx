@@ -68,6 +68,7 @@ import {
   formatStudyCoverageTable,
   formatStudySourceTable,
   formatStudyTargetProfileTable,
+  inferStudySourceSignalsFromText,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
@@ -80,6 +81,7 @@ import {
   StudyDayPlan,
   StudyPlanPhase,
   StudyScoreboardRow,
+  StudySourceKind,
   StudySourceItem,
   StudyWeekPlan,
   TargetDecisionRow,
@@ -425,6 +427,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsPhase, setStudyOsPhase] = useState<StudyPlanPhase>(loadStoredStudyOsPhase);
   const [studyOsCoverageDraft, setStudyOsCoverageDraft] = useState(loadStoredStudyOsCoverage);
   const [studyOsSourceDraft, setStudyOsSourceDraft] = useState(loadStoredStudyOsSourceSignals);
+  const [studyOsRawSourceText, setStudyOsRawSourceText] = useState('');
+  const [studyOsRawSourceKind, setStudyOsRawSourceKind] = useState<StudySourceKind | 'auto'>('auto');
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
 
@@ -922,6 +926,24 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
     showToast('Fontes base carregadas.');
+  };
+
+  const appendInferredStudyOsSources = () => {
+    const inferred = inferStudySourceSignalsFromText(studyOsRawSourceText, {
+      targetSlug: studyOsTarget,
+      sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
+    });
+    if (inferred.length === 0) {
+      showToast('Não encontrei linhas de fonte reconhecíveis.');
+      return;
+    }
+
+    const current = parseStudySourceTable(studyOsSourceDraft);
+    setStudyOsSourceDraft(formatStudySourceTable([...current, ...inferred]));
+    setStudyOsRawSourceText('');
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    showToast(`${inferred.length} fonte(s) normalizada(s).`);
   };
 
   const generateStudyOsPlan = () => {
@@ -1483,6 +1505,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             coverageDraft={studyOsCoverageDraft}
             targetProfileDraft={studyOsTargetProfileDraft}
             sourceDraft={studyOsSourceDraft}
+            rawSourceText={studyOsRawSourceText}
+            rawSourceKind={studyOsRawSourceKind}
             sourceItemCount={studyOsManualSourceItems.length}
             targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
@@ -1505,6 +1529,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               setStudyOsPlan(null);
               setStudyOsWeekPlan(null);
             }}
+            onRawSourceTextChange={setStudyOsRawSourceText}
+            onRawSourceKindChange={setStudyOsRawSourceKind}
+            onAppendInferredSources={appendInferredStudyOsSources}
             onSaveTargetProfiles={saveStudyOsTargetProfiles}
             onResetTargetProfiles={resetStudyOsTargetProfiles}
             onSeedCoverage={seedStudyOsCoverage}
@@ -2382,6 +2409,8 @@ const StudyOSPlannerPanel: React.FC<{
   coverageDraft: string;
   targetProfileDraft: string;
   sourceDraft: string;
+  rawSourceText: string;
+  rawSourceKind: StudySourceKind | 'auto';
   sourceItemCount: number;
   targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
@@ -2392,6 +2421,9 @@ const StudyOSPlannerPanel: React.FC<{
   onCoverageDraftChange: (value: string) => void;
   onTargetProfileDraftChange: (value: string) => void;
   onSourceDraftChange: (value: string) => void;
+  onRawSourceTextChange: (value: string) => void;
+  onRawSourceKindChange: (value: StudySourceKind | 'auto') => void;
+  onAppendInferredSources: () => void;
   onSaveTargetProfiles: () => void;
   onResetTargetProfiles: () => void;
   onSeedCoverage: (targetSlug?: string) => void;
@@ -2408,6 +2440,8 @@ const StudyOSPlannerPanel: React.FC<{
   coverageDraft,
   targetProfileDraft,
   sourceDraft,
+  rawSourceText,
+  rawSourceKind,
   sourceItemCount,
   targetDecisionRows,
   plan,
@@ -2418,6 +2452,9 @@ const StudyOSPlannerPanel: React.FC<{
   onCoverageDraftChange,
   onTargetProfileDraftChange,
   onSourceDraftChange,
+  onRawSourceTextChange,
+  onRawSourceKindChange,
+  onAppendInferredSources,
   onSaveTargetProfiles,
   onResetTargetProfiles,
   onSeedCoverage,
@@ -2600,6 +2637,38 @@ const StudyOSPlannerPanel: React.FC<{
                 >
                   Seed fontes
                 </button>
+              </div>
+
+              <div className="mb-3 grid gap-2 rounded border border-white/10 bg-[#151515] p-2">
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={rawSourceKind}
+                    onChange={(event) => onRawSourceKindChange(event.target.value as StudySourceKind | 'auto')}
+                    className="rounded border border-[#525252] bg-[#262626] px-2 py-1.5 text-[11px] font-bold text-white outline-none focus:border-[#84cc16]"
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="tec_incidence">TEC</option>
+                    <option value="estrategia_aulas">Aulas</option>
+                    <option value="trilha_estrategica">Trilha</option>
+                    <option value="guia_andrety">Andrety</option>
+                    <option value="manual">Manual</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={onAppendInferredSources}
+                    disabled={!rawSourceText.trim()}
+                    className="rounded bg-[#84cc16] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Normalizar texto
+                  </button>
+                </div>
+                <textarea
+                  value={rawSourceText}
+                  onChange={(event) => onRawSourceTextChange(event.target.value)}
+                  className="min-h-[96px] w-full resize-y rounded border border-white/10 bg-[#0f0f0f] p-2 font-mono text-[11px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
+                  spellCheck={false}
+                  placeholder="TEC: Economia - Macroeconomia - incidencia 9 - peso 2"
+                />
               </div>
               <textarea
                 value={sourceDraft}
