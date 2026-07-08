@@ -3,9 +3,11 @@ import test from 'node:test';
 
 import {
   buildStudyDayPlan,
+  buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
   materializeStudyBlocksAsPlannerTasks,
+  materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
   seedCoverageForTarget,
   type StudyCoverageRow,
@@ -206,4 +208,97 @@ test('formatStudyCoverageTable round-trips editable manual target coverage rows'
 
   assert.match(formatted.split('\n')[0], /target \| discipline \| topic/);
   assert.deepEqual(parsed, seed.map((row) => ({ ...row, materialSource: '', notes: '' })));
+});
+
+test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {
+  const coverageRows: StudyCoverageRow[] = Array.from({ length: 10 }, (_, index) => ({
+    targetSlug: 'bacen_economia_financas',
+    discipline: index < 4 ? 'Economia' : index < 7 ? 'Sistema Financeiro' : 'Estatística',
+    topic: `Tema estratégico ${index + 1}`,
+    status: index % 3 === 0 ? 'weak' : 'unread',
+    editalWeight: index < 4 ? 2 : 1.5,
+    incidence: 10 - (index % 4),
+    tier: index < 7 ? 1 : 2,
+    materialHint: 'Questões CEBRASPE',
+  }));
+
+  const week = buildStudyWeekPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    startDate: '2026-07-06',
+    days: 5,
+    coverageRows,
+    feedbackRows: [],
+    sourceItems: [],
+  });
+
+  const blocks = week.days.flatMap((day) => day.blocks);
+  const uniqueBlockIds = new Set(blocks.map((block) => block.id));
+
+  assert.deepEqual(
+    week.days.map((day) => day.date),
+    ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10'],
+  );
+  assert.equal(blocks.length, 20);
+  assert.equal(uniqueBlockIds.size, blocks.length);
+  assert.ok(week.scoreboard.length >= blocks.length);
+});
+
+test('materializeStudyWeekAsPlannerTasks schedules each generated block on its day', () => {
+  const week = buildStudyWeekPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    startDate: '2026-07-06',
+    days: 2,
+    coverageRows: seedCoverageForTarget('bacen_economia_financas'),
+    feedbackRows: [],
+    sourceItems: [],
+  });
+
+  const tasks = materializeStudyWeekAsPlannerTasks(week, {
+    planejamento: 'Study OS - BACEN',
+    metaNumber: 12,
+  });
+
+  assert.equal(tasks.length, 8);
+  assert.equal(new Set(tasks.map((task) => task.id)).size, tasks.length);
+  assert.deepEqual(tasks.slice(0, 4).map((task) => task.scheduledDate), ['2026-07-06', '2026-07-06', '2026-07-06', '2026-07-06']);
+  assert.deepEqual(tasks.slice(4).map((task) => task.scheduledDate), ['2026-07-07', '2026-07-07', '2026-07-07', '2026-07-07']);
+  assert.deepEqual(tasks.map((task) => task.number), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.ok(tasks.every((task) => task.source === 'generated' && task.planejamento === 'Study OS - BACEN'));
+});
+
+test('materializeStudyWeekAsPlannerTasks keeps ids unique when daily materialization happens in the same millisecond', () => {
+  const originalNow = Date.now;
+  Date.now = () => 123;
+
+  try {
+    const week = buildStudyWeekPlan({
+      targetSlug: 'bacen_economia_financas',
+      phase: 'pre_edital',
+      startDate: '2026-07-06',
+      days: 2,
+      coverageRows: Array.from({ length: 8 }, (_, index) => ({
+        targetSlug: 'bacen_economia_financas',
+        discipline: 'Economia',
+        topic: `Tema ${index + 1}`,
+        status: 'weak',
+        editalWeight: 2,
+        incidence: 9,
+        tier: 1,
+        materialHint: 'Questões CEBRASPE',
+      })),
+      feedbackRows: [],
+      sourceItems: [],
+    });
+
+    const tasks = materializeStudyWeekAsPlannerTasks(week, {
+      planejamento: 'Study OS - BACEN',
+    });
+
+    assert.equal(tasks.length, 8);
+    assert.equal(new Set(tasks.map((task) => task.id)).size, tasks.length);
+  } finally {
+    Date.now = originalNow;
+  }
 });

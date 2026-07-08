@@ -142,6 +142,25 @@ export interface BuildStudyDayPlanInput {
   sourceItems: StudySourceItem[];
   targetProfiles?: ExamTargetProfile[];
   dailyQuota?: number;
+  excludedCandidateKeys?: string[];
+}
+
+export interface StudyWeekDayPlan extends StudyDayPlan {
+  date: string;
+}
+
+export interface StudyWeekPlan {
+  targetSlug: string;
+  phase: StudyPlanPhase;
+  startDate: string;
+  days: StudyWeekDayPlan[];
+  scoreboard: StudyScoreboardRow[];
+  warnings: string[];
+}
+
+export interface BuildStudyWeekPlanInput extends BuildStudyDayPlanInput {
+  startDate: string;
+  days?: number;
 }
 
 interface Candidate {
@@ -281,6 +300,7 @@ export const buildStudyDayPlan = ({
   sourceItems,
   targetProfiles = DEFAULT_STUDY_TARGET_PROFILES,
   dailyQuota = 4,
+  excludedCandidateKeys = [],
 }: BuildStudyDayPlanInput): StudyDayPlan => {
   const activeTargetSlug = normalizeTargetSlug(targetSlug);
   const targetProfile = targetProfiles.find((target) => target.slug === activeTargetSlug);
@@ -302,12 +322,13 @@ export const buildStudyDayPlan = ({
     .sort((a, b) => b.finalScore - a.finalScore || a.discipline.localeCompare(b.discipline) || a.topic.localeCompare(b.topic));
 
   const chosenKeys = new Set<string>();
+  const excludedKeys = new Set(excludedCandidateKeys);
   const dailyCounts = new Map<string, number>();
   const blocks: DailyStudyBlock[] = [];
   const dailyMix = DAILY_BLOCKS.slice(0, Math.max(1, dailyQuota));
 
   dailyMix.forEach((kind) => {
-    const choice = chooseCandidate(scoreboard, chosenKeys, dailyCounts, kind);
+    const choice = chooseCandidate(scoreboard, chosenKeys, dailyCounts, kind, excludedKeys);
     if (!choice) return;
     chosenKeys.add(choice.candidateKey);
     dailyCounts.set(choice.discipline, (dailyCounts.get(choice.discipline) || 0) + 1);
@@ -333,6 +354,51 @@ export const buildStudyDayPlan = ({
     targetSlug: activeTargetSlug,
     phase,
     blocks,
+    scoreboard,
+    warnings,
+  };
+};
+
+export const buildStudyWeekPlan = ({
+  startDate,
+  days = 5,
+  ...dayInput
+}: BuildStudyWeekPlanInput): StudyWeekPlan => {
+  const start = parseIsoDate(startDate);
+  const safeDays = clamp(Math.round(days), 1, 14);
+  const usedCandidateKeys = new Set<string>();
+  const weekDays: StudyWeekDayPlan[] = [];
+  const scoreboard: StudyScoreboardRow[] = [];
+  const warnings: string[] = [];
+
+  Array.from({ length: safeDays }).forEach((_, index) => {
+    const date = addDays(start, index);
+    const plan = buildStudyDayPlan({
+      ...dayInput,
+      excludedCandidateKeys: Array.from(usedCandidateKeys),
+    });
+
+    plan.blocks.forEach((block) => {
+      const candidateKey = candidateKeyFromBlockId(block.id);
+      if (candidateKey) usedCandidateKeys.add(candidateKey);
+    });
+    scoreboard.push(...plan.scoreboard.map((row) => ({ ...row })));
+    warnings.push(...plan.warnings.map((warning) => `${toIsoDateString(date)}: ${warning}`));
+    weekDays.push({
+      ...plan,
+      date: toIsoDateString(date),
+      blocks: plan.blocks.map((block) => ({
+        ...block,
+        id: `${toIsoDateString(date)}-${block.id}`,
+      })),
+    });
+  });
+
+  return {
+    targetSlug: normalizeTargetSlug(dayInput.targetSlug),
+    phase: dayInput.phase,
+    startDate: toIsoDateString(start),
+    days: weekDays,
     scoreboard,
     warnings,
   };
@@ -413,6 +479,23 @@ export const materializeStudyBlocksAsPlannerTasks = (
     linkedStudyTaskId: undefined,
     createdAt: now,
     updatedAt: now,
+  }));
+};
+
+export const materializeStudyWeekAsPlannerTasks = (
+  week: StudyWeekPlan,
+  options: { planejamento: string; metaNumber?: number },
+): PlannerTask[] => {
+  return week.days.flatMap((day) =>
+    materializeStudyBlocksAsPlannerTasks(day.blocks, {
+      planejamento: options.planejamento,
+      metaNumber: options.metaNumber,
+      scheduledDate: day.date,
+    }),
+  ).map((task, index) => ({
+    ...task,
+    id: `${task.id}_${index + 1}`,
+    number: index + 1,
   }));
 };
 
@@ -553,8 +636,9 @@ function chooseCandidate(
   chosenKeys: Set<string>,
   dailyCounts: Map<string, number>,
   kind: StudyBlockKind,
+  excludedKeys = new Set<string>(),
 ): StudyScoreboardRow | undefined {
-  const eligible = scoreboard.filter((row) => row.kind === kind && !chosenKeys.has(row.candidateKey));
+  const eligible = scoreboard.filter((row) => row.kind === kind && !chosenKeys.has(row.candidateKey) && !excludedKeys.has(row.candidateKey));
   const trusted = eligible.filter((row) => row.lowTrustPenalty === 0);
   const pool = trusted.length > 0 ? trusted : [];
   const balanced = pool.filter((row) => (dailyCounts.get(row.discipline) || 0) < MAX_DISCIPLINE_PER_DAY);
@@ -735,6 +819,25 @@ function clamp(value: number, min: number, max: number): number {
 
 function normalizeTargetSlug(value: string): string {
   return String(value || 'legacy').trim().toLowerCase() || 'legacy';
+}
+
+function parseIsoDate(value: string): Date {
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(date.getDate() + days);
+  return next;
+}
+
+function toIsoDateString(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function candidateKeyFromBlockId(blockId: string): string {
+  return blockId.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/^study-block-\d+-/, '');
 }
 
 function normalize(value: string): string {
