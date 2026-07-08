@@ -60,6 +60,21 @@ import {
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
+import {
+  buildStudyDayPlan,
+  DEFAULT_STUDY_TARGET_PROFILES,
+  formatStudyCoverageTable,
+  materializeStudyBlocksAsPlannerTasks,
+  parseStudyCoverageTable,
+  seedCoverageForTarget,
+  DailyStudyBlock,
+  ExamTargetProfile,
+  StudyDayPlan,
+  StudyPlanPhase,
+  StudyScoreboardRow,
+  StudySourceItem,
+  TopicFeedback,
+} from '../utils/studyPlannerCore';
 
 type PlannerView = 'month' | 'week';
 type PlannerSection = 'meta' | 'calendar' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
@@ -76,6 +91,9 @@ interface PlannerAreaProps {
 const TASKS_KEY = 'ls_planner_tasks_v1';
 const META_KEY = 'ls_planner_meta_v1';
 const HISTORY_KEY = 'ls_planner_meta_history_v1';
+const STUDY_OS_TARGET_KEY = 'study_os_target_v1';
+const STUDY_OS_PHASE_KEY = 'study_os_phase_v1';
+const STUDY_OS_COVERAGE_KEY = 'study_os_coverage_table_v1';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
@@ -118,6 +136,34 @@ const loadStoredHistory = () => {
     return stored ? (JSON.parse(stored) as PlannerMetaHistoryEntry[]) : [];
   } catch {
     return [];
+  }
+};
+
+const defaultStudyOsTarget = () => DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.active)?.slug || 'bacen_economia_financas';
+
+const loadStoredStudyOsTarget = () => {
+  try {
+    return localStorage.getItem(STUDY_OS_TARGET_KEY) || defaultStudyOsTarget();
+  } catch {
+    return defaultStudyOsTarget();
+  }
+};
+
+const loadStoredStudyOsPhase = (): StudyPlanPhase => {
+  try {
+    const stored = localStorage.getItem(STUDY_OS_PHASE_KEY);
+    return stored === 'pos_edital' ? 'pos_edital' : 'pre_edital';
+  } catch {
+    return 'pre_edital';
+  }
+};
+
+const loadStoredStudyOsCoverage = () => {
+  try {
+    const stored = localStorage.getItem(STUDY_OS_COVERAGE_KEY);
+    return stored || formatStudyCoverageTable(seedCoverageForTarget(loadStoredStudyOsTarget()));
+  } catch {
+    return formatStudyCoverageTable(seedCoverageForTarget(defaultStudyOsTarget()));
   }
 };
 
@@ -248,6 +294,62 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
   };
 };
 
+const buildStudyOsSourceItems = (tasks: PlannerTask[], targetSlug: string): StudySourceItem[] => {
+  const sourceTargetSlug = targetSlug === 'sefaz_ce' ? 'sefaz_ce' : 'legacy';
+  return tasks
+    .filter((task) => task.status !== 'archived')
+    .map((task) => ({
+      id: task.id,
+      sourceKind: task.source.startsWith('ls') ? 'ls' : 'manual',
+      targetSlug: task.source.startsWith('ls') ? sourceTargetSlug : 'shared',
+      discipline: task.discipline,
+      topic: task.description,
+      taskText: [task.format, task.details, task.tips].filter(Boolean).join('\n'),
+      priorityHint: task.relevance,
+      sourceTrust: task.source.startsWith('ls') ? 8 : 5,
+      sourceOrder: task.number,
+    }));
+};
+
+const buildStudyOsFeedbackRows = (items: QuestionBankItem[]): TopicFeedback[] => {
+  const byTopic = new Map<string, TopicFeedback>();
+
+  items.forEach((item) => {
+    const topic = item.lesson || item.taskTitle || item.tags[0] || item.sourceName;
+    if (!item.discipline || !topic) return;
+    const wrong = item.attempts.filter((attempt) => attempt.isCorrect === false).length;
+    const doubts = item.hasDoubt ? 1 : 0;
+    const favorites = item.favorite ? 1 : 0;
+    if (wrong === 0 && doubts === 0 && favorites === 0) return;
+
+    const key = `${item.discipline}::${topic}`;
+    const current = byTopic.get(key) || {
+      discipline: item.discipline,
+      topic,
+      weaknessScore: 0,
+      attempts: 0,
+      wrong: 0,
+      doubts: 0,
+      favorites: 0,
+    };
+
+    const nextWrong = (current.wrong || 0) + wrong;
+    const nextDoubts = (current.doubts || 0) + doubts;
+    const nextFavorites = (current.favorites || 0) + favorites;
+    byTopic.set(key, {
+      ...current,
+      attempts: (current.attempts || 0) + item.attempts.length,
+      wrong: nextWrong,
+      doubts: nextDoubts,
+      favorites: nextFavorites,
+      weaknessScore: Math.min(10, nextWrong * 2 + nextDoubts * 2 + nextFavorites),
+      lastSeenAt: item.updatedAt,
+    });
+  });
+
+  return Array.from(byTopic.values());
+};
+
 export const PlannerArea: React.FC<PlannerAreaProps> = ({
   studyTasks,
   onOpenStudyTask,
@@ -275,6 +377,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [studyOsTarget, setStudyOsTarget] = useState(loadStoredStudyOsTarget);
+  const [studyOsPhase, setStudyOsPhase] = useState<StudyPlanPhase>(loadStoredStudyOsPhase);
+  const [studyOsCoverageDraft, setStudyOsCoverageDraft] = useState(loadStoredStudyOsCoverage);
+  const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
 
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(plannerTasks));
@@ -291,6 +397,18 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(metaHistory));
   }, [metaHistory]);
+
+  useEffect(() => {
+    localStorage.setItem(STUDY_OS_TARGET_KEY, studyOsTarget);
+  }, [studyOsTarget]);
+
+  useEffect(() => {
+    localStorage.setItem(STUDY_OS_PHASE_KEY, studyOsPhase);
+  }, [studyOsPhase]);
+
+  useEffect(() => {
+    localStorage.setItem(STUDY_OS_COVERAGE_KEY, studyOsCoverageDraft);
+  }, [studyOsCoverageDraft]);
 
   useEffect(() => {
     if (metaSummary && plannerTasks.length > 0 && metaHistory.length === 0) {
@@ -444,6 +562,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   );
 
   const hasDraftCustomizations = Object.keys(draftTaskEdits).length > 0 || removedDraftKeys.length > 0;
+  const studyOsActiveTarget = useMemo(
+    () => DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.slug === studyOsTarget),
+    [studyOsTarget]
+  );
 
   const importMetaText = (text: string, source: 'ls-meta-text' | 'ls-meta-pdf') => {
     const weekSchedule = parseWeekScheduleImport(text);
@@ -673,6 +795,84 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     });
     setActiveSection('calendar');
     showToast(`${generated.length} sugestões viraram a meta gerada.`);
+  };
+
+  const selectStudyOsTarget = (targetSlug: string) => {
+    const target = DEFAULT_STUDY_TARGET_PROFILES.find((item) => item.slug === targetSlug);
+    setStudyOsTarget(targetSlug);
+    setStudyOsPhase(target?.phase || 'pre_edital');
+    setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
+    setStudyOsPlan(null);
+  };
+
+  const seedStudyOsCoverage = (targetSlug = studyOsTarget) => {
+    setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
+    setStudyOsPlan(null);
+    showToast('Cobertura base carregada.');
+  };
+
+  const generateStudyOsPlan = () => {
+    const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
+    if (coverageRows.length === 0) {
+      showToast('Nenhuma cobertura válida para o Study OS.');
+      return;
+    }
+
+    const plan = buildStudyDayPlan({
+      targetSlug: studyOsTarget,
+      phase: studyOsPhase,
+      coverageRows,
+      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
+      sourceItems: buildStudyOsSourceItems(activePlannerTasks, studyOsTarget),
+    });
+    setStudyOsPlan(plan);
+    showToast(`${plan.blocks.length} bloco(s) gerado(s) para hoje.`);
+  };
+
+  const applyStudyOsPlan = () => {
+    if (!studyOsPlan || studyOsPlan.blocks.length === 0) {
+      showToast('Gere os blocos do Study OS antes de aplicar.');
+      return;
+    }
+
+    const today = toIsoDate(new Date());
+    const generated = materializeStudyBlocksAsPlannerTasks(studyOsPlan.blocks, {
+      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
+      scheduledDate: today,
+    });
+    const now = new Date().toISOString();
+    const generatedMeta: PlannerMetaSummary = {
+      id: `study_os_meta_${Date.now()}`,
+      title: `Hoje - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
+      totalTasks: generated.length,
+      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
+      completedPercent: 0,
+      completedTasks: 0,
+      pendingTasks: generated.length,
+      ignoredTasks: 0,
+      startedTasks: 0,
+      importedAt: now,
+    };
+
+    setPlannerTasks(generated);
+    setMetaSummary(generatedMeta);
+    setMetaHistory((current) => {
+      const withCurrentMeta = metaSummary && plannerTasks.length > 0
+        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
+        : current;
+      return upsertHistoryEntry(
+        withCurrentMeta,
+        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
+      );
+    });
+    setMonthDate(new Date());
+    setWeekDate(new Date());
+    setView('week');
+    setActiveSection('calendar');
+    showToast(`${generated.length} bloco(s) Study OS viraram tarefas de hoje.`);
   };
 
   const onDropTask = (date: string, time?: string) => {
@@ -1093,19 +1293,41 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       )}
 
       {activeSection === 'generator' && (
-        <PlannerGeneratorPanel
-          draft={nextMetaDraft}
-          draftItems={draftItems}
-          weeklyHours={draftWeeklyHours}
-          maxTasks={draftMaxTasks}
-          onWeeklyHoursChange={setDraftWeeklyHours}
-          onMaxTasksChange={setDraftMaxTasks}
-          onUpdateTask={updateDraftTask}
-          onRemoveTask={removeDraftTask}
-          onResetDraft={resetDraftCustomizations}
-          hasCustomDraft={hasDraftCustomizations}
-          onApply={applyGeneratedDraft}
-        />
+        <div className="space-y-5">
+          <StudyOSPlannerPanel
+            targetProfiles={DEFAULT_STUDY_TARGET_PROFILES}
+            activeTarget={studyOsActiveTarget}
+            targetSlug={studyOsTarget}
+            phase={studyOsPhase}
+            coverageDraft={studyOsCoverageDraft}
+            plan={studyOsPlan}
+            onTargetChange={selectStudyOsTarget}
+            onPhaseChange={(phase) => {
+              setStudyOsPhase(phase);
+              setStudyOsPlan(null);
+            }}
+            onCoverageDraftChange={(value) => {
+              setStudyOsCoverageDraft(value);
+              setStudyOsPlan(null);
+            }}
+            onSeedCoverage={seedStudyOsCoverage}
+            onGenerate={generateStudyOsPlan}
+            onApply={applyStudyOsPlan}
+          />
+          <PlannerGeneratorPanel
+            draft={nextMetaDraft}
+            draftItems={draftItems}
+            weeklyHours={draftWeeklyHours}
+            maxTasks={draftMaxTasks}
+            onWeeklyHoursChange={setDraftWeeklyHours}
+            onMaxTasksChange={setDraftMaxTasks}
+            onUpdateTask={updateDraftTask}
+            onRemoveTask={removeDraftTask}
+            onResetDraft={resetDraftCustomizations}
+            hasCustomDraft={hasDraftCustomizations}
+            onApply={applyGeneratedDraft}
+          />
+        </div>
       )}
 
       {activeSection === 'history' && (
@@ -1939,6 +2161,240 @@ const draftReasonClass: Record<PlannerDraftTask['reason'], string> = {
   retake: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
   maintenance: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
 };
+
+const studyBlockKindLabel: Record<DailyStudyBlock['kind'], string> = {
+  theory: 'Teoria',
+  questions: 'Questões',
+  review: 'Revisão',
+};
+
+const studyBlockKindClass: Record<DailyStudyBlock['kind'], string> = {
+  theory: 'border-blue-400/20 bg-blue-400/10 text-blue-200',
+  questions: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
+  review: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-200',
+};
+
+const StudyOSPlannerPanel: React.FC<{
+  targetProfiles: ExamTargetProfile[];
+  activeTarget?: ExamTargetProfile;
+  targetSlug: string;
+  phase: StudyPlanPhase;
+  coverageDraft: string;
+  plan: StudyDayPlan | null;
+  onTargetChange: (targetSlug: string) => void;
+  onPhaseChange: (phase: StudyPlanPhase) => void;
+  onCoverageDraftChange: (value: string) => void;
+  onSeedCoverage: (targetSlug?: string) => void;
+  onGenerate: () => void;
+  onApply: () => void;
+}> = ({
+  targetProfiles,
+  activeTarget,
+  targetSlug,
+  phase,
+  coverageDraft,
+  plan,
+  onTargetChange,
+  onPhaseChange,
+  onCoverageDraftChange,
+  onSeedCoverage,
+  onGenerate,
+  onApply,
+}) => {
+  const visibleScoreboard = plan?.scoreboard.slice(0, 12) || [];
+  const coverageRows = useMemo(() => parseStudyCoverageTable(coverageDraft), [coverageDraft]);
+
+  return (
+    <section className="rounded-lg border border-[#84cc16]/20 bg-[#18210f] p-4 shadow-lg shadow-black/20">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Target className="h-5 w-5 text-[#84cc16]" />
+            <h2 className="text-lg font-black text-white">Study OS Planner</h2>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
+            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-gray-300">{activeTarget?.organizer || 'Banca'}</span>
+            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-gray-300">{activeTarget?.vagasNotes || 'Sem vagas fixas'}</span>
+            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-[#84cc16]">CB {activeTarget?.costBenefit || '-'}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onGenerate}
+            className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d]"
+          >
+            Gerar 4 blocos
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={!plan || plan.blocks.length === 0}
+            className="rounded border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Aplicar hoje
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="space-y-3 rounded-lg border border-white/10 bg-black/15 p-3">
+          <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+            Target
+            <select
+              value={targetSlug}
+              onChange={(event) => onTargetChange(event.target.value)}
+              className="rounded border border-[#525252] bg-[#262626] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#84cc16]"
+            >
+              {targetProfiles.map((target) => (
+                <option key={target.slug} value={target.slug}>
+                  {target.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onPhaseChange('pre_edital')}
+              className={`rounded px-3 py-2 text-xs font-black uppercase tracking-widest transition ${
+                phase === 'pre_edital' ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+              }`}
+            >
+              Pré
+            </button>
+            <button
+              type="button"
+              onClick={() => onPhaseChange('pos_edital')}
+              className={`rounded px-3 py-2 text-xs font-black uppercase tracking-widest transition ${
+                phase === 'pos_edital' ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+              }`}
+            >
+              Pós
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Metric icon={ClipboardList} label="Cobertura" value={`${coverageRows.length}`} />
+            <Metric icon={ListChecks} label="Score" value={`${plan?.scoreboard.length || 0}`} />
+          </div>
+
+          <div className="grid gap-2">
+            {targetProfiles.map((target) => (
+              <button
+                key={target.slug}
+                type="button"
+                onClick={() => {
+                  onTargetChange(target.slug);
+                  onSeedCoverage(target.slug);
+                }}
+                className="rounded border border-white/10 bg-white/5 px-3 py-2 text-left text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:border-[#84cc16]/40 hover:bg-[#84cc16]/10 hover:text-white"
+              >
+                Seed {target.name}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <main className="grid gap-4 2xl:grid-cols-[minmax(0,0.95fr)_minmax(560px,1.05fr)]">
+          <div className="space-y-4">
+            <textarea
+              value={coverageDraft}
+              onChange={(event) => onCoverageDraftChange(event.target.value)}
+              className="min-h-[220px] w-full resize-y rounded-lg border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
+              spellCheck={false}
+            />
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {plan?.blocks.length ? (
+                plan.blocks.map((block, index) => (
+                  <div key={block.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${studyBlockKindClass[block.kind]}`}>
+                        {index + 1} · {studyBlockKindLabel[block.kind]}
+                      </span>
+                      <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black text-gray-300">{block.finalScore}</span>
+                    </div>
+                    <p className="text-sm font-black text-white">{block.discipline}</p>
+                    <p className="mt-1 text-sm font-bold text-gray-300">{block.topic}</p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
+                      <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{formatMinutes(block.durationMinutes)}</span>
+                      {block.plannedQuestions && <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{block.plannedQuestions} questões</span>}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyPanel icon={Target} title="Sem blocos gerados" />
+              )}
+            </div>
+
+            {plan?.warnings.length ? (
+              <div className="space-y-2">
+                {plan.warnings.map((warning) => (
+                  <div key={warning} className="rounded border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/15">
+            {visibleScoreboard.length > 0 ? (
+              <table className="w-full min-w-[980px] border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                    <th className="px-3 py-3">Bloco</th>
+                    <th className="px-3 py-3">Disciplina</th>
+                    <th className="px-3 py-3">Tema</th>
+                    <th className="px-3 py-3">W</th>
+                    <th className="px-3 py-3">Inc</th>
+                    <th className="px-3 py-3">Tier</th>
+                    <th className="px-3 py-3">Cob</th>
+                    <th className="px-3 py-3">Rev</th>
+                    <th className="px-3 py-3">LS</th>
+                    <th className="px-3 py-3">Fit</th>
+                    <th className="px-3 py-3">Pen</th>
+                    <th className="px-3 py-3">Final</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleScoreboard.map((row) => (
+                    <StudyScoreRow key={row.candidateKey} row={row} />
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyPanel icon={BarChart3} title="Sem score calculado" />
+            )}
+          </div>
+        </main>
+      </div>
+    </section>
+  );
+};
+
+const StudyScoreRow: React.FC<{ row: StudyScoreboardRow }> = ({ row }) => (
+  <tr className={`border-b border-white/5 text-xs transition ${row.chosen ? 'bg-[#84cc16]/10 text-white' : 'text-gray-300 hover:bg-white/[0.03]'}`}>
+    <td className="px-3 py-2">
+      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${studyBlockKindClass[row.kind]}`}>
+        {studyBlockKindLabel[row.kind]}
+      </span>
+    </td>
+    <td className="px-3 py-2 font-bold text-white">{row.discipline}</td>
+    <td className="max-w-[220px] truncate px-3 py-2">{row.topic}</td>
+    <td className="px-3 py-2">{row.weakness}</td>
+    <td className="px-3 py-2">{row.incidence}</td>
+    <td className="px-3 py-2">{row.tier}</td>
+    <td className="px-3 py-2">{row.coverageNeed}</td>
+    <td className="px-3 py-2">{row.reviewDebt}</td>
+    <td className="px-3 py-2">{row.lsAlignment}</td>
+    <td className="px-3 py-2">{row.targetFit}</td>
+    <td className="px-3 py-2">{row.lowTrustPenalty + row.balancePenalty}</td>
+    <td className="px-3 py-2 font-black text-[#84cc16]">{row.finalScore}</td>
+  </tr>
+);
 
 const PlannerGeneratorPanel: React.FC<{
   draft: PlannerDraft;
