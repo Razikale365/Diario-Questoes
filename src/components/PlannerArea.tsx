@@ -63,6 +63,7 @@ import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } 
 import {
   buildTargetDecisionRows,
   buildStudyDayPlan,
+  buildStudyRefreshPlan,
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
@@ -80,6 +81,7 @@ import {
   ExamTargetProfile,
   StudyDayPlan,
   StudyPlanPhase,
+  StudyRefreshPlan,
   StudyScoreboardRow,
   StudySourceKind,
   StudySourceItem,
@@ -233,6 +235,11 @@ const shiftMonth = (date: Date, delta: number) => new Date(date.getFullYear(), d
 const shiftWeek = (date: Date, delta: number) => {
   const next = new Date(date);
   next.setDate(date.getDate() + delta * 7);
+  return next;
+};
+const shiftDate = (date: Date, delta: number) => {
+  const next = new Date(date);
+  next.setDate(date.getDate() + delta);
   return next;
 };
 
@@ -431,6 +438,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsRawSourceKind, setStudyOsRawSourceKind] = useState<StudySourceKind | 'auto'>('auto');
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
+  const [studyOsRefreshPlan, setStudyOsRefreshPlan] = useState<StudyRefreshPlan | null>(null);
 
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(plannerTasks));
@@ -883,6 +891,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
   };
 
   const saveStudyOsTargetProfiles = () => {
@@ -899,6 +908,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsPhase(nextTarget.phase);
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast(`${parsed.length} perfil(is) Study OS salvo(s).`);
   };
 
@@ -911,6 +921,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsPhase(DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.slug === nextTarget)?.phase || 'pre_edital');
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast('Perfis base restaurados.');
   };
 
@@ -918,6 +929,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast('Cobertura base carregada.');
   };
 
@@ -925,6 +937,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast('Fontes base carregadas.');
   };
 
@@ -943,6 +956,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsRawSourceText('');
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast(`${inferred.length} fonte(s) normalizada(s).`);
   };
 
@@ -963,6 +977,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     });
     setStudyOsPlan(plan);
     setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
     showToast(`${plan.blocks.length} bloco(s) gerado(s) para hoje.`);
   };
 
@@ -985,7 +1000,27 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     });
     setStudyOsPlan(null);
     setStudyOsWeekPlan(plan);
+    setStudyOsRefreshPlan(null);
     showToast(`${plan.days.reduce((total, day) => total + day.blocks.length, 0)} bloco(s) gerado(s) para a semana.`);
+  };
+
+  const generateStudyOsRefreshPlan = () => {
+    const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
+    const refreshDate = toIsoDate(shiftDate(new Date(), 1));
+    const plan = buildStudyRefreshPlan({
+      targetSlug: studyOsTarget,
+      phase: studyOsPhase,
+      refreshDate,
+      coverageRows,
+      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
+      sourceItems: studyOsCombinedSourceItems,
+      targetProfiles: studyOsTargetProfiles,
+      previousTasks: activePlannerTasks,
+    });
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(plan);
+    showToast(`${plan.blocks.length} bloco(s) recalculado(s) para amanhã.`);
   };
 
   const applyStudyOsPlan = () => {
@@ -1032,6 +1067,51 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setView('week');
     setActiveSection('calendar');
     showToast(`${generated.length} bloco(s) Study OS viraram tarefas de hoje.`);
+  };
+
+  const applyStudyOsRefreshPlan = () => {
+    if (!studyOsRefreshPlan || studyOsRefreshPlan.blocks.length === 0) {
+      showToast('Gere o refresh do Study OS antes de aplicar.');
+      return;
+    }
+
+    const generated = materializeStudyBlocksAsPlannerTasks(studyOsRefreshPlan.blocks, {
+      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
+      scheduledDate: studyOsRefreshPlan.date,
+    });
+    const now = new Date().toISOString();
+    const generatedMeta: PlannerMetaSummary = {
+      id: `study_os_refresh_${Date.now()}`,
+      title: `Refresh - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
+      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
+      totalTasks: generated.length,
+      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
+      completedPercent: 0,
+      completedTasks: 0,
+      pendingTasks: generated.length,
+      ignoredTasks: 0,
+      startedTasks: 0,
+      importedAt: now,
+    };
+
+    setPlannerTasks(generated);
+    setMetaSummary(generatedMeta);
+    setMetaHistory((current) => {
+      const withCurrentMeta = metaSummary && plannerTasks.length > 0
+        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
+        : current;
+      return upsertHistoryEntry(
+        withCurrentMeta,
+        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
+      );
+    });
+    setMonthDate(new Date(`${studyOsRefreshPlan.date}T00:00:00`));
+    setWeekDate(new Date(`${studyOsRefreshPlan.date}T00:00:00`));
+    setView('week');
+    setActiveSection('calendar');
+    showToast(`${generated.length} bloco(s) Study OS viraram o refresh de amanhã.`);
   };
 
   const applyStudyOsWeekPlan = () => {
@@ -1511,23 +1591,27 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
             weekPlan={studyOsWeekPlan}
+            refreshPlan={studyOsRefreshPlan}
             weekStartDate={studyOsWeekStartDate}
             onTargetChange={selectStudyOsTarget}
             onPhaseChange={(phase) => {
               setStudyOsPhase(phase);
               setStudyOsPlan(null);
               setStudyOsWeekPlan(null);
+              setStudyOsRefreshPlan(null);
             }}
             onCoverageDraftChange={(value) => {
               setStudyOsCoverageDraft(value);
               setStudyOsPlan(null);
               setStudyOsWeekPlan(null);
+              setStudyOsRefreshPlan(null);
             }}
             onTargetProfileDraftChange={setStudyOsTargetProfileDraft}
             onSourceDraftChange={(value) => {
               setStudyOsSourceDraft(value);
               setStudyOsPlan(null);
               setStudyOsWeekPlan(null);
+              setStudyOsRefreshPlan(null);
             }}
             onRawSourceTextChange={setStudyOsRawSourceText}
             onRawSourceKindChange={setStudyOsRawSourceKind}
@@ -1540,6 +1624,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             onApply={applyStudyOsPlan}
             onGenerateWeek={generateStudyOsWeekPlan}
             onApplyWeek={applyStudyOsWeekPlan}
+            onGenerateRefresh={generateStudyOsRefreshPlan}
+            onApplyRefresh={applyStudyOsRefreshPlan}
           />
           <PlannerGeneratorPanel
             draft={nextMetaDraft}
@@ -2415,6 +2501,7 @@ const StudyOSPlannerPanel: React.FC<{
   targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
   weekPlan: StudyWeekPlan | null;
+  refreshPlan: StudyRefreshPlan | null;
   weekStartDate: string;
   onTargetChange: (targetSlug: string) => void;
   onPhaseChange: (phase: StudyPlanPhase) => void;
@@ -2432,6 +2519,8 @@ const StudyOSPlannerPanel: React.FC<{
   onApply: () => void;
   onGenerateWeek: () => void;
   onApplyWeek: () => void;
+  onGenerateRefresh: () => void;
+  onApplyRefresh: () => void;
 }> = ({
   targetProfiles,
   activeTarget,
@@ -2446,6 +2535,7 @@ const StudyOSPlannerPanel: React.FC<{
   targetDecisionRows,
   plan,
   weekPlan,
+  refreshPlan,
   weekStartDate,
   onTargetChange,
   onPhaseChange,
@@ -2463,8 +2553,12 @@ const StudyOSPlannerPanel: React.FC<{
   onApply,
   onGenerateWeek,
   onApplyWeek,
+  onGenerateRefresh,
+  onApplyRefresh,
 }) => {
-  const visibleScoreboard = (plan?.scoreboard || weekPlan?.scoreboard || []).slice(0, 12);
+  const activeDayBlocks = refreshPlan?.blocks || plan?.blocks || [];
+  const activeWarnings = refreshPlan?.warnings || plan?.warnings || [];
+  const visibleScoreboard = (refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).slice(0, 12);
   const coverageRows = useMemo(() => parseStudyCoverageTable(coverageDraft), [coverageDraft]);
   const weekBlockCount = weekPlan?.days.reduce((total, day) => total + day.blocks.length, 0) || 0;
   const weekEndDate = weekPlan?.days[weekPlan.days.length - 1]?.date;
@@ -2514,6 +2608,21 @@ const StudyOSPlannerPanel: React.FC<{
           >
             Aplicar semana
           </button>
+          <button
+            type="button"
+            onClick={onGenerateRefresh}
+            className="rounded border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-yellow-100 transition hover:bg-yellow-400/20"
+          >
+            Refresh amanhã
+          </button>
+          <button
+            type="button"
+            onClick={onApplyRefresh}
+            disabled={!refreshPlan || refreshPlan.blocks.length === 0}
+            className="rounded border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Aplicar refresh
+          </button>
         </div>
       </div>
 
@@ -2558,7 +2667,7 @@ const StudyOSPlannerPanel: React.FC<{
           <div className="grid grid-cols-2 gap-2">
             <Metric icon={ClipboardList} label="Cobertura" value={`${coverageRows.length}`} />
             <Metric icon={DatabaseIcon} label="Fontes" value={`${sourceItemCount}`} />
-            <Metric icon={ListChecks} label="Score" value={`${(plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
+            <Metric icon={ListChecks} label="Score" value={`${(refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
             <Metric icon={Target} label="Targets" value={`${targetProfiles.length}`} />
           </div>
 
@@ -2679,8 +2788,8 @@ const StudyOSPlannerPanel: React.FC<{
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              {plan?.blocks.length ? (
-                plan.blocks.map((block, index) => (
+              {activeDayBlocks.length ? (
+                activeDayBlocks.map((block, index) => (
                   <div key={block.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${studyBlockKindClass[block.kind]}`}>
@@ -2700,6 +2809,12 @@ const StudyOSPlannerPanel: React.FC<{
                 <EmptyPanel icon={Target} title="Sem blocos gerados" />
               )}
             </div>
+
+            {refreshPlan ? (
+              <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
+                Refresh para {formatShortDate(refreshPlan.date)} baseado em {refreshPlan.refreshedFromTaskIds.length} dívida(s) de execução.
+              </div>
+            ) : null}
 
             {weekPlan ? (
               <div className="grid gap-2 rounded-lg border border-white/10 bg-black/15 p-3">
@@ -2726,9 +2841,9 @@ const StudyOSPlannerPanel: React.FC<{
               </div>
             ) : null}
 
-            {plan?.warnings.length ? (
+            {activeWarnings.length ? (
               <div className="space-y-2">
-                {plan.warnings.map((warning) => (
+                {activeWarnings.map((warning) => (
                   <div key={warning} className="rounded border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
                     {warning}
                   </div>

@@ -199,6 +199,17 @@ export interface BuildStudyWeekPlanInput extends BuildStudyDayPlanInput {
   days?: number;
 }
 
+export interface StudyRefreshPlan extends StudyDayPlan {
+  date: string;
+  refreshedFromTaskIds: string[];
+}
+
+export interface BuildStudyRefreshPlanInput extends BuildStudyDayPlanInput {
+  refreshDate: string;
+  previousTasks: PlannerTask[];
+  lowPerformanceThreshold?: number;
+}
+
 interface Candidate {
   candidateKey: string;
   sourceTargetSlug: string;
@@ -455,6 +466,71 @@ export const buildStudyWeekPlan = ({
     days: weekDays,
     scoreboard,
     warnings,
+  };
+};
+
+export const buildStudyRefreshPlan = ({
+  refreshDate,
+  previousTasks,
+  lowPerformanceThreshold = 60,
+  coverageRows,
+  feedbackRows,
+  sourceItems,
+  ...dayInput
+}: BuildStudyRefreshPlanInput): StudyRefreshPlan => {
+  const targetSlug = normalizeTargetSlug(dayInput.targetSlug);
+  const refreshDebtTasks = previousTasks.filter((task) => isRefreshDebtTask(task, lowPerformanceThreshold));
+  const completedGoodTasks = previousTasks.filter((task) => isCompletedGoodTask(task, lowPerformanceThreshold));
+  const completedTopics = completedGoodTasks.map(taskTopicFingerprint).filter(Boolean);
+  const debtCoverageRows = refreshDebtTasks.map((task, index) => coverage(
+    targetSlug,
+    task.discipline,
+    inferTopicFromPlannerTask(task),
+    'weak',
+    2,
+    10,
+    1,
+    task.status === 'ignored' ? 'Refresh: tarefa ignorada' : 'Refresh: baixo desempenho',
+  )).map((row, index) => ({
+    ...row,
+    notes: `refresh:${refreshDebtTasks[index]?.id || index}`,
+  }));
+  const refreshFeedbackRows = refreshDebtTasks.map((task) => ({
+    discipline: task.discipline,
+    topic: inferTopicFromPlannerTask(task),
+    weaknessScore: task.status === 'ignored' ? 9 : 10,
+    attempts: 1,
+    wrong: task.performance !== null && task.performance < lowPerformanceThreshold ? 1 : 0,
+    doubts: task.status === 'ignored' ? 1 : 0,
+    lastSeenAt: task.updatedAt,
+  } satisfies TopicFeedback));
+
+  const debtTopics = refreshDebtTasks.map(taskTopicFingerprint);
+  const filteredCoverage = [...coverageRows, ...debtCoverageRows].filter((row) => !completedTopics.some((topic) => topicMatchesFingerprint(row.discipline, row.topic, topic)));
+  const filteredSources = sourceItems
+    .filter((item) => !completedTopics.some((topic) => topicMatchesFingerprint(item.discipline, item.topic, topic)))
+    .map((item) => {
+      const matchesDebt = debtTopics.some((topic) => topicMatchesFingerprint(item.discipline, item.topic, topic));
+      if (!matchesDebt || item.sourceKind === 'tec_incidence') return item;
+      return { ...item, incidence: 0 };
+    });
+  const plan = buildStudyDayPlan({
+    ...dayInput,
+    coverageRows: filteredCoverage,
+    feedbackRows: [...feedbackRows, ...refreshFeedbackRows],
+    sourceItems: filteredSources,
+  });
+  const date = toIsoDateString(parseIsoDate(refreshDate));
+
+  return {
+    ...plan,
+    date,
+    refreshedFromTaskIds: refreshDebtTasks.map((task) => task.id),
+    warnings: [
+      ...plan.warnings,
+      completedGoodTasks.length > 0 ? `${completedGoodTasks.length} tarefa(s) concluída(s) foram retiradas do refresh.` : '',
+      refreshDebtTasks.length > 0 ? `${refreshDebtTasks.length} tarefa(s) viraram dívida de revisão.` : '',
+    ].filter(Boolean),
   };
 };
 
@@ -824,19 +900,21 @@ function buildCandidates(rows: StudyCoverageRow[], sourceItems: StudySourceItem[
   const candidates = new Map<string, Candidate>();
 
   rows.forEach((row, index) => {
-    (['theory', 'questions'] as StudyBlockKind[]).forEach((kind) => {
-      const key = candidateKey('coverage', index, row.discipline, row.topic, kind, row.materialHint);
-      candidates.set(key, {
-        candidateKey: key,
-        sourceTargetSlug: row.targetSlug,
-        discipline: row.discipline,
-        topic: row.topic,
-        kind,
-        materialHint: row.materialHint,
-        plannedQuestions: kind === 'questions' ? 20 : undefined,
-        sourceItemIds: [],
+    if (!isRefreshCoverageRow(row)) {
+      (['theory', 'questions'] as StudyBlockKind[]).forEach((kind) => {
+        const key = candidateKey('coverage', index, row.discipline, row.topic, kind, row.materialHint);
+        candidates.set(key, {
+          candidateKey: key,
+          sourceTargetSlug: row.targetSlug,
+          discipline: row.discipline,
+          topic: row.topic,
+          kind,
+          materialHint: row.materialHint,
+          plannedQuestions: kind === 'questions' ? 20 : undefined,
+          sourceItemIds: [],
+        });
       });
-    });
+    }
     if (row.status === 'weak' || row.status === 'stale' || row.status === 'unread') {
       const key = candidateKey('coverage', index, row.discipline, row.topic, 'review', row.materialHint);
       candidates.set(key, {
@@ -866,9 +944,26 @@ function buildCandidates(rows: StudyCoverageRow[], sourceItems: StudySourceItem[
       plannedQuestions: kind === 'questions' ? 20 : kind === 'review' ? 15 : undefined,
       sourceItemIds: [...(previous?.sourceItemIds || []), item.id],
     });
+    if (kind !== 'questions' && item.sourceKind !== 'guia_andrety' && (item.incidence || 0) >= 7) {
+      const questionKey = candidateKey('source', index, item.discipline, item.topic, 'questions', `${item.sourceKind}_questions`);
+      candidates.set(questionKey, {
+        candidateKey: questionKey,
+        sourceTargetSlug: item.targetSlug,
+        discipline: item.discipline,
+        topic: item.topic,
+        kind: 'questions',
+        materialHint: ['TEC alvo', item.lesson || item.sourceKind, item.taskText].filter(Boolean).join(' · '),
+        plannedQuestions: 20,
+        sourceItemIds: [item.id],
+      });
+    }
   });
 
   return Array.from(candidates.values());
+}
+
+function isRefreshCoverageRow(row: StudyCoverageRow): boolean {
+  return normalize(row.materialHint).startsWith('refresh');
 }
 
 function scoreCandidate(
@@ -1268,6 +1363,28 @@ function toIsoDateString(date: Date): string {
 
 function candidateKeyFromBlockId(blockId: string): string {
   return blockId.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/^study-block-\d+-/, '');
+}
+
+function isRefreshDebtTask(task: PlannerTask, lowPerformanceThreshold: number): boolean {
+  return task.status === 'ignored' || (task.status === 'completed' && task.performance !== null && task.performance < lowPerformanceThreshold);
+}
+
+function isCompletedGoodTask(task: PlannerTask, lowPerformanceThreshold: number): boolean {
+  return task.status === 'completed' && (task.performance === null || task.performance >= lowPerformanceThreshold);
+}
+
+function inferTopicFromPlannerTask(task: PlannerTask): string {
+  const text = task.description || task.details || task.format || '';
+  const afterColon = text.split(':').slice(1).join(':').trim();
+  return afterColon || task.description || task.format || task.discipline;
+}
+
+function taskTopicFingerprint(task: PlannerTask): { discipline: string; topic: string } {
+  return { discipline: task.discipline, topic: inferTopicFromPlannerTask(task) };
+}
+
+function topicMatchesFingerprint(discipline: string, topic: string, fingerprint: { discipline: string; topic: string }): boolean {
+  return normalize(discipline) === normalize(fingerprint.discipline) && topicMatches(topic, fingerprint.topic);
 }
 
 function normalize(value: string): string {

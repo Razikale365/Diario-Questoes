@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildTargetDecisionRows,
   buildStudyDayPlan,
+  buildStudyRefreshPlan,
   buildStudyWeekPlan,
   DEFAULT_STUDY_TARGET_PROFILES,
   formatStudyCoverageTable,
@@ -19,6 +20,7 @@ import {
   seedCoverageForTarget,
   type StudyCoverageRow,
 } from './studyPlannerCore';
+import type { PlannerTask } from '../types';
 
 test('seedCoverageForTarget creates BACEN rows without leaking RFB-specific topics', () => {
   const bacen = seedCoverageForTarget('bacen_economia_financas');
@@ -364,6 +366,81 @@ Andrety revisão: Auditoria - Procedimentos de auditoria - prioridade 88
   assert.match(rows[2].lesson || '', /Andrety/i);
 });
 
+test('buildStudyRefreshPlan avoids completed generated work and prioritizes ignored work as review debt', () => {
+  const sourceItems = parseStudySourceTable(`
+kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
+tec_incidence | bacen_economia_financas | Economia | Macroeconomia | 10 | 2 | 98 | 9 | 1 | TEC CEBRASPE | mais cai
+tec_incidence | bacen_economia_financas | Economia | Microeconomia | 9 | 2 | 95 | 9 | 2 | TEC CEBRASPE | mais cai
+estrategia_aulas | bacen_economia_financas | Sistema Financeiro | SFN | 8 | 1.5 | 90 | 8 | 3 | Aula Estratégia | aula
+guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 | 88 | 7 | 4 | Guia Andrety | revisão
+`);
+  const previousTasks = [
+    plannerTask({
+      id: 'done-macro',
+      discipline: 'Economia',
+      description: 'Resolver questões TEC: Macroeconomia',
+      status: 'completed',
+      performance: 92,
+      scheduledDate: '2026-07-06',
+    }),
+    plannerTask({
+      id: 'ignored-micro',
+      discipline: 'Economia',
+      description: 'Resolver questões TEC: Microeconomia',
+      status: 'ignored',
+      scheduledDate: '2026-07-06',
+    }),
+  ];
+
+  const refresh = buildStudyRefreshPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    refreshDate: '2026-07-07',
+    coverageRows: [],
+    feedbackRows: [],
+    sourceItems,
+    previousTasks,
+  });
+
+  assert.equal(refresh.date, '2026-07-07');
+  assert.equal(refresh.blocks.length, 4);
+  assert.equal(refresh.blocks.some((block) => block.topic === 'Macroeconomia'), false);
+  assert.equal(refresh.blocks[3].kind, 'review');
+  assert.equal(refresh.blocks[3].topic, 'Microeconomia');
+  assert.ok(refresh.warnings.some((warning) => /concluída/i.test(warning)));
+});
+
+test('buildStudyRefreshPlan converts low-performance completed tasks into weakness feedback', () => {
+  const sourceItems = parseStudySourceTable(`
+kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
+estrategia_aulas | bacen_economia_financas | Sistema Financeiro | SFN | 8 | 1.5 | 90 | 8 | 1 | Aula Estratégia | aula
+tec_incidence | bacen_economia_financas | Economia | Macroeconomia | 10 | 2 | 98 | 9 | 2 | TEC CEBRASPE | mais cai
+tec_incidence | bacen_economia_financas | Economia | Microeconomia | 9 | 2 | 95 | 9 | 3 | TEC CEBRASPE | mais cai
+guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 | 88 | 7 | 4 | Guia Andrety | revisão
+`);
+  const refresh = buildStudyRefreshPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    refreshDate: '2026-07-08',
+    coverageRows: [],
+    feedbackRows: [],
+    sourceItems,
+    previousTasks: [
+      plannerTask({
+        id: 'low-sfn',
+        discipline: 'Sistema Financeiro',
+        description: 'Estudar ou reler bloco médio: SFN',
+        status: 'completed',
+        performance: 45,
+        scheduledDate: '2026-07-07',
+      }),
+    ],
+  });
+
+  assert.ok(refresh.blocks.some((block) => block.kind === 'review' && block.topic === 'SFN'));
+  assert.ok(refresh.scoreboard.some((row) => row.topic === 'SFN' && row.reviewDebt > 0));
+});
+
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {
   const coverageRows: StudyCoverageRow[] = Array.from({ length: 10 }, (_, index) => ({
     targetSlug: 'bacen_economia_financas',
@@ -456,3 +533,29 @@ test('materializeStudyWeekAsPlannerTasks keeps ids unique when daily materializa
     Date.now = originalNow;
   }
 });
+
+function plannerTask(overrides: Partial<PlannerTask>): PlannerTask {
+  return {
+    id: overrides.id || 'task',
+    number: overrides.number || 1,
+    metaNumber: overrides.metaNumber,
+    planejamento: overrides.planejamento || 'Study OS',
+    discipline: overrides.discipline || 'Economia',
+    format: overrides.format || 'Questões TEC',
+    description: overrides.description || 'Resolver questões TEC: Macroeconomia',
+    details: overrides.details,
+    tips: overrides.tips,
+    spentMinutes: overrides.spentMinutes || 0,
+    estimatedMinutes: overrides.estimatedMinutes || 55,
+    performance: overrides.performance ?? null,
+    status: overrides.status || 'pending',
+    relevance: overrides.relevance || 8,
+    scheduledDate: overrides.scheduledDate,
+    startTime: overrides.startTime,
+    durationMinutes: overrides.durationMinutes || 55,
+    source: overrides.source || 'generated',
+    linkedStudyTaskId: overrides.linkedStudyTaskId,
+    createdAt: overrides.createdAt || '2026-07-06T00:00:00.000Z',
+    updatedAt: overrides.updatedAt || '2026-07-06T00:00:00.000Z',
+  };
+}
