@@ -6,6 +6,7 @@ import {
   applyPlannerTaskResult,
   autoSchedulePlannerTasks,
   buildPlannerTaskChatPrompt,
+  getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
 } from './planner';
@@ -293,4 +294,29 @@ test('buildPlannerTaskChatPrompt labels Dicas and Bizus as low-trust support mat
   assert.match(prompt, /Dicas e Bizus/i);
   assert.match(prompt, /baixo grau de confiança/i);
   assert.match(prompt, /material original/i);
+});
+
+test('getPlannerTodayCommandCenter filters today tasks and keeps the normal four-block surface', () => {
+  const today = getPlannerTodayCommandCenter(
+    [
+      makeTask({ id: 'done-early', number: 1, scheduledDate: '2026-07-08', startTime: '08:00', status: 'completed', durationMinutes: 45 }),
+      makeTask({ id: 'next-block', number: 2, scheduledDate: '2026-07-08', startTime: '09:00', status: 'pending', durationMinutes: 60 }),
+      makeTask({ id: 'later-started', number: 3, scheduledDate: '2026-07-08', startTime: '10:00', status: 'started', durationMinutes: 75 }),
+      makeTask({ id: 'later-pending', number: 4, scheduledDate: '2026-07-08', startTime: '11:00', status: 'pending', durationMinutes: 60 }),
+      makeTask({ id: 'overflow', number: 5, scheduledDate: '2026-07-08', startTime: '12:00', status: 'pending', durationMinutes: 60 }),
+      makeTask({ id: 'tomorrow', number: 6, scheduledDate: '2026-07-09', startTime: '08:00', status: 'pending' }),
+      makeTask({ id: 'archived-today', number: 7, scheduledDate: '2026-07-08', startTime: '07:00', status: 'archived' }),
+    ],
+    new Date('2026-07-08T12:00:00'),
+  );
+
+  assert.equal(today.date, '2026-07-08');
+  assert.deepEqual(today.tasks.map((task) => task.id), ['done-early', 'next-block', 'later-started', 'later-pending']);
+  assert.equal(today.totalTasks, 5);
+  assert.equal(today.visibleTasks, 4);
+  assert.equal(today.overflowCount, 1);
+  assert.equal(today.completedTasks, 1);
+  assert.equal(today.openTasks, 4);
+  assert.equal(today.totalMinutes, 300);
+  assert.equal(today.nextTask?.id, 'next-block');
 });

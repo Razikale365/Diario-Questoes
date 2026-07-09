@@ -15,6 +15,7 @@ import {
   FileUp,
   GripVertical,
   History,
+  Home,
   LayoutDashboard,
   ListChecks,
   Loader2,
@@ -37,6 +38,7 @@ import {
   buildMonthGrid,
   buildWeekDays,
   formatMinutes,
+  getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
   type PlannerTaskResultInput,
@@ -94,7 +96,7 @@ import {
 } from '../utils/studyPlannerCore';
 
 type PlannerView = 'month' | 'week';
-type PlannerSection = 'meta' | 'calendar' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
+type PlannerSection = 'today' | 'meta' | 'calendar' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
 type DraftTaskItem = { key: string; task: PlannerDraftTask };
 type DraftTaskEdit = Partial<Pick<PlannerDraftTask, 'description' | 'durationMinutes' | 'relevance'>>;
 
@@ -118,6 +120,7 @@ const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
 
 const SECTION_NAV: Array<{ id: PlannerSection; label: string; icon: React.ElementType }> = [
+  { id: 'today', label: 'Hoje', icon: Home },
   { id: 'meta', label: 'Meta Atual', icon: LayoutDashboard },
   { id: 'calendar', label: 'Calendário', icon: CalendarDays },
   { id: 'insights', label: 'Insights', icon: Lightbulb },
@@ -412,7 +415,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [metaSummary, setMetaSummary] = useState<PlannerMetaSummary | null>(loadStoredMeta);
   const [metaHistory, setMetaHistory] = useState<PlannerMetaHistoryEntry[]>(loadStoredHistory);
   const [importText, setImportText] = useState('');
-  const [activeSection, setActiveSection] = useState<PlannerSection>('meta');
+  const [activeSection, setActiveSection] = useState<PlannerSection>('today');
   const [view, setView] = useState<PlannerView>('month');
   const [monthDate, setMonthDate] = useState(() => new Date());
   const [weekDate, setWeekDate] = useState(() => new Date());
@@ -509,6 +512,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const activePlannerTasks = useMemo(
     () => plannerTasks.filter((task) => task.status !== 'archived'),
     [plannerTasks]
+  );
+  const todayCommandCenter = useMemo(
+    () => getPlannerTodayCommandCenter(activePlannerTasks),
+    [activePlannerTasks],
   );
   const selectedTask = useMemo(
     () => plannerTasks.find((task) => task.id === selectedTaskId) || null,
@@ -1303,6 +1310,64 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     </button>
   );
 
+  const renderTodayTaskCard = (task: PlannerTask, isNext = false) => (
+    <div
+      key={task.id}
+      role="button"
+      tabIndex={0}
+      onClick={() => setSelectedTaskId(task.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          setSelectedTaskId(task.id);
+        }
+      }}
+      className={`rounded-lg border p-4 text-left transition hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-purple-500/60 ${statusClass[task.status]} ${
+        isNext ? 'ring-2 ring-[#84cc16]/50' : ''
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+            {isNext && <span className="rounded bg-[#84cc16] px-2 py-1 text-black">Próxima</span>}
+            <span className="rounded bg-black/25 px-2 py-1 text-white/70">{task.startTime || 'Sem horário'}</span>
+            <span className="rounded bg-black/25 px-2 py-1 text-white/70">{statusLabel[task.status]}</span>
+            <span className="rounded bg-black/25 px-2 py-1 text-white/70">{formatMinutes(task.durationMinutes)}</span>
+          </div>
+          <p className="text-[11px] font-black uppercase tracking-widest text-white/55">{task.number} - {task.discipline}</p>
+          <h3 className="mt-1 text-lg font-black leading-tight text-white">{task.description}</h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/60">
+            <span className="rounded bg-black/20 px-2 py-1">Rel {task.relevance}</span>
+            <span className="rounded bg-black/20 px-2 py-1">{task.format}</span>
+            <span className="rounded bg-black/20 px-2 py-1">{task.performance === null ? 'Sem desempenho' : `${task.performance}%`}</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              createOrOpenStudyTask(task);
+            }}
+            className="rounded bg-[#84cc16] px-3 py-2 text-[10px] font-black uppercase text-black transition hover:bg-[#65a30d]"
+          >
+            Executar
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void copyPlannerTaskChatPrompt(task);
+            }}
+            className="rounded border border-purple-400/30 bg-purple-500/10 px-3 py-2 text-[10px] font-black uppercase text-purple-100 transition hover:bg-purple-500/20"
+          >
+            Prompt IA
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -1358,6 +1423,98 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           })}
         </div>
       </section>
+
+      {activeSection === 'today' && (
+        <section className="space-y-4">
+          <div className="rounded-lg border border-[#404040] bg-[#262626] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#84cc16]">Painel de Hoje</p>
+                <h2 className="mt-1 text-2xl font-black text-white">{formatPlannerDate(todayCommandCenter.date)}</h2>
+                <p className="mt-1 text-sm font-bold text-gray-400">
+                  {studyOsActiveTarget?.name || studyOsTarget} · {studyOsPhase === 'pos_edital' ? 'Pós-edital' : 'Pré-edital'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('generator')}
+                  className="flex items-center gap-2 rounded border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-xs font-black uppercase text-purple-100 transition hover:bg-purple-500/20"
+                >
+                  <Sparkles className="h-4 w-4" /> Study OS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('calendar')}
+                  className="flex items-center gap-2 rounded border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase text-gray-100 transition hover:bg-white/10"
+                >
+                  <CalendarDays className="h-4 w-4" /> Calendário
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Metric icon={ClipboardList} label="Blocos" value={`${todayCommandCenter.visibleTasks}/${Math.max(4, todayCommandCenter.totalTasks)}`} />
+              <Metric icon={Target} label="Abertos" value={`${todayCommandCenter.openTasks}`} />
+              <Metric icon={CheckCircle2} label="Concluídos" value={`${todayCommandCenter.completedTasks}`} />
+              <Metric icon={Timer} label="Tempo" value={formatMinutes(todayCommandCenter.totalMinutes)} />
+            </div>
+
+            {todayCommandCenter.nextTask && (
+              <div className="mt-5 rounded-lg border border-[#84cc16]/25 bg-[#84cc16]/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#bef264]">Próximo bloco</p>
+                    <p className="mt-1 truncate text-lg font-black text-white">
+                      {todayCommandCenter.nextTask.startTime ? `${todayCommandCenter.nextTask.startTime} · ` : ''}
+                      {todayCommandCenter.nextTask.discipline} - {todayCommandCenter.nextTask.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTaskId(todayCommandCenter.nextTask?.id || null)}
+                    className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d]"
+                  >
+                    Abrir
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {todayCommandCenter.tasks.length > 0 ? (
+            <div className="grid gap-3">
+              {todayCommandCenter.tasks.map((task) => renderTodayTaskCard(task, task.id === todayCommandCenter.nextTask?.id))}
+              {todayCommandCenter.overflowCount > 0 && (
+                <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 px-4 py-3 text-sm font-black text-yellow-200">
+                  +{todayCommandCenter.overflowCount} bloco(s) além da cota normal de hoje.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-white/10 bg-[#1a1a1a] p-8 text-center">
+              <CalendarDays className="mx-auto mb-3 h-8 w-8 text-gray-500" />
+              <p className="text-lg font-black text-white">Sem blocos hoje</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('generator')}
+                  className="rounded bg-purple-600 px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-purple-500"
+                >
+                  Gerar Study OS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('calendar')}
+                  className="rounded border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase text-gray-100 transition hover:bg-white/10"
+                >
+                  Calendário
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {activeSection === 'meta' && (
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-5">

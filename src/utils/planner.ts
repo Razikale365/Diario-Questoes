@@ -35,6 +35,18 @@ export interface PlannerTaskChatPromptOptions {
   phase?: string;
 }
 
+export interface PlannerTodayCommandCenter {
+  date: string;
+  tasks: PlannerTask[];
+  totalTasks: number;
+  visibleTasks: number;
+  overflowCount: number;
+  completedTasks: number;
+  openTasks: number;
+  totalMinutes: number;
+  nextTask?: PlannerTask;
+}
+
 const TASK_FORMATS = [
   'Revisão e Exercícios',
   'Teórico e Exercícios',
@@ -213,6 +225,38 @@ SAÍDA ESPERADA
 - Lista curta do que eu devo abrir agora.
 - Critério simples para eu marcar o bloco como concluído, falhei ou precisa voltar no refresh.
 ---`;
+};
+
+const scheduledTaskSort = (left: PlannerTask, right: PlannerTask) => {
+  const leftTime = left.startTime || '99:99';
+  const rightTime = right.startTime || '99:99';
+  return leftTime.localeCompare(rightTime) || left.number - right.number || left.description.localeCompare(right.description);
+};
+
+const isOpenPlannerTask = (task: PlannerTask) => task.status === 'pending' || task.status === 'started';
+
+export const getPlannerTodayCommandCenter = (
+  tasks: PlannerTask[],
+  date = new Date(),
+  limit = 4,
+): PlannerTodayCommandCenter => {
+  const today = toIsoDate(date);
+  const todayTasks = tasks
+    .filter((task) => task.status !== 'archived' && task.scheduledDate === today)
+    .sort(scheduledTaskSort);
+  const safeLimit = Math.max(1, Math.round(limit));
+
+  return {
+    date: today,
+    tasks: todayTasks.slice(0, safeLimit),
+    totalTasks: todayTasks.length,
+    visibleTasks: Math.min(todayTasks.length, safeLimit),
+    overflowCount: Math.max(0, todayTasks.length - safeLimit),
+    completedTasks: todayTasks.filter((task) => task.status === 'completed').length,
+    openTasks: todayTasks.filter(isOpenPlannerTask).length,
+    totalMinutes: todayTasks.reduce((sum, task) => sum + task.durationMinutes, 0),
+    nextTask: todayTasks.find(isOpenPlannerTask),
+  };
 };
 
 const findFirstFormat = (line: string) => {
