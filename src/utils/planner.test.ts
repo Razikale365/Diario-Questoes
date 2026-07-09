@@ -9,6 +9,8 @@ import {
   getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
+  replacePendingGeneratedStudyOsTasks,
+  shouldReplacePlannerMetaWithStudyOs,
 } from './planner';
 
 test('parseLsMetaText extracts current meta summary and task rows', () => {
@@ -193,6 +195,47 @@ test('mergePlannerTasks refreshes reimported task details by meta and number wit
   assert.equal(result[0].scheduledDate, '2026-07-06');
   assert.equal(result[0].startTime, '09:15');
   assert.equal(result[0].linkedStudyTaskId, 'study-task-29');
+});
+
+test('replacePendingGeneratedStudyOsTasks preserves LS and completed work while replacing only the same target and dates', () => {
+  const existing = [
+    makeTask({ id: 'ls-task', source: 'ls-meta-pdf', scheduledDate: '2026-07-10' }),
+    makeTask({ id: 'trilha-task', plannerSourceKind: 'trilha_estrategica', scheduledDate: '2026-07-10' }),
+    makeTask({ id: 'old-bacen-pending', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'bacen_economia_financas', scheduledDate: '2026-07-10' }),
+    makeTask({ id: 'old-bacen-completed', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'bacen_economia_financas', scheduledDate: '2026-07-10', status: 'completed' }),
+    makeTask({ id: 'old-rfb-pending', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'rfb_auditor', scheduledDate: '2026-07-10' }),
+    makeTask({ id: 'old-bacen-other-day', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'bacen_economia_financas', scheduledDate: '2026-07-11' }),
+    makeTask({ id: 'legacy-generated', source: 'generated', scheduledDate: '2026-07-10' }),
+  ];
+  const incoming = [
+    makeTask({ id: 'new-bacen-1', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'bacen_economia_financas', scheduledDate: '2026-07-10' }),
+    makeTask({ id: 'new-bacen-2', source: 'generated', plannerSourceKind: 'generated_planner', targetSlug: 'bacen_economia_financas', scheduledDate: '2026-07-10' }),
+  ];
+
+  const result = replacePendingGeneratedStudyOsTasks(existing, incoming, {
+    targetSlug: 'bacen_economia_financas',
+    scheduledDates: ['2026-07-10'],
+  });
+
+  assert.deepEqual(result.map((task) => task.id), [
+    'ls-task',
+    'trilha-task',
+    'old-bacen-completed',
+    'old-rfb-pending',
+    'old-bacen-other-day',
+    'legacy-generated',
+    'new-bacen-1',
+    'new-bacen-2',
+  ]);
+});
+
+test('shouldReplacePlannerMetaWithStudyOs retains an imported LS meta summary', () => {
+  const lsMeta = parseLsMetaText('Meta atual | Meta 6 (#45)\nPlanejamento SEFAZ CE\n').meta;
+  const studyOsMeta = { ...lsMeta, id: 'study_os_meta_123' };
+
+  assert.equal(shouldReplacePlannerMetaWithStudyOs(undefined), true);
+  assert.equal(shouldReplacePlannerMetaWithStudyOs(studyOsMeta), true);
+  assert.equal(shouldReplacePlannerMetaWithStudyOs(lsMeta), false);
 });
 
 test('applyPlannerTaskResult completes a task with bounded performance and spent minutes', () => {

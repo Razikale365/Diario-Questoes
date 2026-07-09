@@ -41,6 +41,8 @@ import {
   getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
+  replacePendingGeneratedStudyOsTasks,
+  shouldReplacePlannerMetaWithStudyOs,
   type PlannerTaskResultInput,
   toIsoDate,
 } from '../utils/planner';
@@ -1085,8 +1087,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       importedAt: now,
     };
 
-    setPlannerTasks(generated);
-    setMetaSummary(generatedMeta);
+    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
+      targetSlug: studyOsTarget,
+      scheduledDates: [today],
+    }));
+    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
     setMetaHistory((current) => {
       const withCurrentMeta = metaSummary && plannerTasks.length > 0
         ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
@@ -1130,8 +1135,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       importedAt: now,
     };
 
-    setPlannerTasks(generated);
-    setMetaSummary(generatedMeta);
+    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
+      targetSlug: studyOsTarget,
+      scheduledDates: [studyOsRefreshPlan.date],
+    }));
+    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
     setMetaHistory((current) => {
       const withCurrentMeta = metaSummary && plannerTasks.length > 0
         ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
@@ -1174,8 +1182,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       importedAt: now,
     };
 
-    setPlannerTasks(generated);
-    setMetaSummary(generatedMeta);
+    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
+      targetSlug: studyOsTarget,
+      scheduledDates: studyOsWeekPlan.days.map((day) => day.date),
+    }));
+    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
     setMetaHistory((current) => {
       const withCurrentMeta = metaSummary && plannerTasks.length > 0
         ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))

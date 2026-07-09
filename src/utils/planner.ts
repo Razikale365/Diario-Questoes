@@ -47,6 +47,11 @@ export interface PlannerTodayCommandCenter {
   nextTask?: PlannerTask;
 }
 
+export interface ReplacePendingGeneratedStudyOsTasksOptions {
+  targetSlug: string;
+  scheduledDates: string[];
+}
+
 const TASK_FORMATS = [
   'Revisão e Exercícios',
   'Teórico e Exercícios',
@@ -580,6 +585,26 @@ export const mergePlannerTasks = (existing: PlannerTask[], incoming: PlannerTask
 
   return Array.from(byId.values()).sort((a, b) => a.number - b.number);
 };
+
+export const replacePendingGeneratedStudyOsTasks = (
+  existing: PlannerTask[],
+  incoming: PlannerTask[],
+  { targetSlug, scheduledDates }: ReplacePendingGeneratedStudyOsTasksOptions,
+) => {
+  const datesToReplace = new Set(scheduledDates);
+  const retained = existing.filter((task) => !(
+    task.plannerSourceKind === 'generated_planner' &&
+    task.targetSlug === targetSlug &&
+    task.status === 'pending' &&
+    task.scheduledDate !== undefined &&
+    datesToReplace.has(task.scheduledDate)
+  ));
+
+  return [...retained, ...incoming];
+};
+
+export const shouldReplacePlannerMetaWithStudyOs = (metaSummary: PlannerMetaSummary | null | undefined) =>
+  !metaSummary || metaSummary.id.startsWith('study_os_');
 
 export const buildMonthGrid = (monthDate: Date): MonthDay[] => {
   const firstOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
