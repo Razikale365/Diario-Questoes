@@ -13,6 +13,7 @@ import {
   formatStudyTargetProfileTable,
   extractStudySourceCandidatesFromText,
   inferStudySourceSignalsFromText,
+  isQuestionBankItemRelevantToStudyTarget,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
@@ -476,6 +477,24 @@ test('inferStudySourceSignalsFromText uses a discipline hint for a course headin
   assert.equal(parsed[0].discipline, 'Economia');
   assert.equal(parsed[0].topic, 'Macroeconomia');
   assert.equal(parsed[0].lesson, 'Aula 02 Estratégia');
+});
+
+test('isQuestionBankItemRelevantToStudyTarget keeps unlabeled legacy feedback out of BACEN and RFB', () => {
+  const legacyItem = { exam: '', institution: '', sourceName: 'Caderno legado', tags: [] };
+  const bacenItem = { exam: 'BACEN 2024', institution: 'Banco Central', sourceName: 'TEC', tags: [] };
+  const rfbItem = { exam: 'AFRFB Receita Federal', institution: 'RFB', sourceName: 'TEC', tags: [] };
+  const genericRfbItem = { exam: 'Receita Federal', institution: 'RFB', sourceName: 'TEC', tags: [] };
+
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(legacyItem, 'bacen_economia_financas'), false);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(legacyItem, 'rfb_auditor'), false);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(legacyItem, 'sefaz_ce'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(bacenItem, 'bacen_economia_financas'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(bacenItem, 'rfb_auditor'), false);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(rfbItem, 'rfb_auditor'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(rfbItem, 'rfb_analista'), false);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(genericRfbItem, 'rfb_auditor'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(genericRfbItem, 'rfb_analista'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(rfbItem, 'bacen_economia_financas'), false);
 });
 
 test('buildStudyRefreshPlan avoids completed generated work and prioritizes ignored work as review debt', () => {

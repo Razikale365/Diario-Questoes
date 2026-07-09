@@ -1,4 +1,4 @@
-import { PlannerTask } from '../types';
+import { PlannerTask, QuestionBankItem } from '../types';
 
 export type StudyPlanPhase = 'pre_edital' | 'pos_edital';
 export type CoverageStatus = 'strong' | 'stale' | 'weak' | 'unread';
@@ -1517,6 +1517,34 @@ export function isPlannerTaskRelevantToStudyTarget(task: PlannerTask, targetSlug
     task.source.startsWith('ls');
   return targetSlug === 'sefaz_ce' && isLegacyBaseline;
 }
+
+export const isQuestionBankItemRelevantToStudyTarget = (
+  item: Pick<QuestionBankItem, 'exam' | 'institution' | 'sourceName' | 'tags'>,
+  targetSlug: string,
+): boolean => {
+  const normalizedTarget = normalizeTargetSlug(targetSlug);
+  const metadata = normalize([item.exam, item.institution, item.sourceName, ...(item.tags || [])].filter(Boolean).join(' '));
+  const markersByTarget: Record<string, string[]> = {
+    bacen_economia_financas: ['bacen', 'banco central', 'bcb', 'bacen_economia_financas'],
+    rfb_auditor: ['receita federal', 'rfb', 'afrfb', 'auditor fiscal da receita', 'rfb_auditor'],
+    rfb_analista: ['receita federal', 'rfb', 'atrfb', 'analista tributario da receita', 'rfb_analista'],
+    sefaz_ce: ['sefaz ce', 'sefaz_ce', 'ceara', 'ceará', 'fiscal ce'],
+  };
+  const auditorRoleMarkers = ['afrfb', 'auditor fiscal da receita', 'rfb_auditor'];
+  const analystRoleMarkers = ['atrfb', 'analista tributario da receita', 'rfb_analista'];
+  const knownMarkers = Object.values(markersByTarget).flat();
+  const isAuditorSpecific = auditorRoleMarkers.some((marker) => metadata.includes(normalize(marker)));
+  const isAnalystSpecific = analystRoleMarkers.some((marker) => metadata.includes(normalize(marker)));
+
+  if (normalizedTarget === 'rfb_auditor' && isAnalystSpecific) return false;
+  if (normalizedTarget === 'rfb_analista' && isAuditorSpecific) return false;
+
+  const matchesCurrentTarget = (markersByTarget[normalizedTarget] || []).some((marker) => metadata.includes(normalize(marker)));
+
+  if (matchesCurrentTarget) return true;
+  if (knownMarkers.some((marker) => metadata.includes(normalize(marker)))) return false;
+  return normalizedTarget === 'sefaz_ce';
+};
 
 export const updateStudyCoverageFromPlannerTask = (
   coverageRows: StudyCoverageRow[],

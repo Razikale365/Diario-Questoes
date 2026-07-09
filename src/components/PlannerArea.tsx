@@ -79,6 +79,7 @@ import {
   formatStudyTargetProfileTable,
   extractStudySourceCandidatesFromText,
   inferStudySourceSignalsFromText,
+  isQuestionBankItemRelevantToStudyTarget,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
@@ -368,10 +369,11 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
   };
 };
 
-const buildStudyOsFeedbackRows = (items: QuestionBankItem[]): TopicFeedback[] => {
+const buildStudyOsFeedbackRows = (items: QuestionBankItem[], targetSlug: string): TopicFeedback[] => {
   const byTopic = new Map<string, TopicFeedback>();
 
   items.forEach((item) => {
+    if (!isQuestionBankItemRelevantToStudyTarget(item, targetSlug)) return;
     const topic = item.lesson || item.taskTitle || item.tags[0] || item.sourceName;
     if (!item.discipline || !topic) return;
     const wrong = item.attempts.filter((attempt) => attempt.isCorrect === false).length;
@@ -678,7 +680,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       buildTargetDecisionRows({
         targetProfiles: studyOsTargetProfiles,
         coverageRows: parseStudyCoverageTable(studyOsCoverageDraft),
-        feedbackRows: buildStudyOsFeedbackRows(questionBankItems),
+        feedbackRows: buildStudyOsFeedbackRows(questionBankItems, studyOsTarget),
         sourceItems: studyOsCombinedSourceItems,
         activeTargetSlug: studyOsTarget,
       }),
@@ -1105,7 +1107,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       targetSlug: studyOsTarget,
       phase: studyOsPhase,
       coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
+      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
       sourceItems: studyOsCombinedSourceItems,
       targetProfiles: studyOsTargetProfiles,
     });
@@ -1128,7 +1130,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       startDate: studyOsWeekStartDate,
       days: 5,
       coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
+      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
       sourceItems: studyOsCombinedSourceItems,
       targetProfiles: studyOsTargetProfiles,
     });
@@ -1146,7 +1148,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       phase: studyOsPhase,
       refreshDate,
       coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank()),
+      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
       sourceItems: studyOsCombinedSourceItems,
       targetProfiles: studyOsTargetProfiles,
       previousTasks: activePlannerTasks,
