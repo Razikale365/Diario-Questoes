@@ -23,6 +23,7 @@ import {
   seedSourceSignalsForTarget,
   seedCoverageForTarget,
   studySourceItemsFromPlannerTasks,
+  updateStudyCoverageStatus,
   updateStudyCoverageFromPlannerTask,
   type StudyCoverageRow,
 } from './studyPlannerCore';
@@ -755,6 +756,41 @@ test('LS alignment ignores a baseline from another target while keeping shared m
     mismatchedCount: 1,
     mismatchTargetSlugs: ['sefaz_ce'],
   });
+});
+
+test('updateStudyCoverageStatus changes only the exact target topic selected in the quick audit', () => {
+  const rows: StudyCoverageRow[] = [
+    {
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'unread',
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Curso BACEN',
+    },
+    {
+      targetSlug: 'rfb_auditor',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'weak',
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Curso RFB',
+    },
+  ];
+
+  const result = updateStudyCoverageStatus(rows, {
+    targetSlug: 'bacen_economia_financas',
+    discipline: 'Economia',
+    topic: 'Macroeconomia',
+  }, 'strong');
+
+  assert.equal(result.updatedCount, 1);
+  assert.equal(result.rows[0].status, 'strong');
+  assert.equal(result.rows[1].status, 'weak');
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

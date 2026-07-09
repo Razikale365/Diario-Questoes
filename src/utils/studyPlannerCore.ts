@@ -79,6 +79,12 @@ export interface StudyCoverageRow {
   notes?: string;
 }
 
+export interface StudyCoverageIdentity {
+  targetSlug: string;
+  discipline: string;
+  topic: string;
+}
+
 export interface StudySourceItem {
   id: string;
   sourceKind: StudySourceKind;
@@ -371,6 +377,24 @@ export const mergeStudyCoverageWithTargetSeed = (
     ),
   );
   return missingRows.length > 0 ? [...coverageRows, ...missingRows] : coverageRows;
+};
+
+export const updateStudyCoverageStatus = (
+  coverageRows: StudyCoverageRow[],
+  identity: StudyCoverageIdentity,
+  status: CoverageStatus,
+): { rows: StudyCoverageRow[]; updatedCount: number } => {
+  let updatedCount = 0;
+  const rows = coverageRows.map((row) => {
+    const isExactMatch =
+      row.targetSlug === identity.targetSlug &&
+      normalize(row.discipline) === normalize(identity.discipline) &&
+      normalize(row.topic) === normalize(identity.topic);
+    if (!isExactMatch || row.status === status) return row;
+    updatedCount += 1;
+    return { ...row, status };
+  });
+  return updatedCount > 0 ? { rows, updatedCount } : { rows: coverageRows, updatedCount: 0 };
 };
 
 export const seedSourceSignalsForTarget = (targetSlug: string): StudySourceItem[] => {

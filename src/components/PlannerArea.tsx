@@ -90,6 +90,9 @@ import {
   seedSourceSignalsForTarget,
   studySourceItemsFromPlannerTasks,
   updateStudyCoverageFromPlannerTask,
+  updateStudyCoverageStatus,
+  CoverageStatus,
+  StudyCoverageIdentity,
   DailyStudyBlock,
   ExamTargetProfile,
   StudyDayPlan,
@@ -1023,6 +1026,16 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     showToast('Fontes base conferidas sem apagar importações.');
   };
 
+  const updateStudyOsCoverageStatus = (identity: StudyCoverageIdentity, status: CoverageStatus) => {
+    const update = updateStudyCoverageStatus(parseStudyCoverageTable(studyOsCoverageDraft), identity, status);
+    if (update.updatedCount === 0) return;
+    setStudyOsCoverageDraft(formatStudyCoverageTable(update.rows));
+    setStudyOsPlan(null);
+    setStudyOsWeekPlan(null);
+    setStudyOsRefreshPlan(null);
+    showToast(`${identity.topic}: cobertura marcada como ${coverageStatusLabel[status]}.`);
+  };
+
   const appendInferredStudyOsSources = () => {
     const inferred = inferStudySourceSignalsFromText(studyOsRawSourceText, {
       targetSlug: studyOsTarget,
@@ -1919,6 +1932,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               setStudyOsWeekPlan(null);
               setStudyOsRefreshPlan(null);
             }}
+            onCoverageStatusChange={updateStudyOsCoverageStatus}
             onTargetProfileDraftChange={setStudyOsTargetProfileDraft}
             onSourceDraftChange={(value) => {
               setStudyOsSourceDraft(value);
@@ -2947,12 +2961,27 @@ const studyBlockKindClass: Record<DailyStudyBlock['kind'], string> = {
   review: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-200',
 };
 
+const coverageStatusLabel: Record<CoverageStatus, string> = {
+  strong: 'forte',
+  stale: 'a rever',
+  weak: 'fraca',
+  unread: 'nao lida',
+};
+
+const coverageStatusClass: Record<CoverageStatus, string> = {
+  strong: 'border-[#84cc16]/35 bg-[#84cc16]/15 text-[#d9f99d]',
+  stale: 'border-yellow-400/35 bg-yellow-400/10 text-yellow-100',
+  weak: 'border-orange-400/35 bg-orange-400/10 text-orange-100',
+  unread: 'border-blue-400/35 bg-blue-400/10 text-blue-100',
+};
+
 const StudyOSPlannerPanel: React.FC<{
   targetProfiles: ExamTargetProfile[];
   activeTarget?: ExamTargetProfile;
   targetSlug: string;
   phase: StudyPlanPhase;
   coverageDraft: string;
+  onCoverageStatusChange: (identity: StudyCoverageIdentity, status: CoverageStatus) => void;
   targetProfileDraft: string;
   sourceDraft: string;
   rawSourceText: string;
@@ -2988,6 +3017,7 @@ const StudyOSPlannerPanel: React.FC<{
   targetSlug,
   phase,
   coverageDraft,
+  onCoverageStatusChange,
   targetProfileDraft,
   sourceDraft,
   rawSourceText,
@@ -3022,6 +3052,7 @@ const StudyOSPlannerPanel: React.FC<{
   const activeWarnings = refreshPlan?.warnings || plan?.warnings || [];
   const visibleScoreboard = (refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).slice(0, 12);
   const coverageRows = useMemo(() => parseStudyCoverageTable(coverageDraft), [coverageDraft]);
+  const auditableCoverageRows = coverageRows.filter((row) => row.targetSlug === targetSlug || row.targetSlug === 'shared');
   const weekBlockCount = weekPlan?.days.reduce((total, day) => total + day.blocks.length, 0) || 0;
   const weekEndDate = weekPlan?.days[weekPlan.days.length - 1]?.date;
   const mismatchTargetNames = baselineComparison.mismatchTargetSlugs
@@ -3130,7 +3161,7 @@ const StudyOSPlannerPanel: React.FC<{
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Metric icon={ClipboardList} label="Cobertura" value={`${coverageRows.length}`} />
+            <Metric icon={ClipboardList} label="Cobertura" value={`${auditableCoverageRows.length}`} />
             <Metric icon={DatabaseIcon} label="Fontes" value={`${sourceItemCount}`} />
             <Metric icon={ListChecks} label="Score" value={`${(refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
             <Metric icon={Target} label="Targets" value={`${targetProfiles.length}`} />
@@ -3155,6 +3186,52 @@ const StudyOSPlannerPanel: React.FC<{
             )}
             {baselineComparison.alignedCount === 0 && baselineComparison.transferableCount === 0 && baselineComparison.mismatchedCount === 0 && (
               <p className="mt-1">Nenhuma LS/trilha associada a este target.</p>
+            )}
+          </div>
+
+          <div className="border border-white/10 bg-black/20">
+            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Auditoria rapida</p>
+              <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">F forte · R rever · Fr fraca · N nao lida</span>
+            </div>
+            {auditableCoverageRows.length > 0 ? (
+              <div className="max-h-72 overflow-y-auto">
+                {auditableCoverageRows.map((row) => (
+                  <div key={`${row.targetSlug}-${row.discipline}-${row.topic}`} className="border-b border-white/5 px-3 py-2 last:border-b-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black text-white">{row.topic}</p>
+                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                          {row.discipline}{row.targetSlug === 'shared' ? ' · compartilhado' : ''}
+                        </p>
+                      </div>
+                      <div className="grid shrink-0 grid-cols-4 gap-1">
+                        {(Object.keys(coverageStatusLabel) as CoverageStatus[]).map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            title={coverageStatusLabel[status]}
+                            aria-label={`Marcar ${row.topic} como ${coverageStatusLabel[status]}`}
+                            aria-pressed={row.status === status}
+                            onClick={() => onCoverageStatusChange({
+                              targetSlug: row.targetSlug,
+                              discipline: row.discipline,
+                              topic: row.topic,
+                            }, status)}
+                            className={`h-7 w-7 border text-[9px] font-black uppercase transition ${
+                              row.status === status ? coverageStatusClass[status] : 'border-white/10 bg-white/[0.03] text-gray-600 hover:border-white/25 hover:text-white'
+                            }`}
+                          >
+                            {status === 'strong' ? 'F' : status === 'stale' ? 'R' : status === 'weak' ? 'Fr' : 'N'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="px-3 py-4 text-xs font-bold text-gray-500">Sem cobertura auditavel para este target.</p>
             )}
           </div>
 
