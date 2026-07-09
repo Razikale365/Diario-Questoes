@@ -206,6 +206,13 @@ shared | Português | Interpretação de textos | stale | 1 | 6 | Curso base
   assert.equal(rows[0].targetSlug, 'bacen_economia_financas');
   assert.equal(tasks.length, plan.blocks.length);
   assert.equal(tasks[0].source, 'generated');
+  assert.equal(tasks[0].plannerSourceKind, 'generated_planner');
+  assert.equal(tasks[0].targetSlug, 'bacen_economia_financas');
+  assert.equal(tasks[0].plannedBlockKind, plan.blocks[0].kind);
+  assert.equal(tasks[0].plannedQuestions, plan.blocks[0].plannedQuestions);
+  assert.equal(tasks[0].materialHint, plan.blocks[0].materialHint);
+  assert.deepEqual(tasks[0].sourceReason, plan.blocks[0].sourceReason);
+  assert.equal(tasks[0].scoreBreakdown?.finalScore, plan.blocks[0].scoreBreakdown.finalScore);
   assert.equal(tasks[0].scheduledDate, '2026-07-08');
   assert.match(tasks[0].description, /Macroeconomia|Interpretação/);
 });

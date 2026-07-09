@@ -181,11 +181,21 @@ const hasLowTrustPlannerSource = (task: PlannerTask) => {
 };
 
 export const buildPlannerTaskChatPrompt = (task: PlannerTask, options: PlannerTaskChatPromptOptions = {}) => {
-  const target = options.targetName || extractDetailValue(task.details, 'Target') || task.planejamento || 'target atual';
-  const source = extractDetailValue(task.details, 'Fonte') || task.source;
-  const score = extractDetailValue(task.details, 'Score');
+  const target = options.targetName || task.targetSlug || extractDetailValue(task.details, 'Target') || task.planejamento || 'target atual';
+  const source = task.materialHint || extractDetailValue(task.details, 'Fonte') || task.source;
+  const score = task.scoreBreakdown?.finalScore ?? extractDetailValue(task.details, 'Score');
   const schedule = [task.scheduledDate, task.startTime].filter(Boolean).join(' ');
-  const detailLines = summarizePromptLines(task.details).filter((line) => !/^target\s*:/i.test(line));
+  const structuredLines = [
+    task.plannerSourceKind ? `Camada de origem: ${task.plannerSourceKind}` : '',
+    task.plannedBlockKind ? `Tipo planejado: ${task.plannedBlockKind}` : '',
+    task.plannedQuestions ? `Volume planejado: ${task.plannedQuestions} questões` : '',
+    task.originTaskId ? `Origem vinculada: ${task.originTaskId}` : '',
+    ...(task.sourceReason || []),
+  ].filter(Boolean);
+  const detailLines = [
+    ...structuredLines,
+    ...summarizePromptLines(task.details).filter((line) => !/^(target|fonte|score)\s*:/i.test(line)),
+  ].slice(0, 12);
   const lowTrustWarning = hasLowTrustPlannerSource(task)
     ? '\n- Dicas e Bizus aparecem como apoio de baixo grau de confiança: use apenas para checagem rápida e valide contra o material original.'
     : '';
@@ -202,8 +212,10 @@ CONTEXTO DO TARGET
 TAREFA DE AGORA
 - Disciplina: ${task.discipline}
 - Bloco: ${task.format}
+- Tipo Study OS: ${task.plannedBlockKind || 'não estruturado'}
 - Tema: ${task.description}
 - Duração planejada: ${formatMinutes(task.durationMinutes)}
+- Questões planejadas: ${task.plannedQuestions ? `${task.plannedQuestions} questões` : 'não se aplica'}
 - Agenda: ${schedule || 'não agendada'}
 - Fonte principal: ${source}
 - Score do planner: ${score || task.relevance}

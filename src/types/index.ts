@@ -98,6 +98,24 @@ export interface StudyTask {
 export type PlannerTaskStatus = 'pending' | 'completed' | 'started' | 'ignored' | 'archived';
 export type PlannerTaskSource = 'ls-meta-text' | 'ls-meta-pdf' | 'manual' | 'generated';
 export type PlannerMetaHistoryOrigin = 'ls' | 'generated';
+export type PlannerTaskSourceKind = 'ls' | 'trilha_estrategica' | 'generated_planner' | 'manual';
+export type PlannerTaskBlockKind = 'theory' | 'questions' | 'review';
+
+export interface PlannerTaskScoreBreakdown {
+  weakness: number;
+  incidence: number;
+  tier: number;
+  coverageNeed: number;
+  reviewDebt: number;
+  lsAlignment: number;
+  targetFit: number;
+  overlapValue: number;
+  deadlinePressure: number;
+  bancaFit: number;
+  balancePenalty: number;
+  lowTrustPenalty: number;
+  finalScore: number;
+}
 
 export interface PlannerTask {
   id: string;
@@ -118,6 +136,15 @@ export interface PlannerTask {
   startTime?: string;
   durationMinutes: number;
   source: PlannerTaskSource;
+  plannerSourceKind?: PlannerTaskSourceKind;
+  targetSlug?: string;
+  originTaskId?: string;
+  plannedBlockKind?: PlannerTaskBlockKind;
+  plannedQuestions?: number;
+  materialHint?: string;
+  sourceReason?: string[];
+  scoreBreakdown?: PlannerTaskScoreBreakdown;
+  displacedReason?: string;
   linkedStudyTaskId?: string;
   createdAt: string;
   updatedAt: string;

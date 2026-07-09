@@ -280,6 +280,47 @@ test('buildPlannerTaskChatPrompt creates a source-aware prompt for a generated p
   assert.match(prompt, /plano de execução/i);
 });
 
+test('buildPlannerTaskChatPrompt prefers structured Study OS metadata', () => {
+  const task = makeTask({
+    planejamento: 'Study OS - BACEN',
+    discipline: 'Macroeconomia',
+    format: 'Questões TEC',
+    description: 'Política monetária',
+    source: 'generated',
+    plannerSourceKind: 'generated_planner',
+    targetSlug: 'bacen_economia_financas',
+    plannedBlockKind: 'questions',
+    plannedQuestions: 25,
+    materialHint: 'TEC CEBRASPE mais cai',
+    sourceReason: ['fraqueza alta', 'incidência alta'],
+    scoreBreakdown: {
+      weakness: 10,
+      incidence: 9,
+      tier: 8,
+      coverageNeed: 6,
+      reviewDebt: 4,
+      lsAlignment: 1,
+      targetFit: 10,
+      overlapValue: 8,
+      deadlinePressure: 5,
+      bancaFit: 10,
+      balancePenalty: 0,
+      lowTrustPenalty: 0,
+      finalScore: 91.5,
+    },
+  });
+
+  const prompt = buildPlannerTaskChatPrompt(task);
+
+  assert.match(prompt, /bacen_economia_financas/);
+  assert.match(prompt, /TEC CEBRASPE mais cai/);
+  assert.match(prompt, /25 questões/);
+  assert.match(prompt, /questions/);
+  assert.match(prompt, /91.5/);
+  assert.match(prompt, /fraqueza alta/);
+  assert.match(prompt, /incidência alta/);
+});
+
 test('buildPlannerTaskChatPrompt labels Dicas and Bizus as low-trust support material', () => {
   const task = makeTask({
     discipline: 'Legislação Tributária',

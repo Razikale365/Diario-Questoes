@@ -227,6 +227,12 @@ const statusClass: Record<PlannerTask['status'], string> = {
   archived: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
 };
 
+const plannedBlockKindLabel: Record<string, string> = {
+  theory: 'Teoria',
+  questions: 'Questões',
+  review: 'Revisão',
+};
+
 const historyOriginLabel: Record<PlannerMetaHistoryOrigin, string> = {
   ls: 'LS',
   generated: 'Gerada',
@@ -783,7 +789,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const copyPlannerTaskChatPrompt = async (task: PlannerTask) => {
-    const targetSlug = task.details?.match(/^\s*Target\s*:\s*(.+)$/im)?.[1]?.trim();
+    const targetSlug = task.targetSlug || task.details?.match(/^\s*Target\s*:\s*(.+)$/im)?.[1]?.trim();
     const targetProfile = targetSlug
       ? studyOsTargetProfiles.find((profile) => profile.slug === targetSlug)
       : studyOsActiveTarget;
@@ -1333,14 +1339,22 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             <span className="rounded bg-black/25 px-2 py-1 text-white/70">{task.startTime || 'Sem horário'}</span>
             <span className="rounded bg-black/25 px-2 py-1 text-white/70">{statusLabel[task.status]}</span>
             <span className="rounded bg-black/25 px-2 py-1 text-white/70">{formatMinutes(task.durationMinutes)}</span>
+            {task.targetSlug && <span className="rounded bg-black/25 px-2 py-1 text-white/70">{task.targetSlug}</span>}
           </div>
           <p className="text-[11px] font-black uppercase tracking-widest text-white/55">{task.number} - {task.discipline}</p>
           <h3 className="mt-1 text-lg font-black leading-tight text-white">{task.description}</h3>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/60">
             <span className="rounded bg-black/20 px-2 py-1">Rel {task.relevance}</span>
-            <span className="rounded bg-black/20 px-2 py-1">{task.format}</span>
+            <span className="rounded bg-black/20 px-2 py-1">{task.plannedBlockKind ? plannedBlockKindLabel[task.plannedBlockKind] : task.format}</span>
+            {task.plannedQuestions && <span className="rounded bg-black/20 px-2 py-1">{task.plannedQuestions} questões</span>}
+            {task.scoreBreakdown && <span className="rounded bg-black/20 px-2 py-1">Score {task.scoreBreakdown.finalScore}</span>}
             <span className="rounded bg-black/20 px-2 py-1">{task.performance === null ? 'Sem desempenho' : `${task.performance}%`}</span>
           </div>
+          {task.sourceReason && task.sourceReason.length > 0 && (
+            <p className="mt-3 line-clamp-2 text-xs font-bold leading-relaxed text-white/65">
+              {task.sourceReason.slice(0, 2).join(' · ')}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <button
@@ -2033,6 +2047,13 @@ const PlannerTaskDetailModal: React.FC<{
     }
     onApplyResult({ outcome, performance: draftPerformance, spentMinutes: draftMinutes });
   };
+  const visibleDetails = task.plannerSourceKind === 'generated_planner'
+    ? task.details
+      ?.split('\n')
+      .filter((line) => !/^\s*(Target|Fonte|Score)\s*:/i.test(line))
+      .join('\n')
+      .trim()
+    : task.details;
 
   return (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -2071,11 +2092,46 @@ const PlannerTaskDetailModal: React.FC<{
               <p className="whitespace-pre-wrap text-sm font-bold leading-relaxed text-white">{task.description}</p>
             </div>
 
-            {task.details && (
+            {task.plannerSourceKind === 'generated_planner' && (
+              <div className="rounded-xl border border-[#84cc16]/20 bg-[#84cc16]/5 p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <p className="mr-auto text-[10px] font-black uppercase tracking-widest text-[#bef264]">Por que entrou no plano</p>
+                  {task.targetSlug && <span className="rounded bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white/70">{task.targetSlug}</span>}
+                  {task.plannedBlockKind && <span className="rounded bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white/70">{plannedBlockKindLabel[task.plannedBlockKind]}</span>}
+                  {task.plannedQuestions && <span className="rounded bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white/70">{task.plannedQuestions} questões</span>}
+                  {task.scoreBreakdown && <span className="rounded bg-[#84cc16]/15 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[#bef264]">Score {task.scoreBreakdown.finalScore}</span>}
+                </div>
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Fonte</p>
+                    <p className="mt-1 text-sm font-bold text-white">{task.materialHint || 'Study OS'}</p>
+                    {task.sourceReason && task.sourceReason.length > 0 && (
+                      <ul className="mt-3 space-y-1 text-sm font-semibold leading-relaxed text-gray-200">
+                        {task.sourceReason.slice(0, 4).map((reason) => (
+                          <li key={reason}>- {reason}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  {task.scoreBreakdown && (
+                    <div className="grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                      <span className="rounded bg-black/20 px-2 py-1">Fraq. {task.scoreBreakdown.weakness}</span>
+                      <span className="rounded bg-black/20 px-2 py-1">Inc. {task.scoreBreakdown.incidence}</span>
+                      <span className="rounded bg-black/20 px-2 py-1">Peso {task.scoreBreakdown.tier}</span>
+                      <span className="rounded bg-black/20 px-2 py-1">Cob. {task.scoreBreakdown.coverageNeed}</span>
+                      <span className="rounded bg-black/20 px-2 py-1">Rev. {task.scoreBreakdown.reviewDebt}</span>
+                      <span className="rounded bg-black/20 px-2 py-1">Banca {task.scoreBreakdown.bancaFit}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {visibleDetails && (
               <div className="rounded-xl border border-white/10 bg-[#1a1a1a] p-4">
                 <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Atividades e instruções</p>
                 <p className="max-h-[28vh] overflow-y-auto whitespace-pre-wrap pr-2 text-sm font-semibold leading-relaxed text-gray-200 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                  {task.details}
+                  {visibleDetails}
                 </p>
               </div>
             )}
