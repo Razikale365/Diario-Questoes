@@ -3507,7 +3507,7 @@ const StudyOSPlannerPanel: React.FC<{
 
           <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/15">
             {visibleScoreboard.length > 0 ? (
-              <table className="w-full min-w-[980px] border-collapse text-left">
+              <table className="w-full min-w-[1160px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
                     <th className="px-3 py-3">Bloco</th>
@@ -3521,6 +3521,8 @@ const StudyOSPlannerPanel: React.FC<{
                     <th className="px-3 py-3">LS</th>
                     <th className="px-3 py-3">Fit</th>
                     <th className="px-3 py-3">Pen</th>
+                    <th className="px-3 py-3">Escolha</th>
+                    <th className="px-3 py-3">Substituído por</th>
                     <th className="px-3 py-3">Final</th>
                   </tr>
                 </thead>
@@ -3614,6 +3616,14 @@ const StudyScoreRow: React.FC<{ row: StudyScoreboardRow }> = ({ row }) => (
     <td className="px-3 py-2">{row.lsAlignment}</td>
     <td className="px-3 py-2">{row.targetFit}</td>
     <td className="px-3 py-2">{row.lowTrustPenalty + row.balancePenalty}</td>
+    <td className="px-3 py-2">
+      <span className={`rounded px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
+        row.chosen ? 'bg-[#84cc16]/15 text-[#bef264]' : 'bg-white/5 text-gray-500'
+      }`}>
+        {row.chosen ? 'Sim' : 'Não'}
+      </span>
+    </td>
+    <td className="max-w-[180px] truncate px-3 py-2" title={row.displacedBy || undefined}>{row.displacedBy || '-'}</td>
     <td className="px-3 py-2 font-black text-[#84cc16]">{row.finalScore}</td>
   </tr>
 );
