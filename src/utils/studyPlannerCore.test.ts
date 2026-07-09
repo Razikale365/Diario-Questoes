@@ -11,6 +11,7 @@ import {
   formatStudyCoverageTable,
   formatStudySourceTable,
   formatStudyTargetProfileTable,
+  extractStudySourceCandidatesFromText,
   inferStudySourceSignalsFromText,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
@@ -446,6 +447,35 @@ Andrety revisão: Auditoria - Procedimentos de auditoria - prioridade 88
   assert.deepEqual(rows.map((row) => row.sourceOrder), [3, 4, 3]);
   assert.equal(rows[2].priorityHint, 88);
   assert.match(rows[2].lesson || '', /Andrety/i);
+});
+
+test('extractStudySourceCandidatesFromText retains structural course headings and excludes question content', () => {
+  const candidates = extractStudySourceCandidatesFromText(`
+[Pagina 1]
+Economia para concursos
+Aula 02 - Macroeconomia
+Questão 01 - Assinale a alternativa correta sobre a inflação.
+Alternativa A - Texto proprietário.
+Trilha Estratégica - Revisão - Curva de Phillips
+`);
+
+  assert.deepEqual(candidates, [
+    'Aula 02 - Macroeconomia',
+    'Trilha Estratégica - Revisão - Curva de Phillips',
+  ]);
+});
+
+test('inferStudySourceSignalsFromText uses a discipline hint for a course heading without discipline', () => {
+  const parsed = inferStudySourceSignalsFromText('Aula 02 - Macroeconomia', {
+    targetSlug: 'bacen_economia_financas',
+    sourceKind: 'estrategia_aulas',
+    disciplineHint: 'Economia',
+  });
+
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].discipline, 'Economia');
+  assert.equal(parsed[0].topic, 'Macroeconomia');
+  assert.equal(parsed[0].lesson, 'Aula 02 Estratégia');
 });
 
 test('buildStudyRefreshPlan avoids completed generated work and prioritizes ignored work as review debt', () => {

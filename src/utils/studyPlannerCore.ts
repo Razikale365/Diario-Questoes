@@ -64,6 +64,7 @@ export interface BuildTargetDecisionRowsInput {
 export interface InferStudySourceSignalsOptions {
   targetSlug: string;
   sourceKind?: StudySourceKind;
+  disciplineHint?: string;
 }
 
 export interface StudyCoverageRow {
@@ -742,6 +743,7 @@ export const inferStudySourceSignalsFromText = (
   options: InferStudySourceSignalsOptions,
 ): StudySourceItem[] => {
   const targetSlug = normalizeTargetSlug(options.targetSlug);
+  const disciplineHint = String(options.disciplineHint || '').trim();
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -750,7 +752,9 @@ export const inferStudySourceSignalsFromText = (
       const sourceKind = options.sourceKind || inferSourceKindFromLine(line);
       const sourceOrder = inferSourceOrder(line, index + 1);
       const cleaned = stripSourceMetadata(line);
-      const { discipline, topic } = inferDisciplineAndTopic(cleaned);
+      const inferred = inferDisciplineAndTopic(cleaned);
+      const discipline = inferred.discipline || disciplineHint;
+      const topic = inferred.topic || (disciplineHint ? cleaned : '');
 
       if (!discipline || !topic) return null;
 
@@ -770,6 +774,15 @@ export const inferStudySourceSignalsFromText = (
       } satisfies StudySourceItem;
     })
     .filter((item): item is StudySourceItem => item !== null);
+};
+
+export const extractStudySourceCandidatesFromText = (text: string): string[] => {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length >= 4 && line.length <= 240)
+    .filter((line) => /\b(?:aula|m[oó]dulo|trilha|disciplina|tema|assunto|cap[ií]tulo|revis[aã]o)\b/i.test(line))
+    .filter((line) => !/\b(?:quest[aã]o|alternativa|gabarito|resposta|item)\b/i.test(line));
 };
 
 export const parseStudyTargetProfileTable = (text: string): ExamTargetProfile[] => {
@@ -1395,6 +1408,7 @@ function stripSourceMetadata(line: string): string {
     .replace(/\baula\s*\d{1,3}\b/gi, '')
     .replace(/\b(?:tec|trilha\s+estrat[eé]gica|estrat[eé]gia|andrety|guia|revis[aã]o)\b\s*:?\s*/gi, '')
     .replace(/\b(?:incid[eê]ncia|inc|peso|weight|prioridade|priority|prior)\s*[:=]?\s*\d+(?:[,.]\d+)?\b/gi, '')
+    .replace(/^\s*[-:;>]+\s*/, '')
     .replace(/\s+-\s*$/g, '')
     .trim();
 }

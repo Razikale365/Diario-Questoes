@@ -77,6 +77,7 @@ import {
   formatStudyCoverageTable,
   formatStudySourceTable,
   formatStudyTargetProfileTable,
+  extractStudySourceCandidatesFromText,
   inferStudySourceSignalsFromText,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
@@ -443,6 +444,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsSourceDraft, setStudyOsSourceDraft] = useState(loadStoredStudyOsSourceSignals);
   const [studyOsRawSourceText, setStudyOsRawSourceText] = useState('');
   const [studyOsRawSourceKind, setStudyOsRawSourceKind] = useState<StudySourceKind | 'auto'>('auto');
+  const [studyOsRawSourceDiscipline, setStudyOsRawSourceDiscipline] = useState('');
+  const [isReadingStudyOsSourceFiles, setIsReadingStudyOsSourceFiles] = useState(false);
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
   const [studyOsRefreshPlan, setStudyOsRefreshPlan] = useState<StudyRefreshPlan | null>(null);
@@ -1040,6 +1043,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     const inferred = inferStudySourceSignalsFromText(studyOsRawSourceText, {
       targetSlug: studyOsTarget,
       sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
+      disciplineHint: studyOsRawSourceDiscipline.trim() || undefined,
     });
     if (inferred.length === 0) {
       showToast('Não encontrei linhas de fonte reconhecíveis.');
@@ -1053,6 +1057,41 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     setStudyOsWeekPlan(null);
     setStudyOsRefreshPlan(null);
     showToast(`${inferred.length} fonte(s) normalizada(s).`);
+  };
+
+  const importStudyOsSourceFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    setIsReadingStudyOsSourceFiles(true);
+    try {
+      const extractedCandidates = await Promise.all(files.map(async (file) => {
+        try {
+          const text = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+            ? (await extractPdfText(file)).text
+            : await file.text();
+          return extractStudySourceCandidatesFromText(text);
+        } catch (error) {
+          console.error('[Diário LS] Study source import failed', file.name, error);
+          return [];
+        }
+      }));
+      const candidates = Array.from(new Set(extractedCandidates.flat()));
+      if (candidates.length === 0) {
+        showToast('Nenhum cabeçalho estrutural foi encontrado nos arquivos.');
+        return;
+      }
+
+      setStudyOsRawSourceText((current) => Array.from(new Set([
+        ...current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+        ...candidates,
+      ])).join('\n'));
+      setStudyOsPlan(null);
+      setStudyOsWeekPlan(null);
+      setStudyOsRefreshPlan(null);
+      showToast(`${candidates.length} cabeçalho(s) extraído(s) para revisão.`);
+    } finally {
+      setIsReadingStudyOsSourceFiles(false);
+    }
   };
 
   const generateStudyOsPlan = () => {
@@ -1912,6 +1951,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             sourceDraft={studyOsSourceDraft}
             rawSourceText={studyOsRawSourceText}
             rawSourceKind={studyOsRawSourceKind}
+            rawSourceDiscipline={studyOsRawSourceDiscipline}
+            isReadingSourceFiles={isReadingStudyOsSourceFiles}
             sourceItemCount={studyOsManualSourceItems.length}
             baselineComparison={studyOsBaselineComparison}
             targetDecisionRows={studyOsTargetDecisionRows}
@@ -1942,6 +1983,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             }}
             onRawSourceTextChange={setStudyOsRawSourceText}
             onRawSourceKindChange={setStudyOsRawSourceKind}
+            onRawSourceDisciplineChange={setStudyOsRawSourceDiscipline}
+            onImportSourceFiles={importStudyOsSourceFiles}
             onAppendInferredSources={appendInferredStudyOsSources}
             onSaveTargetProfiles={saveStudyOsTargetProfiles}
             onResetTargetProfiles={resetStudyOsTargetProfiles}
@@ -2986,6 +3029,8 @@ const StudyOSPlannerPanel: React.FC<{
   sourceDraft: string;
   rawSourceText: string;
   rawSourceKind: StudySourceKind | 'auto';
+  rawSourceDiscipline: string;
+  isReadingSourceFiles: boolean;
   sourceItemCount: number;
   baselineComparison: StudyBaselineComparison;
   targetDecisionRows: TargetDecisionRow[];
@@ -3000,6 +3045,8 @@ const StudyOSPlannerPanel: React.FC<{
   onSourceDraftChange: (value: string) => void;
   onRawSourceTextChange: (value: string) => void;
   onRawSourceKindChange: (value: StudySourceKind | 'auto') => void;
+  onRawSourceDisciplineChange: (value: string) => void;
+  onImportSourceFiles: (files: File[]) => void;
   onAppendInferredSources: () => void;
   onSaveTargetProfiles: () => void;
   onResetTargetProfiles: () => void;
@@ -3022,6 +3069,8 @@ const StudyOSPlannerPanel: React.FC<{
   sourceDraft,
   rawSourceText,
   rawSourceKind,
+  rawSourceDiscipline,
+  isReadingSourceFiles,
   sourceItemCount,
   baselineComparison,
   targetDecisionRows,
@@ -3036,6 +3085,8 @@ const StudyOSPlannerPanel: React.FC<{
   onSourceDraftChange,
   onRawSourceTextChange,
   onRawSourceKindChange,
+  onRawSourceDisciplineChange,
+  onImportSourceFiles,
   onAppendInferredSources,
   onSaveTargetProfiles,
   onResetTargetProfiles,
@@ -3326,6 +3377,33 @@ const StudyOSPlannerPanel: React.FC<{
                     <option value="guia_andrety">Andrety</option>
                     <option value="manual">Manual</option>
                   </select>
+                  <input
+                    value={rawSourceDiscipline}
+                    onChange={(event) => onRawSourceDisciplineChange(event.target.value)}
+                    aria-label="Disciplina da fonte"
+                    placeholder="Disciplina da pasta"
+                    className="min-w-[150px] flex-1 rounded border border-[#525252] bg-[#262626] px-2 py-1.5 text-[11px] font-bold text-white outline-none placeholder:text-gray-600 focus:border-[#84cc16]"
+                  />
+                  <label className={`flex items-center gap-2 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition ${
+                    isReadingSourceFiles
+                      ? 'cursor-wait border-white/10 bg-white/5 text-gray-500'
+                      : 'cursor-pointer border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
+                  }`}>
+                    {isReadingSourceFiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                    {isReadingSourceFiles ? 'Lendo' : 'Arquivos'}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf,text/plain,.txt,.md"
+                      multiple
+                      disabled={isReadingSourceFiles}
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        onImportSourceFiles(files);
+                        event.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
                   <button
                     type="button"
                     onClick={onAppendInferredSources}
