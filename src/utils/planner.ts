@@ -29,6 +29,12 @@ export interface PlannerTaskResultInput {
   spentMinutes?: number;
 }
 
+export interface PlannerTaskChatPromptOptions {
+  targetName?: string;
+  organizer?: string;
+  phase?: string;
+}
+
 const TASK_FORMATS = [
   'Revisão e Exercícios',
   'Teórico e Exercícios',
@@ -139,6 +145,74 @@ export const applyPlannerTaskResult = (
     spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
     updatedAt: now,
   };
+};
+
+const extractDetailValue = (details: string | undefined, label: string) => {
+  if (!details) return undefined;
+  const match = details.match(new RegExp(`^\\s*${label}\\s*:\\s*(.+)$`, 'im'));
+  return match?.[1]?.trim();
+};
+
+const summarizePromptLines = (value: string | undefined, maxLines = 8) => {
+  if (!value) return [];
+  return value
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, maxLines);
+};
+
+const hasLowTrustPlannerSource = (task: PlannerTask) => {
+  const sourceText = `${task.format}\n${task.description}\n${task.details || ''}\n${task.tips || ''}`;
+  const normalized = normalize(sourceText);
+  return normalized.includes('dicas') || normalized.includes('bizus');
+};
+
+export const buildPlannerTaskChatPrompt = (task: PlannerTask, options: PlannerTaskChatPromptOptions = {}) => {
+  const target = options.targetName || extractDetailValue(task.details, 'Target') || task.planejamento || 'target atual';
+  const source = extractDetailValue(task.details, 'Fonte') || task.source;
+  const score = extractDetailValue(task.details, 'Score');
+  const schedule = [task.scheduledDate, task.startTime].filter(Boolean).join(' ');
+  const detailLines = summarizePromptLines(task.details).filter((line) => !/^target\s*:/i.test(line));
+  const lowTrustWarning = hasLowTrustPlannerSource(task)
+    ? '\n- Dicas e Bizus aparecem como apoio de baixo grau de confiança: use apenas para checagem rápida e valide contra o material original.'
+    : '';
+
+  return `---
+ATUAÇÃO: Tutor especialista em concursos, focado em execução de estudo.
+OBJETIVO: me ajudar a executar este bloco com o menor atrito possível, sem trocar o plano do Study OS.
+
+CONTEXTO DO TARGET
+- Target: ${target}
+- Banca/organizador: ${options.organizer || 'não informado'}
+- Fase: ${options.phase || 'não informada'}
+
+TAREFA DE AGORA
+- Disciplina: ${task.discipline}
+- Bloco: ${task.format}
+- Tema: ${task.description}
+- Duração planejada: ${formatMinutes(task.durationMinutes)}
+- Agenda: ${schedule || 'não agendada'}
+- Fonte principal: ${source}
+- Score do planner: ${score || task.relevance}
+- Desempenho registrado: ${task.performance === null ? 'sem registro' : `${task.performance}%`}
+${lowTrustWarning}
+
+NOTAS DO PLANNER
+${detailLines.length > 0 ? detailLines.map((line) => `- ${line}`).join('\n') : '- Sem notas adicionais.'}
+
+INSTRUÇÕES
+1. Monte um plano de execução objetivo para este bloco, com ordem de ataque e tempo por etapa.
+2. Se for bloco de teoria/releitura, diga exatamente o que devo procurar no material original e como transformar isso em revisão ativa.
+3. Se for bloco de questões TEC, não reproduza questões proprietárias; use apenas meus resultados, assuntos e erros que eu informar.
+4. Se for revisão de erros, comece por causa provável do erro, regra/conceito central, pegadinha de banca e um mini-teste de validação.
+5. Não invente edital, incidência, jurisprudência, lei, gabarito ou conteúdo que eu não tenha fornecido. Quando faltar material, me peça o trecho.
+
+SAÍDA ESPERADA
+- Plano de execução em até 6 passos.
+- Lista curta do que eu devo abrir agora.
+- Critério simples para eu marcar o bloco como concluído, falhei ou precisa voltar no refresh.
+---`;
 };
 
 const findFirstFormat = (line: string) => {

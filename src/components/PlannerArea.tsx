@@ -33,6 +33,7 @@ import { PlannerMetaHistoryEntry, PlannerMetaHistoryOrigin, PlannerMetaSummary, 
 import {
   applyPlannerTaskResult,
   autoSchedulePlannerTasks,
+  buildPlannerTaskChatPrompt,
   buildMonthGrid,
   buildWeekDays,
   formatMinutes,
@@ -772,6 +773,26 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
     );
     showToast(resultLabel[result.outcome]);
+  };
+
+  const copyPlannerTaskChatPrompt = async (task: PlannerTask) => {
+    const targetSlug = task.details?.match(/^\s*Target\s*:\s*(.+)$/im)?.[1]?.trim();
+    const targetProfile = targetSlug
+      ? studyOsTargetProfiles.find((profile) => profile.slug === targetSlug)
+      : studyOsActiveTarget;
+    const prompt = buildPlannerTaskChatPrompt(task, {
+      targetName: targetProfile?.name,
+      organizer: targetProfile?.organizer,
+      phase: targetProfile?.phase || studyOsPhase,
+    });
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+      showToast('Prompt do ChatGPT copiado.');
+    } catch (error) {
+      console.error('[Diário LS] Planner prompt copy failed', error);
+      showToast('Não consegui copiar o prompt.');
+    }
   };
 
   const scheduleTask = (taskId: string, date: string, time?: string) => {
@@ -1579,6 +1600,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           task={selectedTask}
           onClose={() => setSelectedTaskId(null)}
           onExecute={() => createOrOpenStudyTask(selectedTask)}
+          onCopyChatPrompt={() => copyPlannerTaskChatPrompt(selectedTask)}
           onApplyResult={(result) => applyTaskResult(selectedTask.id, result)}
           onClearSchedule={() => clearSchedule(selectedTask.id)}
           onArchive={() => {
@@ -1830,10 +1852,11 @@ const PlannerTaskDetailModal: React.FC<{
   task: PlannerTask;
   onClose: () => void;
   onExecute: () => void;
+  onCopyChatPrompt: () => void;
   onApplyResult: (result: PlannerTaskResultInput) => void;
   onClearSchedule: () => void;
   onArchive: () => void;
-}> = ({ task, onClose, onExecute, onApplyResult, onClearSchedule, onArchive }) => {
+}> = ({ task, onClose, onExecute, onCopyChatPrompt, onApplyResult, onClearSchedule, onArchive }) => {
   const [draftPerformance, setDraftPerformance] = useState(task.performance ?? 70);
   const [draftMinutes, setDraftMinutes] = useState(task.spentMinutes || task.durationMinutes || 60);
 
@@ -1988,6 +2011,13 @@ const PlannerTaskDetailModal: React.FC<{
           className="rounded border border-yellow-400/20 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-300 transition hover:bg-yellow-400/20"
         >
           Arquivar
+        </button>
+        <button
+          type="button"
+          onClick={onCopyChatPrompt}
+          className="flex items-center gap-2 rounded border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-xs font-black uppercase text-purple-200 transition hover:bg-purple-500/20"
+        >
+          <Sparkles className="h-4 w-4" /> Prompt IA
         </button>
         <button
           type="button"

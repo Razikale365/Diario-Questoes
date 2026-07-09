@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { PlannerTask } from '../types';
-import { applyPlannerTaskResult, autoSchedulePlannerTasks, mergePlannerTasks, parseLsMetaText } from './planner';
+import {
+  applyPlannerTaskResult,
+  autoSchedulePlannerTasks,
+  buildPlannerTaskChatPrompt,
+  mergePlannerTasks,
+  parseLsMetaText,
+} from './planner';
 
 test('parseLsMetaText extracts current meta summary and task rows', () => {
   const text = `
@@ -233,4 +239,58 @@ test('applyPlannerTaskResult records failed and skipped blocks for adaptive refr
   assert.equal(skipped.performance, null);
   assert.equal(skipped.spentMinutes, 45);
   assert.equal(skipped.updatedAt, '2026-07-08T14:00:00.000Z');
+});
+
+test('buildPlannerTaskChatPrompt creates a source-aware prompt for a generated planner block', () => {
+  const task = makeTask({
+    number: 3,
+    planejamento: 'Study OS - BACEN Economia e Financas',
+    discipline: 'Macroeconomia',
+    format: 'Questões TEC',
+    description: 'Macroeconomia - Política Monetária | Questões TEC | 25 questões',
+    details: [
+      'Target: bacen_economia_financas',
+      'Fonte: TEC incidência',
+      'Score: 87.5',
+      'alto peso do edital',
+      'fraqueza recente detectada',
+    ].join('\n'),
+    durationMinutes: 60,
+    scheduledDate: '2026-07-08',
+    startTime: '08:00',
+    performance: 64,
+    source: 'generated',
+  });
+
+  const prompt = buildPlannerTaskChatPrompt(task, {
+    targetName: 'BACEN Economia e Financas',
+    organizer: 'CEBRASPE',
+    phase: 'pre_edital',
+  });
+
+  assert.match(prompt, /BACEN Economia e Financas/);
+  assert.match(prompt, /CEBRASPE/);
+  assert.match(prompt, /Macroeconomia/);
+  assert.match(prompt, /Política Monetária/);
+  assert.match(prompt, /TEC incidência/);
+  assert.match(prompt, /64%/);
+  assert.match(prompt, /não invente/i);
+  assert.match(prompt, /não reproduza questões proprietárias/i);
+  assert.match(prompt, /plano de execução/i);
+});
+
+test('buildPlannerTaskChatPrompt labels Dicas and Bizus as low-trust support material', () => {
+  const task = makeTask({
+    discipline: 'Legislação Tributária',
+    format: 'Teoria/Releitura',
+    description: 'ICMS - Benefícios fiscais',
+    details: 'Fonte: Dicas e Bizus\nScore: 71',
+    tips: 'Resumo do professor sobre exceções de prova.',
+  });
+
+  const prompt = buildPlannerTaskChatPrompt(task);
+
+  assert.match(prompt, /Dicas e Bizus/i);
+  assert.match(prompt, /baixo grau de confiança/i);
+  assert.match(prompt, /material original/i);
 });
