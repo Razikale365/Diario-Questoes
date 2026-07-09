@@ -18,9 +18,28 @@ import {
   parseStudyTargetProfileTable,
   seedSourceSignalsForTarget,
   seedCoverageForTarget,
+  studySourceItemsFromPlannerTasks,
   type StudyCoverageRow,
 } from './studyPlannerCore';
 import type { PlannerTask } from '../types';
+
+const makePlannerTask = (overrides: Partial<PlannerTask> = {}): PlannerTask => ({
+  id: crypto.randomUUID(),
+  number: 1,
+  discipline: 'Economia',
+  format: 'Teoria',
+  description: 'Macroeconomia',
+  spentMinutes: 0,
+  estimatedMinutes: 60,
+  performance: null,
+  status: 'pending',
+  relevance: 7,
+  durationMinutes: 60,
+  source: 'manual',
+  createdAt: '2026-07-09T12:00:00.000Z',
+  updatedAt: '2026-07-09T12:00:00.000Z',
+  ...overrides,
+});
 
 test('seedCoverageForTarget creates BACEN rows without leaking RFB-specific topics', () => {
   const bacen = seedCoverageForTarget('bacen_economia_financas');
@@ -215,6 +234,56 @@ shared | Português | Interpretação de textos | stale | 1 | 6 | Curso base
   assert.equal(tasks[0].scoreBreakdown?.finalScore, plan.blocks[0].scoreBreakdown.finalScore);
   assert.equal(tasks[0].scheduledDate, '2026-07-08');
   assert.match(tasks[0].description, /Macroeconomia|Interpretação/);
+});
+
+test('studySourceItemsFromPlannerTasks excludes generated planner output from the next source pool', () => {
+  const sourceItems = studySourceItemsFromPlannerTasks([
+    makePlannerTask({
+      id: 'generated-block',
+      source: 'generated',
+      plannerSourceKind: 'generated_planner',
+      targetSlug: 'bacen_economia_financas',
+      description: 'Política monetária',
+    }),
+    makePlannerTask({
+      id: 'legacy-generated-block',
+      source: 'generated',
+      description: 'Sistema Financeiro Nacional',
+    }),
+  ], 'bacen_economia_financas');
+
+  assert.deepEqual(sourceItems, []);
+});
+
+test('studySourceItemsFromPlannerTasks retains LS, trilha, and manual imported inputs', () => {
+  const sourceItems = studySourceItemsFromPlannerTasks([
+    makePlannerTask({
+      id: 'ls-input',
+      source: 'ls-meta-pdf',
+      plannerSourceKind: 'ls',
+      description: 'Crédito tributário',
+    }),
+    makePlannerTask({
+      id: 'trilha-input',
+      source: 'manual',
+      plannerSourceKind: 'trilha_estrategica',
+      discipline: 'Contabilidade',
+      description: 'Demonstrações contábeis',
+    }),
+    makePlannerTask({
+      id: 'manual-input',
+      source: 'manual',
+      plannerSourceKind: 'manual',
+      discipline: 'Estatística',
+      description: 'Probabilidade',
+    }),
+  ], 'rfb_auditor');
+
+  assert.deepEqual(sourceItems.map((item) => [item.id, item.sourceKind, item.targetSlug]), [
+    ['ls-input', 'ls', 'legacy'],
+    ['trilha-input', 'trilha_estrategica', 'legacy'],
+    ['manual-input', 'manual', 'shared'],
+  ]);
 });
 
 test('formatStudyCoverageTable round-trips editable manual target coverage rows', () => {

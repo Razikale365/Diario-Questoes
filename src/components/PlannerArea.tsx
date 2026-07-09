@@ -82,6 +82,7 @@ import {
   parseStudyTargetProfileTable,
   seedCoverageForTarget,
   seedSourceSignalsForTarget,
+  studySourceItemsFromPlannerTasks,
   DailyStudyBlock,
   ExamTargetProfile,
   StudyDayPlan,
@@ -353,23 +354,6 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
     ],
     status: 'in_progress',
   };
-};
-
-const buildStudyOsSourceItems = (tasks: PlannerTask[], targetSlug: string): StudySourceItem[] => {
-  const sourceTargetSlug = targetSlug === 'sefaz_ce' ? 'sefaz_ce' : 'legacy';
-  return tasks
-    .filter((task) => task.status !== 'archived')
-    .map((task) => ({
-      id: task.id,
-      sourceKind: task.source.startsWith('ls') ? 'ls' : 'manual',
-      targetSlug: task.source.startsWith('ls') ? sourceTargetSlug : 'shared',
-      discipline: task.discipline,
-      topic: task.description,
-      taskText: [task.format, task.details, task.tips].filter(Boolean).join('\n'),
-      priorityHint: task.relevance,
-      sourceTrust: task.source.startsWith('ls') ? 8 : 5,
-      sourceOrder: task.number,
-    }));
 };
 
 const buildStudyOsFeedbackRows = (items: QuestionBankItem[]): TopicFeedback[] => {
@@ -654,7 +638,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     [studyOsSourceDraft],
   );
   const studyOsCombinedSourceItems = useMemo(
-    () => [...buildStudyOsSourceItems(activePlannerTasks, studyOsTarget), ...studyOsManualSourceItems],
+    () => [...studySourceItemsFromPlannerTasks(activePlannerTasks, studyOsTarget), ...studyOsManualSourceItems],
     [activePlannerTasks, studyOsManualSourceItems, studyOsTarget],
   );
   const studyOsTargetDecisionRows = useMemo(

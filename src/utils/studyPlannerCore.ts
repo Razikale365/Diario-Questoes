@@ -357,6 +357,34 @@ export const seedSourceSignalsForTarget = (targetSlug: string): StudySourceItem[
     .map((item) => ({ ...item }));
 };
 
+export const studySourceItemsFromPlannerTasks = (tasks: PlannerTask[], targetSlug: string): StudySourceItem[] => {
+  const sourceTargetSlug = normalizeTargetSlug(targetSlug) === 'sefaz_ce' ? 'sefaz_ce' : 'legacy';
+
+  return tasks
+    .filter((task) => task.status !== 'archived')
+    .filter((task) => task.source !== 'generated' && task.plannerSourceKind !== 'generated_planner')
+    .map((task) => {
+      const sourceKind: StudySourceKind = task.plannerSourceKind === 'trilha_estrategica'
+        ? 'trilha_estrategica'
+        : task.plannerSourceKind === 'ls' || task.source.startsWith('ls')
+          ? 'ls'
+          : 'manual';
+      const isBaselineSource = sourceKind === 'ls' || sourceKind === 'trilha_estrategica';
+
+      return {
+        id: task.id,
+        sourceKind,
+        targetSlug: isBaselineSource ? sourceTargetSlug : 'shared',
+        discipline: task.discipline,
+        topic: task.description,
+        taskText: [task.format, task.details, task.tips].filter(Boolean).join('\n'),
+        priorityHint: task.relevance,
+        sourceTrust: isBaselineSource ? 8 : 5,
+        sourceOrder: task.number,
+      } satisfies StudySourceItem;
+    });
+};
+
 export const buildStudyDayPlan = ({
   targetSlug,
   phase,
