@@ -31,12 +31,14 @@ import {
 
 import { PlannerMetaHistoryEntry, PlannerMetaHistoryOrigin, PlannerMetaSummary, PlannerTask, QuestionBankItem, StudyTask } from '../types';
 import {
+  applyPlannerTaskResult,
   autoSchedulePlannerTasks,
   buildMonthGrid,
   buildWeekDays,
   formatMinutes,
   mergePlannerTasks,
   parseLsMetaText,
+  type PlannerTaskResultInput,
   toIsoDate,
 } from '../utils/planner';
 import { extractPdfText } from '../utils/pdfQuestionImport';
@@ -756,6 +758,20 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         task.id === taskId ? { ...task, ...updates, updatedAt: new Date().toISOString() } : task
       )
     );
+  };
+
+  const applyTaskResult = (taskId: string, result: PlannerTaskResultInput) => {
+    const resultLabel: Record<PlannerTaskResultInput['outcome'], string> = {
+      started: 'Tarefa iniciada.',
+      completed: 'Resultado registrado.',
+      failed: 'Falha registrada para refresh.',
+      skipped: 'Tarefa ignorada.',
+    };
+    const now = new Date().toISOString();
+    setPlannerTasks((current) =>
+      current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
+    );
+    showToast(resultLabel[result.outcome]);
   };
 
   const scheduleTask = (taskId: string, date: string, time?: string) => {
@@ -1563,6 +1579,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           task={selectedTask}
           onClose={() => setSelectedTaskId(null)}
           onExecute={() => createOrOpenStudyTask(selectedTask)}
+          onApplyResult={(result) => applyTaskResult(selectedTask.id, result)}
           onClearSchedule={() => clearSchedule(selectedTask.id)}
           onArchive={() => {
             archivePlannerTask(selectedTask.id);
@@ -1764,6 +1781,31 @@ const NumberField: React.FC<{ label: string; value: number; onChange: (value: nu
   </label>
 );
 
+const clampInputValue = (value: number, min: number, max: number) => {
+  const safeValue = Number.isFinite(value) ? value : min;
+  return Math.min(max, Math.max(min, Math.round(safeValue)));
+};
+
+const ResultNumberField: React.FC<{
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}> = ({ label, value, min, max, onChange }) => (
+  <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+    {label}
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(event) => onChange(clampInputValue(Number(event.target.value), min, max))}
+      className="min-w-0 rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-black text-white outline-none focus:border-purple-500"
+    />
+  </label>
+);
+
 const CalendarNav: React.FC<{ label: string; onPrev: () => void; onNext: () => void }> = ({ label, onPrev, onNext }) => (
   <div className="flex items-center gap-2">
     <button type="button" onClick={onPrev} title="Anterior" className="rounded bg-white/5 px-3 py-2 text-sm font-black text-white hover:bg-white/10">
@@ -1788,9 +1830,31 @@ const PlannerTaskDetailModal: React.FC<{
   task: PlannerTask;
   onClose: () => void;
   onExecute: () => void;
+  onApplyResult: (result: PlannerTaskResultInput) => void;
   onClearSchedule: () => void;
   onArchive: () => void;
-}> = ({ task, onClose, onExecute, onClearSchedule, onArchive }) => (
+}> = ({ task, onClose, onExecute, onApplyResult, onClearSchedule, onArchive }) => {
+  const [draftPerformance, setDraftPerformance] = useState(task.performance ?? 70);
+  const [draftMinutes, setDraftMinutes] = useState(task.spentMinutes || task.durationMinutes || 60);
+
+  useEffect(() => {
+    setDraftPerformance(task.performance ?? 70);
+    setDraftMinutes(task.spentMinutes || task.durationMinutes || 60);
+  }, [task.id, task.performance, task.spentMinutes, task.durationMinutes]);
+
+  const submitResult = (outcome: PlannerTaskResultInput['outcome']) => {
+    if (outcome === 'started') {
+      onApplyResult({ outcome });
+      return;
+    }
+    if (outcome === 'skipped') {
+      onApplyResult({ outcome, spentMinutes: draftMinutes });
+      return;
+    }
+    onApplyResult({ outcome, performance: draftPerformance, spentMinutes: draftMinutes });
+  };
+
+  return (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
     <div
       className="flex flex-col rounded-2xl border border-[#525252] bg-[#262626] shadow-2xl"
@@ -1855,6 +1919,55 @@ const PlannerTaskDetailModal: React.FC<{
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Meta</span>{task.metaNumber || '-'}</p>
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Desempenho</span>{task.performance === null ? '-' : `${task.performance}%`}</p>
             </div>
+            <div className="rounded-lg border border-white/10 bg-[#262626] p-3">
+              <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-gray-500">Resultado</p>
+              <div className="grid grid-cols-2 gap-2">
+                <ResultNumberField
+                  label="Desemp. %"
+                  value={draftPerformance}
+                  min={0}
+                  max={100}
+                  onChange={setDraftPerformance}
+                />
+                <ResultNumberField
+                  label="Minutos"
+                  value={draftMinutes}
+                  min={0}
+                  max={240}
+                  onChange={setDraftMinutes}
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => submitResult('started')}
+                  className="flex items-center justify-center gap-2 rounded border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] font-black uppercase text-blue-200 transition hover:bg-blue-500/20"
+                >
+                  <Play className="h-3.5 w-3.5" /> Iniciar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitResult('completed')}
+                  className="flex items-center justify-center gap-2 rounded border border-[#84cc16]/30 bg-[#84cc16]/15 px-3 py-2 text-[10px] font-black uppercase text-[#bef264] transition hover:bg-[#84cc16]/25"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Concluir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitResult('failed')}
+                  className="flex items-center justify-center gap-2 rounded border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-[10px] font-black uppercase text-orange-200 transition hover:bg-orange-500/20"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" /> Falhei
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitResult('skipped')}
+                  className="flex items-center justify-center gap-2 rounded border border-red-400/20 bg-red-500/10 px-3 py-2 text-[10px] font-black uppercase text-red-200 transition hover:bg-red-500/20"
+                >
+                  <Ban className="h-3.5 w-3.5" /> Pular
+                </button>
+              </div>
+            </div>
           </aside>
         </div>
       </div>
@@ -1886,7 +1999,8 @@ const PlannerTaskDetailModal: React.FC<{
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const TaskTable: React.FC<{
   title: string;

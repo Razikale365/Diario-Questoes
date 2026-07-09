@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { PlannerTask } from '../types';
-import { autoSchedulePlannerTasks, mergePlannerTasks, parseLsMetaText } from './planner';
+import { applyPlannerTaskResult, autoSchedulePlannerTasks, mergePlannerTasks, parseLsMetaText } from './planner';
 
 test('parseLsMetaText extracts current meta summary and task rows', () => {
   const text = `
@@ -186,4 +186,51 @@ test('mergePlannerTasks refreshes reimported task details by meta and number wit
   assert.equal(result[0].scheduledDate, '2026-07-06');
   assert.equal(result[0].startTime, '09:15');
   assert.equal(result[0].linkedStudyTaskId, 'study-task-29');
+});
+
+test('applyPlannerTaskResult completes a task with bounded performance and spent minutes', () => {
+  const task = makeTask({
+    id: 'study-os-task',
+    scheduledDate: '2026-07-08',
+    startTime: '08:00',
+    durationMinutes: 75,
+  });
+
+  const result = applyPlannerTaskResult(
+    task,
+    { outcome: 'completed', performance: 112, spentMinutes: 58 },
+    '2026-07-08T12:00:00.000Z',
+  );
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.performance, 100);
+  assert.equal(result.spentMinutes, 58);
+  assert.equal(result.scheduledDate, '2026-07-08');
+  assert.equal(result.startTime, '08:00');
+  assert.equal(result.updatedAt, '2026-07-08T12:00:00.000Z');
+});
+
+test('applyPlannerTaskResult records failed and skipped blocks for adaptive refresh', () => {
+  const task = makeTask({
+    id: 'weak-topic-task',
+    performance: 72,
+    spentMinutes: 45,
+    status: 'started',
+  });
+
+  const failed = applyPlannerTaskResult(
+    task,
+    { outcome: 'failed', performance: -10, spentMinutes: -5 },
+    '2026-07-08T13:00:00.000Z',
+  );
+  const skipped = applyPlannerTaskResult(task, { outcome: 'skipped' }, '2026-07-08T14:00:00.000Z');
+
+  assert.equal(failed.status, 'completed');
+  assert.equal(failed.performance, 0);
+  assert.equal(failed.spentMinutes, 0);
+  assert.equal(failed.updatedAt, '2026-07-08T13:00:00.000Z');
+  assert.equal(skipped.status, 'ignored');
+  assert.equal(skipped.performance, null);
+  assert.equal(skipped.spentMinutes, 45);
+  assert.equal(skipped.updatedAt, '2026-07-08T14:00:00.000Z');
 });

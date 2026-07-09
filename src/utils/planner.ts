@@ -21,6 +21,14 @@ export interface AutoScheduleConfig {
   startDate?: Date;
 }
 
+export type PlannerTaskResultOutcome = 'started' | 'completed' | 'failed' | 'skipped';
+
+export interface PlannerTaskResultInput {
+  outcome: PlannerTaskResultOutcome;
+  performance?: number | null;
+  spentMinutes?: number;
+}
+
 const TASK_FORMATS = [
   'Revisão e Exercícios',
   'Teórico e Exercícios',
@@ -55,6 +63,18 @@ const toInt = (value: string | undefined, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const sanitizePerformance = (value: number | null | undefined) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return Math.round(clampNumber(value, 0, 100));
+};
+
+const sanitizeSpentMinutes = (value: number | undefined, fallback: number) => {
+  if (value === undefined || !Number.isFinite(value)) return Math.max(0, Math.round(fallback));
+  return Math.max(0, Math.round(value));
+};
+
 export const toIsoDate = (date: Date) => {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
@@ -86,6 +106,39 @@ export const addMinutesToTime = (time: string, minutes: number) => {
   const nextHours = Math.floor(total / 60) % 24;
   const nextMins = total % 60;
   return `${String(nextHours).padStart(2, '0')}:${String(nextMins).padStart(2, '0')}`;
+};
+
+export const applyPlannerTaskResult = (
+  task: PlannerTask,
+  result: PlannerTaskResultInput,
+  now = new Date().toISOString(),
+): PlannerTask => {
+  if (result.outcome === 'started') {
+    return {
+      ...task,
+      status: 'started',
+      spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
+      updatedAt: now,
+    };
+  }
+
+  if (result.outcome === 'skipped') {
+    return {
+      ...task,
+      status: 'ignored',
+      performance: null,
+      spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
+      updatedAt: now,
+    };
+  }
+
+  return {
+    ...task,
+    status: 'completed',
+    performance: sanitizePerformance(result.outcome === 'failed' ? result.performance ?? 0 : result.performance),
+    spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
+    updatedAt: now,
+  };
 };
 
 const findFirstFormat = (line: string) => {
