@@ -105,6 +105,14 @@ export interface TopicFeedback {
   lastSeenAt?: string;
 }
 
+export interface StudyBaselineComparison {
+  activeTargetSlug: string;
+  alignedCount: number;
+  transferableCount: number;
+  mismatchedCount: number;
+  mismatchTargetSlugs: string[];
+}
+
 export interface StudyScoreboardRow {
   candidateKey: string;
   targetSlug: string;
@@ -386,6 +394,25 @@ export const mergeStudySourceItemsWithTargetSeed = (
     ),
   );
   return missingItems.length > 0 ? [...sourceItems, ...missingItems] : sourceItems;
+};
+
+export const buildStudyBaselineComparison = (
+  sourceItems: StudySourceItem[],
+  targetSlug: string,
+): StudyBaselineComparison => {
+  const activeTargetSlug = normalizeTargetSlug(targetSlug);
+  const baselineItems = sourceItems.filter((item) => item.sourceKind === 'ls' || item.sourceKind === 'trilha_estrategica');
+  const alignedItems = baselineItems.filter((item) => item.targetSlug === activeTargetSlug);
+  const transferableItems = baselineItems.filter((item) => item.targetSlug === 'shared');
+  const mismatchedItems = baselineItems.filter((item) => item.targetSlug !== activeTargetSlug && item.targetSlug !== 'shared');
+
+  return {
+    activeTargetSlug,
+    alignedCount: alignedItems.length,
+    transferableCount: transferableItems.length,
+    mismatchedCount: mismatchedItems.length,
+    mismatchTargetSlugs: Array.from(new Set(mismatchedItems.map((item) => item.targetSlug))).sort(),
+  };
 };
 
 export const studySourceItemsFromPlannerTasks = (tasks: PlannerTask[], targetSlug: string): StudySourceItem[] => {
@@ -1215,12 +1242,15 @@ function coverageRaw(candidate: Candidate, coverageRows: StudyCoverageRow[]): nu
 function lsAlignmentRaw(candidate: Candidate, sourceItems: StudySourceItem[]): number {
   const aligned = sourceItems.find(
     (item) =>
-      item.sourceKind === 'ls' &&
+      (item.sourceKind === 'ls' || item.sourceKind === 'trilha_estrategica') &&
       sameDiscipline(item, candidate) &&
       topicMatches(candidate.topic, item.topic) &&
-      item.sourceTrust > 0,
+      item.sourceTrust > 0 &&
+      (item.targetSlug === candidate.sourceTargetSlug || item.targetSlug === 'shared' || candidate.sourceTargetSlug === 'shared'),
   );
-  return aligned ? clamp(aligned.sourceTrust, 0, 10) : 0;
+  if (!aligned) return 0;
+  const transferable = aligned.targetSlug === 'shared' || candidate.sourceTargetSlug === 'shared';
+  return clamp(aligned.sourceTrust * (transferable ? 0.5 : 1), 0, 10);
 }
 
 function targetFitRaw(candidate: Candidate, targetSlug: string): number {

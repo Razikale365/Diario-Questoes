@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildStudyBaselineComparison,
   buildTargetDecisionRows,
   buildStudyDayPlan,
   buildStudyRefreshPlan,
@@ -684,6 +685,76 @@ test('mergeStudySourceItemsWithTargetSeed preserves imported sources while addin
 
   assert.equal(merged.find((item) => item.id === 'my-bacen-source')?.lesson, 'Aula 12');
   assert.ok(merged.some((item) => item.targetSlug === 'sefaz_ce' && item.sourceKind === 'tec_incidence'));
+});
+
+test('LS alignment ignores a baseline from another target while keeping shared material as partial transfer', () => {
+  const coverageRows: StudyCoverageRow[] = [
+    {
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'stale',
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Curso BACEN',
+    },
+  ];
+  const sourceItems = [
+    {
+      id: 'ls-sefaz',
+      sourceKind: 'ls' as const,
+      targetSlug: 'sefaz_ce',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      sourceTrust: 9,
+    },
+    {
+      id: 'trilha-shared',
+      sourceKind: 'trilha_estrategica' as const,
+      targetSlug: 'shared',
+      discipline: 'Português',
+      topic: 'Interpretação de textos',
+      sourceTrust: 8,
+    },
+  ];
+
+  const plan = buildStudyDayPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    coverageRows,
+    feedbackRows: [],
+    sourceItems,
+  });
+  const sharedPlan = buildStudyDayPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    coverageRows: [
+      {
+        targetSlug: 'shared',
+        discipline: 'Português',
+        topic: 'Interpretação de textos',
+        status: 'stale',
+        editalWeight: 1,
+        incidence: 6,
+        tier: 2,
+        materialHint: 'Curso base',
+      },
+    ],
+    feedbackRows: [],
+    sourceItems,
+  });
+  const comparison = buildStudyBaselineComparison(sourceItems, 'bacen_economia_financas');
+
+  assert.ok(plan.scoreboard.filter((row) => row.topic === 'Macroeconomia').every((row) => row.lsAlignment === 0));
+  assert.equal(sharedPlan.scoreboard.find((row) => row.topic === 'Interpretação de textos')?.lsAlignment, 2);
+  assert.deepEqual(comparison, {
+    activeTargetSlug: 'bacen_economia_financas',
+    alignedCount: 0,
+    transferableCount: 1,
+    mismatchedCount: 1,
+    mismatchTargetSlugs: ['sefaz_ce'],
+  });
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

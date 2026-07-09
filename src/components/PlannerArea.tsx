@@ -68,6 +68,7 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
+  buildStudyBaselineComparison,
   buildTargetDecisionRows,
   buildStudyDayPlan,
   buildStudyRefreshPlan,
@@ -95,6 +96,7 @@ import {
   StudyPlanPhase,
   StudyRefreshPlan,
   StudyScoreboardRow,
+  StudyBaselineComparison,
   StudySourceKind,
   StudySourceItem,
   StudyWeekPlan,
@@ -660,6 +662,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const studyOsCombinedSourceItems = useMemo(
     () => [...studySourceItemsFromPlannerTasks(activePlannerTasks, studyOsTarget), ...studyOsManualSourceItems],
     [activePlannerTasks, studyOsManualSourceItems, studyOsTarget],
+  );
+  const studyOsBaselineComparison = useMemo(
+    () => buildStudyBaselineComparison(studyOsCombinedSourceItems, studyOsTarget),
+    [studyOsCombinedSourceItems, studyOsTarget],
   );
   const studyOsTargetDecisionRows = useMemo(
     () =>
@@ -1894,6 +1900,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             rawSourceText={studyOsRawSourceText}
             rawSourceKind={studyOsRawSourceKind}
             sourceItemCount={studyOsManualSourceItems.length}
+            baselineComparison={studyOsBaselineComparison}
             targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
             weekPlan={studyOsWeekPlan}
@@ -2951,6 +2958,7 @@ const StudyOSPlannerPanel: React.FC<{
   rawSourceText: string;
   rawSourceKind: StudySourceKind | 'auto';
   sourceItemCount: number;
+  baselineComparison: StudyBaselineComparison;
   targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
   weekPlan: StudyWeekPlan | null;
@@ -2985,6 +2993,7 @@ const StudyOSPlannerPanel: React.FC<{
   rawSourceText,
   rawSourceKind,
   sourceItemCount,
+  baselineComparison,
   targetDecisionRows,
   plan,
   weekPlan,
@@ -3015,6 +3024,9 @@ const StudyOSPlannerPanel: React.FC<{
   const coverageRows = useMemo(() => parseStudyCoverageTable(coverageDraft), [coverageDraft]);
   const weekBlockCount = weekPlan?.days.reduce((total, day) => total + day.blocks.length, 0) || 0;
   const weekEndDate = weekPlan?.days[weekPlan.days.length - 1]?.date;
+  const mismatchTargetNames = baselineComparison.mismatchTargetSlugs
+    .map((slug) => targetProfiles.find((target) => target.slug === slug)?.name || slug)
+    .join(', ');
 
   return (
     <section className="rounded-lg border border-[#84cc16]/20 bg-[#18210f] p-4 shadow-lg shadow-black/20">
@@ -3122,6 +3134,28 @@ const StudyOSPlannerPanel: React.FC<{
             <Metric icon={DatabaseIcon} label="Fontes" value={`${sourceItemCount}`} />
             <Metric icon={ListChecks} label="Score" value={`${(refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
             <Metric icon={Target} label="Targets" value={`${targetProfiles.length}`} />
+          </div>
+
+          <div className={`border p-3 text-xs font-bold leading-relaxed ${
+            baselineComparison.mismatchedCount > 0
+              ? 'border-yellow-400/25 bg-yellow-400/5 text-yellow-100'
+              : baselineComparison.alignedCount > 0
+                ? 'border-[#84cc16]/25 bg-[#84cc16]/5 text-[#d9f99d]'
+                : 'border-white/10 bg-black/20 text-gray-400'
+          }`}>
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-75">LS e Trilha</p>
+            {baselineComparison.alignedCount > 0 && (
+              <p className="mt-1">{baselineComparison.alignedCount} sinal(is) alinhado(s) a este target entram no score.</p>
+            )}
+            {baselineComparison.transferableCount > 0 && (
+              <p className="mt-1">{baselineComparison.transferableCount} sinal(is) compartilhado(s) entram com peso parcial.</p>
+            )}
+            {baselineComparison.mismatchedCount > 0 && (
+              <p className="mt-1">{baselineComparison.mismatchedCount} sinal(is) de {mismatchTargetNames || 'outro target'} ficam só como referência e não somam alinhamento.</p>
+            )}
+            {baselineComparison.alignedCount === 0 && baselineComparison.transferableCount === 0 && baselineComparison.mismatchedCount === 0 && (
+              <p className="mt-1">Nenhuma LS/trilha associada a este target.</p>
+            )}
           </div>
 
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
