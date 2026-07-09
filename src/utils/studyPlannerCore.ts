@@ -507,8 +507,9 @@ export const buildStudyRefreshPlan = ({
   ...dayInput
 }: BuildStudyRefreshPlanInput): StudyRefreshPlan => {
   const targetSlug = normalizeTargetSlug(dayInput.targetSlug);
-  const refreshDebtTasks = previousTasks.filter((task) => isRefreshDebtTask(task, lowPerformanceThreshold));
-  const completedGoodTasks = previousTasks.filter((task) => isCompletedGoodTask(task, lowPerformanceThreshold));
+  const targetPreviousTasks = previousTasks.filter((task) => isTaskRelevantToRefreshTarget(task, targetSlug));
+  const refreshDebtTasks = targetPreviousTasks.filter((task) => isRefreshDebtTask(task, lowPerformanceThreshold));
+  const completedGoodTasks = targetPreviousTasks.filter((task) => isCompletedGoodTask(task, lowPerformanceThreshold));
   const completedTopics = completedGoodTasks.map(taskTopicFingerprint).filter(Boolean);
   const debtCoverageRows = refreshDebtTasks.map((task, index) => coverage(
     targetSlug,
@@ -1407,6 +1408,15 @@ function isRefreshDebtTask(task: PlannerTask, lowPerformanceThreshold: number): 
 
 function isCompletedGoodTask(task: PlannerTask, lowPerformanceThreshold: number): boolean {
   return task.status === 'completed' && (task.performance === null || task.performance >= lowPerformanceThreshold);
+}
+
+function isTaskRelevantToRefreshTarget(task: PlannerTask, targetSlug: string): boolean {
+  if (task.targetSlug) return task.targetSlug === targetSlug || task.targetSlug === 'shared';
+
+  const isLegacyBaseline = task.plannerSourceKind === 'ls' ||
+    task.plannerSourceKind === 'trilha_estrategica' ||
+    task.source.startsWith('ls');
+  return targetSlug === 'sefaz_ce' && isLegacyBaseline;
 }
 
 function inferTopicFromPlannerTask(task: PlannerTask): string {

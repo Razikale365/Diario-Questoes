@@ -458,6 +458,9 @@ guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 
       status: 'completed',
       performance: 92,
       scheduledDate: '2026-07-06',
+      source: 'generated',
+      plannerSourceKind: 'generated_planner',
+      targetSlug: 'bacen_economia_financas',
     }),
     plannerTask({
       id: 'ignored-micro',
@@ -465,6 +468,9 @@ guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 
       description: 'Resolver questões TEC: Microeconomia',
       status: 'ignored',
       scheduledDate: '2026-07-06',
+      source: 'generated',
+      plannerSourceKind: 'generated_planner',
+      targetSlug: 'bacen_economia_financas',
     }),
   ];
 
@@ -509,12 +515,41 @@ guia_andrety | bacen_economia_financas | Estatística | Probabilidade | 7 | 1.5 
         status: 'completed',
         performance: 45,
         scheduledDate: '2026-07-07',
+        source: 'generated',
+        plannerSourceKind: 'generated_planner',
+        targetSlug: 'bacen_economia_financas',
       }),
     ],
   });
 
   assert.ok(refresh.blocks.some((block) => block.kind === 'review' && block.topic === 'SFN'));
   assert.ok(refresh.scoreboard.some((row) => row.topic === 'SFN' && row.reviewDebt > 0));
+});
+
+test('buildStudyRefreshPlan ignores a failed block from a different target', () => {
+  const refresh = buildStudyRefreshPlan({
+    targetSlug: 'bacen_economia_financas',
+    phase: 'pre_edital',
+    refreshDate: '2026-07-08',
+    coverageRows: [],
+    feedbackRows: [],
+    sourceItems: seedSourceSignalsForTarget('bacen_economia_financas'),
+    previousTasks: [
+      plannerTask({
+        id: 'rfb-tax-debt',
+        discipline: 'Direito Tributário',
+        description: 'Crédito tributário',
+        status: 'ignored',
+        source: 'generated',
+        plannerSourceKind: 'generated_planner',
+        targetSlug: 'rfb_auditor',
+      }),
+    ],
+  });
+
+  assert.deepEqual(refresh.refreshedFromTaskIds, []);
+  assert.equal(refresh.blocks.some((block) => block.discipline === 'Direito Tributário'), false);
+  assert.equal(refresh.warnings.some((warning) => /dívida de revisão/i.test(warning)), false);
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {
@@ -630,6 +665,8 @@ function plannerTask(overrides: Partial<PlannerTask>): PlannerTask {
     startTime: overrides.startTime,
     durationMinutes: overrides.durationMinutes || 55,
     source: overrides.source || 'generated',
+    plannerSourceKind: overrides.plannerSourceKind,
+    targetSlug: overrides.targetSlug,
     linkedStudyTaskId: overrides.linkedStudyTaskId,
     createdAt: overrides.createdAt || '2026-07-06T00:00:00.000Z',
     updatedAt: overrides.updatedAt || '2026-07-06T00:00:00.000Z',
