@@ -14,12 +14,15 @@ import {
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
+  mergeStudyCoverageWithTargetSeed,
+  mergeStudySourceItemsWithTargetSeed,
   parseStudyCoverageTable,
   parseStudySourceTable,
   parseStudyTargetProfileTable,
   seedSourceSignalsForTarget,
   seedCoverageForTarget,
   studySourceItemsFromPlannerTasks,
+  updateStudyCoverageFromPlannerTask,
   type StudyCoverageRow,
 } from './studyPlannerCore';
 import type { PlannerTask } from '../types';
@@ -563,6 +566,124 @@ test('isPlannerTaskRelevantToStudyTarget transfers only explicit shared work and
   assert.equal(isPlannerTaskRelevantToStudyTarget(sharedTask, 'rfb_auditor'), true);
   assert.equal(isPlannerTaskRelevantToStudyTarget(legacyLsTask, 'sefaz_ce'), true);
   assert.equal(isPlannerTaskRelevantToStudyTarget(legacyLsTask, 'bacen_economia_financas'), false);
+});
+
+test('updateStudyCoverageFromPlannerTask turns matching coverage strong after a high-performing generated block', () => {
+  const coverageRows: StudyCoverageRow[] = [
+    {
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'unread',
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Curso BACEN',
+    },
+    {
+      targetSlug: 'shared',
+      discipline: 'Português',
+      topic: 'Interpretação de textos',
+      status: 'stale',
+      editalWeight: 1,
+      incidence: 6,
+      tier: 2,
+      materialHint: 'Curso base',
+    },
+    {
+      targetSlug: 'rfb_auditor',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'weak',
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Curso RFB',
+    },
+  ];
+  const task = plannerTask({
+    targetSlug: 'bacen_economia_financas',
+    plannerSourceKind: 'generated_planner',
+    description: 'Resolver questões TEC: Macroeconomia',
+    status: 'completed',
+    performance: 86,
+  });
+
+  const result = updateStudyCoverageFromPlannerTask(coverageRows, task);
+
+  assert.equal(result.updatedCount, 1);
+  assert.equal(result.status, 'strong');
+  assert.equal(result.rows[0].status, 'strong');
+  assert.equal(result.rows[1].status, 'stale');
+  assert.equal(result.rows[2].status, 'weak');
+});
+
+test('updateStudyCoverageFromPlannerTask leaves skipped and LS tasks to adaptive refresh instead of rewriting coverage', () => {
+  const coverageRows = seedCoverageForTarget('sefaz_ce');
+  const skippedGenerated = plannerTask({
+    targetSlug: 'sefaz_ce',
+    plannerSourceKind: 'generated_planner',
+    description: 'Resolver questões TEC: ICMS',
+    status: 'ignored',
+  });
+  const completedLs = plannerTask({
+    source: 'ls-meta-pdf',
+    plannerSourceKind: 'ls',
+    description: 'Resolver questões TEC: ICMS',
+    status: 'completed',
+    performance: 90,
+  });
+
+  assert.deepEqual(updateStudyCoverageFromPlannerTask(coverageRows, skippedGenerated), {
+    rows: coverageRows,
+    updatedCount: 0,
+  });
+  assert.deepEqual(updateStudyCoverageFromPlannerTask(coverageRows, completedLs), {
+    rows: coverageRows,
+    updatedCount: 0,
+  });
+});
+
+test('mergeStudyCoverageWithTargetSeed keeps prior target audits while adding missing target defaults', () => {
+  const existing = [
+    {
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      status: 'strong' as const,
+      editalWeight: 2,
+      incidence: 9,
+      tier: 1,
+      materialHint: 'Meu curso',
+      notes: 'auditada',
+    },
+  ];
+
+  const merged = mergeStudyCoverageWithTargetSeed(existing, 'rfb_auditor');
+
+  assert.equal(merged.find((row) => row.targetSlug === 'bacen_economia_financas')?.status, 'strong');
+  assert.equal(merged.find((row) => row.targetSlug === 'bacen_economia_financas')?.notes, 'auditada');
+  assert.ok(merged.some((row) => row.targetSlug === 'rfb_auditor' && row.discipline === 'Direito Tributário'));
+  assert.ok(merged.some((row) => row.targetSlug === 'shared' && row.discipline === 'Português'));
+});
+
+test('mergeStudySourceItemsWithTargetSeed preserves imported sources while adding a target baseline', () => {
+  const existing = [
+    {
+      id: 'my-bacen-source',
+      sourceKind: 'estrategia_aulas' as const,
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Economia',
+      topic: 'Macroeconomia',
+      sourceTrust: 9,
+      lesson: 'Aula 12',
+    },
+  ];
+
+  const merged = mergeStudySourceItemsWithTargetSeed(existing, 'sefaz_ce');
+
+  assert.equal(merged.find((item) => item.id === 'my-bacen-source')?.lesson, 'Aula 12');
+  assert.ok(merged.some((item) => item.targetSlug === 'sefaz_ce' && item.sourceKind === 'tec_incidence'));
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

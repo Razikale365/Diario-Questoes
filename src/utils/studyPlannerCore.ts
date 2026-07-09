@@ -350,11 +350,42 @@ export const seedCoverageForTarget = (targetSlug: string): StudyCoverageRow[] =>
     .map((row) => ({ ...row }));
 };
 
+export const mergeStudyCoverageWithTargetSeed = (
+  coverageRows: StudyCoverageRow[],
+  targetSlug: string,
+): StudyCoverageRow[] => {
+  const seededRows = seedCoverageForTarget(targetSlug);
+  const missingRows = seededRows.filter((seed) =>
+    !coverageRows.some((row) =>
+      row.targetSlug === seed.targetSlug &&
+      normalize(row.discipline) === normalize(seed.discipline) &&
+      normalize(row.topic) === normalize(seed.topic),
+    ),
+  );
+  return missingRows.length > 0 ? [...coverageRows, ...missingRows] : coverageRows;
+};
+
 export const seedSourceSignalsForTarget = (targetSlug: string): StudySourceItem[] => {
   const normalizedTarget = normalizeTargetSlug(targetSlug);
   return DEFAULT_STUDY_SOURCE_SIGNALS
     .filter((item) => item.targetSlug === normalizedTarget || item.targetSlug === 'shared')
     .map((item) => ({ ...item }));
+};
+
+export const mergeStudySourceItemsWithTargetSeed = (
+  sourceItems: StudySourceItem[],
+  targetSlug: string,
+): StudySourceItem[] => {
+  const seededItems = seedSourceSignalsForTarget(targetSlug);
+  const missingItems = seededItems.filter((seed) =>
+    !sourceItems.some((item) =>
+      item.targetSlug === seed.targetSlug &&
+      item.sourceKind === seed.sourceKind &&
+      normalize(item.discipline) === normalize(seed.discipline) &&
+      normalize(item.topic) === normalize(seed.topic),
+    ),
+  );
+  return missingItems.length > 0 ? [...sourceItems, ...missingItems] : sourceItems;
 };
 
 export const studySourceItemsFromPlannerTasks = (tasks: PlannerTask[], targetSlug: string): StudySourceItem[] => {
@@ -1418,6 +1449,33 @@ export function isPlannerTaskRelevantToStudyTarget(task: PlannerTask, targetSlug
     task.source.startsWith('ls');
   return targetSlug === 'sefaz_ce' && isLegacyBaseline;
 }
+
+export const updateStudyCoverageFromPlannerTask = (
+  coverageRows: StudyCoverageRow[],
+  task: PlannerTask,
+): { rows: StudyCoverageRow[]; updatedCount: number; status?: CoverageStatus } => {
+  if (
+    task.plannerSourceKind !== 'generated_planner' ||
+    !task.targetSlug ||
+    task.status !== 'completed' ||
+    task.performance === null
+  ) {
+    return { rows: coverageRows, updatedCount: 0 };
+  }
+
+  const status: CoverageStatus = task.performance >= 80 ? 'strong' : task.performance >= 60 ? 'stale' : 'weak';
+  const topic = inferTopicFromPlannerTask(task);
+  let updatedCount = 0;
+  const rows = coverageRows.map((row) => {
+    const belongsToTaskTarget = row.targetSlug === task.targetSlug || row.targetSlug === 'shared';
+    const matchesTask = belongsToTaskTarget && sameDiscipline(row, task) && topicMatches(row.topic, topic);
+    if (!matchesTask || row.status === status) return row;
+    updatedCount += 1;
+    return { ...row, status };
+  });
+
+  return updatedCount > 0 ? { rows, updatedCount, status } : { rows: coverageRows, updatedCount: 0 };
+};
 
 function inferTopicFromPlannerTask(task: PlannerTask): string {
   const text = task.description || task.details || task.format || '';

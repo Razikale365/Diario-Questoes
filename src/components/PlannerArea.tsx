@@ -80,12 +80,15 @@ import {
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
+  mergeStudyCoverageWithTargetSeed,
+  mergeStudySourceItemsWithTargetSeed,
   parseStudyCoverageTable,
   parseStudySourceTable,
   parseStudyTargetProfileTable,
   seedCoverageForTarget,
   seedSourceSignalsForTarget,
   studySourceItemsFromPlannerTasks,
+  updateStudyCoverageFromPlannerTask,
   DailyStudyBlock,
   ExamTargetProfile,
   StudyDayPlan,
@@ -783,10 +786,24 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       skipped: 'Tarefa ignorada.',
     };
     const now = new Date().toISOString();
+    const task = plannerTasks.find((item) => item.id === taskId);
+    const updatedTask = task ? applyPlannerTaskResult(task, result, now) : null;
     setPlannerTasks((current) =>
       current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
     );
-    showToast(resultLabel[result.outcome]);
+    const coverageUpdate = updatedTask
+      ? updateStudyCoverageFromPlannerTask(parseStudyCoverageTable(studyOsCoverageDraft), updatedTask)
+      : { rows: [], updatedCount: 0 };
+    if (coverageUpdate.updatedCount > 0) {
+      setStudyOsCoverageDraft(formatStudyCoverageTable(coverageUpdate.rows));
+      setStudyOsPlan(null);
+      setStudyOsWeekPlan(null);
+      setStudyOsRefreshPlan(null);
+    }
+    const coverageMessage = coverageUpdate.updatedCount > 0 && coverageUpdate.status
+      ? ` Cobertura marcada como ${coverageUpdate.status}.`
+      : '';
+    showToast(`${resultLabel[result.outcome]}${coverageMessage}`);
   };
 
   const copyPlannerTaskChatPrompt = async (task: PlannerTask) => {
@@ -938,8 +955,12 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     const target = studyOsTargetProfiles.find((item) => item.slug === targetSlug);
     setStudyOsTarget(targetSlug);
     setStudyOsPhase(target?.phase || 'pre_edital');
-    setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
-    setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
+    setStudyOsCoverageDraft(formatStudyCoverageTable(
+      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(studyOsCoverageDraft), targetSlug),
+    ));
+    setStudyOsSourceDraft(formatStudySourceTable(
+      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(studyOsSourceDraft), targetSlug),
+    ));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
     setStudyOsRefreshPlan(null);
@@ -977,19 +998,23 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const seedStudyOsCoverage = (targetSlug = studyOsTarget) => {
-    setStudyOsCoverageDraft(formatStudyCoverageTable(seedCoverageForTarget(targetSlug)));
+    setStudyOsCoverageDraft(formatStudyCoverageTable(
+      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(studyOsCoverageDraft), targetSlug),
+    ));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
     setStudyOsRefreshPlan(null);
-    showToast('Cobertura base carregada.');
+    showToast('Cobertura base conferida sem apagar auditorias.');
   };
 
   const seedStudyOsSources = (targetSlug = studyOsTarget) => {
-    setStudyOsSourceDraft(formatStudySourceTable(seedSourceSignalsForTarget(targetSlug)));
+    setStudyOsSourceDraft(formatStudySourceTable(
+      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(studyOsSourceDraft), targetSlug),
+    ));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
     setStudyOsRefreshPlan(null);
-    showToast('Fontes base carregadas.');
+    showToast('Fontes base conferidas sem apagar importações.');
   };
 
   const appendInferredStudyOsSources = () => {
