@@ -507,7 +507,7 @@ export const buildStudyRefreshPlan = ({
   ...dayInput
 }: BuildStudyRefreshPlanInput): StudyRefreshPlan => {
   const targetSlug = normalizeTargetSlug(dayInput.targetSlug);
-  const targetPreviousTasks = previousTasks.filter((task) => isTaskRelevantToRefreshTarget(task, targetSlug));
+  const targetPreviousTasks = previousTasks.filter((task) => isPlannerTaskRelevantToStudyTarget(task, targetSlug));
   const refreshDebtTasks = targetPreviousTasks.filter((task) => isRefreshDebtTask(task, lowPerformanceThreshold));
   const completedGoodTasks = targetPreviousTasks.filter((task) => isCompletedGoodTask(task, lowPerformanceThreshold));
   const completedTopics = completedGoodTasks.map(taskTopicFingerprint).filter(Boolean);
@@ -1410,7 +1410,7 @@ function isCompletedGoodTask(task: PlannerTask, lowPerformanceThreshold: number)
   return task.status === 'completed' && (task.performance === null || task.performance >= lowPerformanceThreshold);
 }
 
-function isTaskRelevantToRefreshTarget(task: PlannerTask, targetSlug: string): boolean {
+export function isPlannerTaskRelevantToStudyTarget(task: PlannerTask, targetSlug: string): boolean {
   if (task.targetSlug) return task.targetSlug === targetSlug || task.targetSlug === 'shared';
 
   const isLegacyBaseline = task.plannerSourceKind === 'ls' ||

@@ -11,6 +11,7 @@ import {
   formatStudySourceTable,
   formatStudyTargetProfileTable,
   inferStudySourceSignalsFromText,
+  isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
@@ -550,6 +551,18 @@ test('buildStudyRefreshPlan ignores a failed block from a different target', () 
   assert.deepEqual(refresh.refreshedFromTaskIds, []);
   assert.equal(refresh.blocks.some((block) => block.discipline === 'Direito Tributário'), false);
   assert.equal(refresh.warnings.some((warning) => /dívida de revisão/i.test(warning)), false);
+});
+
+test('isPlannerTaskRelevantToStudyTarget transfers only explicit shared work and the SEFAZ LS baseline', () => {
+  const bacenTask = plannerTask({ targetSlug: 'bacen_economia_financas', plannerSourceKind: 'generated_planner' });
+  const sharedTask = plannerTask({ targetSlug: 'shared', plannerSourceKind: 'manual' });
+  const legacyLsTask = plannerTask({ source: 'ls-meta-pdf', plannerSourceKind: 'ls' });
+
+  assert.equal(isPlannerTaskRelevantToStudyTarget(bacenTask, 'bacen_economia_financas'), true);
+  assert.equal(isPlannerTaskRelevantToStudyTarget(bacenTask, 'rfb_auditor'), false);
+  assert.equal(isPlannerTaskRelevantToStudyTarget(sharedTask, 'rfb_auditor'), true);
+  assert.equal(isPlannerTaskRelevantToStudyTarget(legacyLsTask, 'sefaz_ce'), true);
+  assert.equal(isPlannerTaskRelevantToStudyTarget(legacyLsTask, 'bacen_economia_financas'), false);
 });
 
 test('buildStudyWeekPlan creates a weekday shell without reusing the same scored candidate', () => {

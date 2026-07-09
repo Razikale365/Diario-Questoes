@@ -77,6 +77,7 @@ import {
   formatStudySourceTable,
   formatStudyTargetProfileTable,
   inferStudySourceSignalsFromText,
+  isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   parseStudyCoverageTable,
@@ -509,6 +510,20 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     () => getPlannerTodayCommandCenter(activePlannerTasks),
     [activePlannerTasks],
   );
+  const todayStudyOsRefreshContext = useMemo(() => {
+    const relevantTasks = activePlannerTasks.filter((task) =>
+      task.scheduledDate === todayCommandCenter.date && isPlannerTaskRelevantToStudyTarget(task, studyOsTarget),
+    );
+    const resultTasks = relevantTasks.filter((task) => task.status === 'completed' || task.status === 'ignored');
+    const reviewDebtTasks = resultTasks.filter((task) =>
+      task.status === 'ignored' || (task.performance !== null && task.performance < 60),
+    );
+
+    return {
+      resultCount: resultTasks.length,
+      reviewDebtCount: reviewDebtTasks.length,
+    };
+  }, [activePlannerTasks, studyOsTarget, todayCommandCenter.date]);
   const selectedTask = useMemo(
     () => plannerTasks.find((task) => task.id === selectedTaskId) || null,
     [plannerTasks, selectedTaskId]
@@ -1522,6 +1537,67 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               </div>
             </div>
           )}
+
+          <section className="border-y border-yellow-400/20 bg-[#1d1a10] px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-yellow-200">Amanhã adaptativo</p>
+                <h3 className="mt-1 text-lg font-black text-white">{formatPlannerDate(toIsoDate(shiftDate(new Date(), 1)))}</h3>
+                <p className="mt-1 max-w-2xl text-sm font-semibold leading-relaxed text-gray-400">
+                  {todayStudyOsRefreshContext.resultCount > 0
+                    ? `${todayStudyOsRefreshContext.resultCount} resultado(s) deste target serão considerados; ${todayStudyOsRefreshContext.reviewDebtCount} viram prioridade de revisão.`
+                    : 'Registre o resultado de um bloco para tornar o próximo dia adaptativo. Você também pode gerar uma prévia base agora.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={generateStudyOsRefreshPlan}
+                  className="flex items-center gap-2 rounded border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-100 transition hover:bg-yellow-400/20"
+                >
+                  <RotateCcw className="h-4 w-4" /> {studyOsRefreshPlan ? 'Recalcular amanhã' : 'Gerar amanhã'}
+                </button>
+                <button
+                  type="button"
+                  onClick={applyStudyOsRefreshPlan}
+                  disabled={!studyOsRefreshPlan || studyOsRefreshPlan.blocks.length === 0}
+                  className="flex items-center gap-2 rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <CalendarDays className="h-4 w-4" /> Aplicar amanhã
+                </button>
+              </div>
+            </div>
+
+            {studyOsRefreshPlan ? (
+              <div className="mt-4 border-t border-yellow-400/15 pt-4">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  {studyOsRefreshPlan.blocks.map((block) => (
+                    <div key={block.id} className={`border p-3 ${studyBlockKindClass[block.kind]}`}>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-75">{plannedBlockKindLabel[block.kind]}</p>
+                      <p className="mt-2 text-sm font-black leading-snug text-white">{block.discipline}</p>
+                      <p className="mt-1 line-clamp-2 text-xs font-semibold leading-relaxed text-white/75">{block.topic}</p>
+                      <p className="mt-3 text-[10px] font-black uppercase tracking-widest opacity-80">
+                        {formatMinutes(block.durationMinutes)}{block.plannedQuestions ? ` · ${block.plannedQuestions} questões` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-yellow-100">
+                  <p>LS/trilha, outro target e blocos já executados permanecem intactos.</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('generator')}
+                    className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-yellow-200 transition hover:text-white"
+                  >
+                    Ver score <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+                {studyOsRefreshPlan.warnings.length > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-yellow-200/80">{studyOsRefreshPlan.warnings.slice(0, 2).join(' · ')}</p>
+                )}
+              </div>
+            ) : null}
+          </section>
         </section>
       )}
 
