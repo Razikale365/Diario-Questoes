@@ -601,6 +601,29 @@ export const resolveMergedQuestionBankItems = (
   return incoming.map((item) => byFingerprint.get(item.fingerprint) || item);
 };
 
+export const reassignQuestionBankItemsTarget = (
+  items: QuestionBankItem[],
+  itemIds: string[],
+  targetSlug?: string,
+  updatedAt = new Date().toISOString(),
+): { items: QuestionBankItem[]; updated: number } => {
+  const selectedIds = new Set(itemIds);
+  const normalizedTarget = targetSlug || undefined;
+  let updated = 0;
+
+  const nextItems = items.map((item) => {
+    if (!selectedIds.has(item.id) || item.targetSlug === normalizedTarget) return item;
+    updated += 1;
+    return {
+      ...item,
+      targetSlug: normalizedTarget,
+      updatedAt,
+    };
+  });
+
+  return { items: nextItems, updated };
+};
+
 export const filterQuestionBankItems = (items: QuestionBankItem[], filters: QuestionBankFilters) => {
   const query = normalize(filters.query);
 

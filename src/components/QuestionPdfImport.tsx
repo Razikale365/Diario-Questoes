@@ -11,6 +11,7 @@ import {
   RotateCcw,
   SearchCheck,
   Star,
+  Tags,
   Trash2,
   Undo2,
   Upload,
@@ -60,6 +61,7 @@ import {
   persistQuestionBank,
   QUESTION_BANK_UPDATED_EVENT,
   questionBankItemToQuestion,
+  reassignQuestionBankItemsTarget,
   resetQuestionBankItemAttempts,
   resolveMergedQuestionBankItems,
 } from '../utils/questionBank';
@@ -139,6 +141,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const [bankDiscipline, setBankDiscipline] = useState('');
   const [bankSourceKind, setBankSourceKind] = useState<QuestionSourceKind | ''>('');
   const [bankTargetSlug, setBankTargetSlug] = useState('');
+  const [bulkTargetSlug, setBulkTargetSlug] = useState(loadActiveStudyTarget);
   const [bankAttemptStatus, setBankAttemptStatus] = useState<QuestionBankAttemptStatus>('');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [onlyDoubts, setOnlyDoubts] = useState(false);
@@ -469,6 +472,27 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     setBankAttemptStatus('');
     setOnlyFavorites(false);
     setOnlyDoubts(false);
+  };
+
+  const reassignFilteredQuestionBankTarget = () => {
+    if (filteredBankItems.length === 0) {
+      showToast('Nenhuma questão filtrada para reclassificar.');
+      return;
+    }
+
+    const result = reassignQuestionBankItemsTarget(
+      questionBank,
+      filteredBankItems.map((item) => item.id),
+      bulkTargetSlug || undefined,
+    );
+    if (result.updated === 0) {
+      showToast(`As questões filtradas já estão em ${questionTargetLabel(bulkTargetSlug)}.`);
+      return;
+    }
+
+    setQuestionBank(result.items);
+    persistQuestionBank(result.items);
+    showToast(`${result.updated} questão(ões) movidas para ${questionTargetLabel(bulkTargetSlug)}.`);
   };
 
   const createTaskFromExternalBatch = (mode: ExternalAnswerReviewMode) => {
@@ -1068,18 +1092,40 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <p className="text-xs font-bold text-gray-500">
             {bankStats.answered} respondidas · {bankStats.wrong} erradas · {bankStats.correct} acertadas · {bankStats.doubts} dúvidas no banco.
           </p>
-          <button
-            type="button"
-            onClick={createTaskFromBank}
-            disabled={filteredBankItems.length === 0}
-            className="bg-[#84cc16] hover:bg-[#65a30d] disabled:opacity-50 disabled:cursor-not-allowed text-black px-5 py-3 rounded font-bold flex items-center gap-2 transition-colors"
-          >
-            <Play className="w-5 h-5" /> Executar Filtradas
-          </button>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid min-w-[220px] gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+              Novo target das filtradas
+              <select
+                value={bulkTargetSlug}
+                onChange={(event) => setBulkTargetSlug(event.target.value)}
+                className="min-h-[44px] rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-cyan-400"
+              >
+                {QUESTION_TARGET_OPTIONS.map((option) => (
+                  <option key={option.value || 'legacy'} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={reassignFilteredQuestionBankTarget}
+              disabled={filteredBankItems.length === 0}
+              className="min-h-[44px] rounded border border-cyan-300/20 bg-cyan-400/10 px-4 text-sm font-black uppercase tracking-widest text-cyan-100 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Tags className="mr-1 inline h-4 w-4" /> Aplicar ({filteredBankItems.length})
+            </button>
+            <button
+              type="button"
+              onClick={createTaskFromBank}
+              disabled={filteredBankItems.length === 0}
+              className="min-h-[44px] bg-[#84cc16] hover:bg-[#65a30d] disabled:opacity-50 disabled:cursor-not-allowed text-black px-5 rounded font-bold flex items-center gap-2 transition-colors"
+            >
+              <Play className="w-5 h-5" /> Executar Filtradas
+            </button>
+          </div>
         </div>
 
         <section className="grid gap-4 rounded border border-cyan-500/10 bg-cyan-500/5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">

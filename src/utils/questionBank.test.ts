@@ -13,6 +13,7 @@ import {
   matchQuestionBankItemsToPlannerTask,
   mergeQuestionBankItems,
   parseQuestionBankBackup,
+  reassignQuestionBankItemsTarget,
   resetQuestionBankItemAttempts,
   resolveMergedQuestionBankItems,
   syncQuestionBankItemProgress,
@@ -113,6 +114,33 @@ test('filterQuestionBankItems filters by explicit study target', () => {
   const result = filterQuestionBankItems([...bacen, ...sefaz], { targetSlug: 'bacen_economia_financas' });
 
   assert.deepEqual(result.map((item) => item.targetSlug), ['bacen_economia_financas']);
+});
+
+test('reassignQuestionBankItemsTarget migrates selected legacy items without losing study progress', () => {
+  const [legacy, untouched] = buildQuestionBankItems(importedQuestions, context);
+  const progressed = {
+    ...legacy,
+    favorite: true,
+    hasDoubt: true,
+    observations: 'Rever a justificativa antes da próxima rodada.',
+    attempts: [{ answer: 'E', isCorrect: false, attemptedAt: '2026-07-09T18:00:00.000Z' }],
+  };
+
+  const result = reassignQuestionBankItemsTarget(
+    [progressed, untouched],
+    [progressed.id],
+    'rfb_auditor',
+    '2026-07-10T14:00:00.000Z',
+  );
+
+  assert.equal(result.updated, 1);
+  assert.equal(result.items[0].targetSlug, 'rfb_auditor');
+  assert.equal(result.items[0].updatedAt, '2026-07-10T14:00:00.000Z');
+  assert.equal(result.items[0].favorite, true);
+  assert.equal(result.items[0].hasDoubt, true);
+  assert.equal(result.items[0].observations, progressed.observations);
+  assert.deepEqual(result.items[0].attempts, progressed.attempts);
+  assert.equal(result.items[1], untouched);
 });
 
 test('filterQuestionBankItems filters by latest attempt status', () => {
