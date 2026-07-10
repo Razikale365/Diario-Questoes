@@ -1101,18 +1101,28 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         setStudyOsSourceFileProgress({ processed: index + 1, total: supportedFiles.length });
       }
 
+      if (readableFiles.length === 0 && failedFiles > 0) {
+        showToast(`Não consegui ler ${failedFiles} arquivo(s). Verifique se os PDFs estão íntegros.`);
+        return;
+      }
+
       const inferred = inferStudySourceSignalsFromFiles(readableFiles, {
         targetSlug: studyOsTarget,
         sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
         disciplineHint: studyOsRawSourceDiscipline.trim() || undefined,
       });
       if (inferred.items.length === 0 && inferred.unresolvedLines.length === 0) {
-        showToast('Nenhum cabeçalho estrutural foi encontrado nos arquivos.');
+        showToast([
+          'Nenhum cabeçalho estrutural foi encontrado nos arquivos',
+          failedFiles > 0 ? `${failedFiles} arquivo(s) com falha` : '',
+        ].filter(Boolean).join(' · '));
         return;
       }
 
-      const merged = mergeStudySourceItems(parseStudySourceTable(studyOsSourceDraft), inferred.items);
-      if (merged.added > 0) setStudyOsSourceDraft(formatStudySourceTable(merged.items));
+      setStudyOsSourceDraft((currentDraft) => {
+        const merged = mergeStudySourceItems(parseStudySourceTable(currentDraft), inferred.items);
+        return merged.added > 0 ? formatStudySourceTable(merged.items) : currentDraft;
+      });
       if (inferred.unresolvedLines.length > 0) {
         setStudyOsRawSourceText((current) => Array.from(new Set([
           ...current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
@@ -1122,10 +1132,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       setStudyOsPlan(null);
       setStudyOsWeekPlan(null);
       setStudyOsRefreshPlan(null);
-      const duplicateCount = inferred.items.length - merged.added;
       showToast([
-        `${merged.added} fonte(s) adicionada(s)`,
-        duplicateCount > 0 ? `${duplicateCount} já existente(s)` : '',
+        `${inferred.items.length} fonte(s) processada(s)`,
         inferred.unresolvedLines.length > 0 ? `${inferred.unresolvedLines.length} aguardando disciplina` : '',
         failedFiles > 0 ? `${failedFiles} arquivo(s) com falha` : '',
       ].filter(Boolean).join(' · '));

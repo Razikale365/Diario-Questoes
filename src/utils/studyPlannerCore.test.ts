@@ -402,6 +402,21 @@ estrategia_aulas | bacen_economia_financas | Economia | Macroeconomia | 0 | 1 | 
   assert.equal(result.items[1].topic, 'Microeconomia');
 });
 
+test('mergeStudySourceItems treats source order as editable metadata during reimport', () => {
+  const [existing] = parseStudySourceTable(`
+kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
+estrategia_aulas | bacen_economia_financas | Economia | Macroeconomia | 0 | 1 | 95 | 10 | 7 | Aula 02 ajustada | Ajuste manual
+`);
+  const reimported = { ...existing, id: 'package_reimport', sourceOrder: 2, priorityHint: 76 };
+
+  const result = mergeStudySourceItems([existing], [reimported]);
+
+  assert.equal(result.added, 0);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].sourceOrder, 7);
+  assert.equal(result.items[0].priorityHint, 95);
+});
+
 test('buildStudyDayPlan can generate a four-block day from source signals without LS coverage', () => {
   const sourceItems = parseStudySourceTable(`
 kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
@@ -486,6 +501,16 @@ Trilha Estratégica - Revisão - Curva de Phillips
   ]);
 });
 
+test('extractStudySourceCandidatesFromText rejects body prose that merely mentions aula or revisao', () => {
+  const candidates = extractStudySourceCandidatesFromText(`
+Nesta aula, veremos inflação e juros com exemplos práticos.
+A revisão desses conceitos será importante antes da prova.
+Aula 07 - Política Monetária
+`);
+
+  assert.deepEqual(candidates, ['Aula 07 - Política Monetária']);
+});
+
 test('inferStudySourceSignalsFromFiles uses package folders per discipline and reports unresolved files', () => {
   const result = inferStudySourceSignalsFromFiles(
     [
@@ -527,6 +552,22 @@ test('inferStudySourceSignalsFromFiles uses package folders per discipline and r
   assert.ok(result.items.every((item) => item.targetSlug === 'bacen_economia_financas'));
   assert.ok(result.items.every((item) => item.sourceKind === 'estrategia_aulas'));
   assert.deepEqual(result.unresolvedLines, ['Aula 04 - Sistema Financeiro Nacional']);
+});
+
+test('inferStudySourceSignalsFromFiles falls back to a descriptive filename after a weak text heading', () => {
+  const result = inferStudySourceSignalsFromFiles(
+    [{
+      name: 'Aula 02 - Macroeconomia.pdf',
+      relativePath: 'Pacote BACEN/Economia/Aula 02 - Macroeconomia.pdf',
+      text: 'Aula 02',
+    }],
+    { targetSlug: 'bacen_economia_financas' },
+  );
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].discipline, 'Economia');
+  assert.equal(result.items[0].topic, 'Macroeconomia');
+  assert.deepEqual(result.unresolvedLines, []);
 });
 
 test('inferStudySourceSignalsFromText uses a discipline hint for a course heading without discipline', () => {

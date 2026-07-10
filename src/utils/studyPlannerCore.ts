@@ -810,7 +810,7 @@ export const extractStudySourceCandidatesFromText = (text: string): string[] => 
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, ' ').trim())
     .filter((line) => line.length >= 4 && line.length <= 240)
-    .filter((line) => /\b(?:aula|m[oó]dulo|trilha|disciplina|tema|assunto|cap[ií]tulo|revis[aã]o)\b/i.test(line))
+    .filter((line) => /^(?:\d{1,3}[.)-]\s*)?(?:aula|m[oó]dulo|trilha(?:\s+estrat[eé]gica)?|disciplina|tema|assunto|cap[ií]tulo|revis[aã]o)\b/i.test(line))
     .filter((line) => !/\b(?:quest[aã]o|alternativa|gabarito|resposta|item)\b/i.test(line));
 };
 
@@ -826,10 +826,13 @@ export const inferStudySourceSignalsFromFiles = (
   files.forEach((file, fileIndex) => {
     const textCandidates = extractStudySourceCandidatesFromText(file.text);
     const fileNameCandidate = structuralFileNameCandidate(file.name);
-    const candidates = textCandidates.length > 0
-      ? textCandidates
-      : fileNameCandidate ? [fileNameCandidate] : [];
+    const candidates = Array.from(new Set([
+      ...textCandidates,
+      ...(fileNameCandidate ? [fileNameCandidate] : []),
+    ]));
     const disciplineHint = String(options.disciplineHint || '').trim() || inferDisciplineFromSourcePath(file.relativePath);
+    const fileItems: StudySourceItem[] = [];
+    const fileUnresolvedLines: string[] = [];
 
     candidates.forEach((line, lineIndex) => {
       const inferred = inferStudySourceSignalsFromText(line, {
@@ -838,11 +841,7 @@ export const inferStudySourceSignalsFromFiles = (
       });
 
       if (inferred.length === 0) {
-        const unresolvedKey = normalize(line);
-        if (!unresolvedKeys.has(unresolvedKey)) {
-          unresolvedKeys.add(unresolvedKey);
-          unresolvedLines.push(line);
-        }
+        fileUnresolvedLines.push(line);
         return;
       }
 
@@ -856,12 +855,32 @@ export const inferStudySourceSignalsFromFiles = (
         ].join('|');
         if (itemKeys.has(key)) return;
         itemKeys.add(key);
-        items.push({
+        fileItems.push({
           ...item,
           id: `file_${fileIndex + 1}_${lineIndex + 1}_${item.id}`,
           taskText: [item.taskText, file.relativePath || file.name].filter(Boolean).join(' · '),
         });
       });
+    });
+
+    if (fileItems.length > 0) {
+      items.push(...fileItems);
+      return;
+    }
+
+    const specificUnresolvedLines = fileUnresolvedLines.filter((line) => {
+      const normalizedLine = normalize(line);
+      return !fileUnresolvedLines.some((other) => {
+        const normalizedOther = normalize(other);
+        return normalizedOther.length > normalizedLine.length && normalizedOther.startsWith(normalizedLine);
+      });
+    });
+
+    specificUnresolvedLines.forEach((line) => {
+      const unresolvedKey = normalize(line);
+      if (unresolvedKeys.has(unresolvedKey)) return;
+      unresolvedKeys.add(unresolvedKey);
+      unresolvedLines.push(line);
     });
   });
 
@@ -1418,7 +1437,6 @@ function studySourceIdentityKey(item: StudySourceItem): string {
     normalizeTargetSlug(item.targetSlug),
     normalize(item.discipline),
     normalize(item.topic),
-    item.sourceOrder || 0,
   ].join('|');
 }
 
