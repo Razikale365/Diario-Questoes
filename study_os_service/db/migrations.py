@@ -1,15 +1,22 @@
 import sqlite3
 
 
-_MIGRATION_ONE = (
-    """
+class UnsupportedSchemaVersionError(RuntimeError):
+    """Raised when a database was created by a newer Study OS version."""
+
+
+MIGRATIONS = (
+    (
+        1,
+        (
+            """
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """,
-    """
+            """
 CREATE TABLE IF NOT EXISTS app_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
@@ -19,7 +26,11 @@ CREATE TABLE IF NOT EXISTS app_events (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """,
+        ),
+    ),
 )
+
+CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
 class MigrationRunner:
@@ -43,14 +54,25 @@ class MigrationRunner:
                     "SELECT version FROM schema_migrations ORDER BY version"
                 )
             }
-            if 1 not in applied:
-                for statement in _MIGRATION_ONE:
-                    self.connection.execute(statement)
-                self.connection.execute(
-                    "INSERT INTO schema_migrations (version) VALUES (?)", (1,)
+            unsupported = sorted(
+                version for version in applied if version > CURRENT_SCHEMA_VERSION
+            )
+            if unsupported:
+                raise UnsupportedSchemaVersionError(
+                    "Database schema version "
+                    f"{unsupported[-1]} is newer than supported version "
+                    f"{CURRENT_SCHEMA_VERSION}"
                 )
+            for version, statements in MIGRATIONS:
+                if version not in applied:
+                    for statement in statements:
+                        self.connection.execute(statement)
+                    self.connection.execute(
+                        "INSERT INTO schema_migrations (version) VALUES (?)", (version,)
+                    )
+                    applied.add(version)
             self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
-        return 1
+        return max(applied, default=0)
