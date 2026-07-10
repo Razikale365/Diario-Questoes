@@ -46,6 +46,7 @@ import {
   type ExternalAnswerDraft,
 } from '../utils/externalAnswers';
 import { importObjectiveQuestionsFromPdf, PdfQuestionImportResult } from '../utils/pdfQuestionImport';
+import { DEFAULT_STUDY_TARGET_PROFILES } from '../utils/studyPlannerCore';
 import {
   answerQuestionBankItemInline,
   buildQuestionBankItems,
@@ -86,6 +87,23 @@ const ATTEMPT_STATUS_OPTIONS: Array<{ value: QuestionBankAttemptStatus; label: s
   { value: 'unanswered', label: 'Sem resposta' },
 ];
 
+const QUESTION_TARGET_OPTIONS = [
+  { value: '', label: 'Legado / sem target' },
+  { value: 'shared', label: 'Compartilhado' },
+  ...DEFAULT_STUDY_TARGET_PROFILES.map((target) => ({ value: target.slug, label: target.name })),
+];
+
+const loadActiveStudyTarget = () => {
+  try {
+    return localStorage.getItem('study_os_target_v1') || '';
+  } catch {
+    return '';
+  }
+};
+
+const questionTargetLabel = (targetSlug?: string) =>
+  QUESTION_TARGET_OPTIONS.find((option) => option.value === (targetSlug || ''))?.label || targetSlug || 'Legado';
+
 const QUICK_MULTIPLE_CHOICE_ANSWERS = ['A', 'B', 'C', 'D', 'E'];
 const QUICK_BINARY_ANSWERS = ['Certo', 'Errado'];
 const EMPTY_EXTERNAL_ANSWER_DRAFT: ExternalAnswerDraft = { text: '', quickNumber: 1 };
@@ -108,6 +126,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const initialExternalAnswerDraft = useMemo(() => loadStoredExternalAnswerDraft() || EMPTY_EXTERNAL_ANSWER_DRAFT, []);
   const [file, setFile] = useState<File | null>(null);
   const [sourceKind, setSourceKind] = useState<QuestionSourceKind>('estrategia');
+  const [targetSlug, setTargetSlug] = useState(loadActiveStudyTarget);
   const [sourceName, setSourceName] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [lesson, setLesson] = useState('');
@@ -119,6 +138,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const [bankQuery, setBankQuery] = useState('');
   const [bankDiscipline, setBankDiscipline] = useState('');
   const [bankSourceKind, setBankSourceKind] = useState<QuestionSourceKind | ''>('');
+  const [bankTargetSlug, setBankTargetSlug] = useState('');
   const [bankAttemptStatus, setBankAttemptStatus] = useState<QuestionBankAttemptStatus>('');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [onlyDoubts, setOnlyDoubts] = useState(false);
@@ -180,13 +200,14 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     () =>
       filterQuestionBankItems(questionBank, {
         query: bankQuery,
+        targetSlug: bankTargetSlug,
         discipline: bankDiscipline,
         sourceKind: bankSourceKind,
         attemptStatus: bankAttemptStatus,
         onlyFavorites,
         onlyDoubts,
       }),
-    [questionBank, bankQuery, bankDiscipline, bankSourceKind, bankAttemptStatus, onlyFavorites, onlyDoubts]
+    [questionBank, bankQuery, bankTargetSlug, bankDiscipline, bankSourceKind, bankAttemptStatus, onlyFavorites, onlyDoubts]
   );
 
   const externalAnswerPreview = useMemo(
@@ -316,6 +337,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
       sourceKind,
       sourceName: effectiveSourceName,
       sourceFileName: result.fileName,
+      targetSlug: targetSlug || undefined,
       discipline,
       lesson: lesson || effectiveTitle,
       taskTitle: effectiveTitle,
@@ -441,6 +463,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
 
   const clearBankFilters = () => {
     setBankQuery('');
+    setBankTargetSlug('');
     setBankDiscipline('');
     setBankSourceKind('');
     setBankAttemptStatus('');
@@ -745,6 +768,19 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
         </div>
 
         <div>
+          <label className="block text-sm font-bold text-gray-300 mb-2">Target</label>
+          <select
+            value={targetSlug}
+            onChange={(event) => setTargetSlug(event.target.value)}
+            className="w-full bg-[#404040] border border-[#525252] rounded px-4 py-2 text-white focus:outline-none focus:border-[#84cc16] focus:ring-1 focus:ring-[#84cc16]"
+          >
+            {QUESTION_TARGET_OPTIONS.map((option) => (
+              <option key={option.value || 'legacy'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label className="block text-sm font-bold text-gray-300 mb-2">Disciplina *</label>
           <select
             value={discipline}
@@ -934,7 +970,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-7">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-8">
           <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500 lg:col-span-2">
             Buscar
             <input
@@ -944,6 +980,21 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
               placeholder="Enunciado, fonte, assunto, banca..."
               className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-purple-500"
             />
+          </label>
+
+          <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+            Target
+            <select
+              value={bankTargetSlug}
+              onChange={(event) => setBankTargetSlug(event.target.value)}
+              className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-[#84cc16]"
+            >
+              <option value="">Todos</option>
+              {QUESTION_TARGET_OPTIONS.map((option) => option.value && (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+              <option value="legacy">Legado / sem target</option>
+            </select>
           </label>
 
           <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
@@ -1324,6 +1375,9 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
                     </span>
                     <span className="rounded bg-purple-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-200">
                       {item.sourceName}
+                    </span>
+                    <span className="rounded bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-cyan-100">
+                      {questionTargetLabel(item.targetSlug)}
                     </span>
                     {item.sourceQuestionNumber && (
                       <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">

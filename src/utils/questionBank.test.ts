@@ -75,6 +75,18 @@ test('mergeQuestionBankItems deduplicates questions and preserves local user sta
   assert.equal(result.items.find((item) => item.fingerprint === edited.fingerprint)?.attempts.length, 1);
 });
 
+test('buildQuestionBankItems and backup round-trip preserve explicit study target metadata', () => {
+  const items = buildQuestionBankItems(importedQuestions, {
+    ...context,
+    targetSlug: 'bacen_economia_financas',
+  });
+  const backup = createQuestionBankBackup(items, '2026-07-10T12:00:00.000Z');
+  const parsed = parseQuestionBankBackup(backup);
+
+  assert.equal(items[0].targetSlug, 'bacen_economia_financas');
+  assert.equal(parsed.items[0].targetSlug, 'bacen_economia_financas');
+});
+
 test('filterQuestionBankItems searches metadata and statement text', () => {
   const items = buildQuestionBankItems(importedQuestions, context);
 
@@ -86,6 +98,21 @@ test('filterQuestionBankItems searches metadata and statement text', () => {
   assert.equal(byQuery[0].sourceQuestionNumber, 2);
   assert.equal(byDiscipline.length, 2);
   assert.equal(bySource.length, 0);
+});
+
+test('filterQuestionBankItems filters by explicit study target', () => {
+  const bacen = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    targetSlug: 'bacen_economia_financas',
+  });
+  const sefaz = buildQuestionBankItems([importedQuestions[1]], {
+    ...context,
+    targetSlug: 'sefaz_ce',
+  });
+
+  const result = filterQuestionBankItems([...bacen, ...sefaz], { targetSlug: 'bacen_economia_financas' });
+
+  assert.deepEqual(result.map((item) => item.targetSlug), ['bacen_economia_financas']);
 });
 
 test('filterQuestionBankItems filters by latest attempt status', () => {

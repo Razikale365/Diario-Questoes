@@ -25,6 +25,7 @@ export interface QuestionBankItem {
   year?: number;
   exam?: string;
   institution?: string;
+  targetSlug?: string;
   discipline: string;
   lesson?: string;
   taskTitle?: string;

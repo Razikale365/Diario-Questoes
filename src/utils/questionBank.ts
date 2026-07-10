@@ -11,6 +11,7 @@ export interface QuestionBankImportContext {
   sourceKind: QuestionSourceKind;
   sourceName: string;
   sourceFileName?: string;
+  targetSlug?: string;
   discipline: string;
   lesson?: string;
   taskTitle?: string;
@@ -63,6 +64,7 @@ export type QuestionBankAttemptStatus = '' | 'answered' | 'unanswered' | 'correc
 
 export interface QuestionBankFilters {
   query?: string;
+  targetSlug?: string;
   discipline?: string;
   sourceKind?: QuestionSourceKind | '';
   onlyFavorites?: boolean;
@@ -241,6 +243,7 @@ const sanitizeQuestionBankItem = (value: unknown): QuestionBankItem | null => {
     year: asOptionalNumber(value.year),
     exam: asOptionalString(value.exam),
     institution: asOptionalString(value.institution),
+    targetSlug: asOptionalString(value.targetSlug),
     discipline,
     lesson: asOptionalString(value.lesson),
     taskTitle: asOptionalString(value.taskTitle),
@@ -533,6 +536,7 @@ export const buildQuestionBankItems = (
       sourceKind: context.sourceKind,
       sourceName: context.sourceName,
       sourceFileName: context.sourceFileName,
+      targetSlug: context.targetSlug,
       year: question.year,
       discipline: context.discipline,
       lesson: context.lesson,
@@ -601,6 +605,8 @@ export const filterQuestionBankItems = (items: QuestionBankItem[], filters: Ques
   const query = normalize(filters.query);
 
   return items.filter((item) => {
+    if (filters.targetSlug === 'legacy' && item.targetSlug) return false;
+    if (filters.targetSlug && filters.targetSlug !== 'legacy' && item.targetSlug !== filters.targetSlug) return false;
     if (filters.discipline && item.discipline !== filters.discipline) return false;
     if (filters.sourceKind && item.sourceKind !== filters.sourceKind) return false;
     if (filters.onlyFavorites && !item.favorite) return false;

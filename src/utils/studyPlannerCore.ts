@@ -1519,10 +1519,12 @@ export function isPlannerTaskRelevantToStudyTarget(task: PlannerTask, targetSlug
 }
 
 export const isQuestionBankItemRelevantToStudyTarget = (
-  item: Pick<QuestionBankItem, 'exam' | 'institution' | 'sourceName' | 'tags'>,
+  item: Pick<QuestionBankItem, 'exam' | 'institution' | 'sourceName' | 'tags' | 'targetSlug'>,
   targetSlug: string,
 ): boolean => {
   const normalizedTarget = normalizeTargetSlug(targetSlug);
+  if (item.targetSlug) return item.targetSlug === normalizedTarget || item.targetSlug === 'shared';
+
   const metadata = normalize([item.exam, item.institution, item.sourceName, ...(item.tags || [])].filter(Boolean).join(' '));
   const markersByTarget: Record<string, string[]> = {
     bacen_economia_financas: ['bacen', 'banco central', 'bcb', 'bacen_economia_financas'],

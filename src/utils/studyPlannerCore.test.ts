@@ -497,6 +497,19 @@ test('isQuestionBankItemRelevantToStudyTarget keeps unlabeled legacy feedback ou
   assert.equal(isQuestionBankItemRelevantToStudyTarget(rfbItem, 'bacen_economia_financas'), false);
 });
 
+test('isQuestionBankItemRelevantToStudyTarget prefers explicit target metadata over inferred labels', () => {
+  const explicitlyRfb = {
+    targetSlug: 'rfb_auditor',
+    exam: 'BACEN 2024',
+    institution: 'Banco Central',
+    sourceName: 'TEC',
+    tags: [],
+  };
+
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(explicitlyRfb, 'rfb_auditor'), true);
+  assert.equal(isQuestionBankItemRelevantToStudyTarget(explicitlyRfb, 'bacen_economia_financas'), false);
+});
+
 test('buildStudyRefreshPlan avoids completed generated work and prioritizes ignored work as review debt', () => {
   const sourceItems = parseStudySourceTable(`
 kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
