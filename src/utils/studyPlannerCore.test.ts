@@ -511,6 +511,19 @@ Aula 07 - Política Monetária
   assert.deepEqual(candidates, ['Aula 07 - Política Monetária']);
 });
 
+test('extractStudySourceCandidatesFromText accepts Markdown and list-prefixed headings', () => {
+  const candidates = extractStudySourceCandidatesFromText(`
+# Aula 02 - Macroeconomia
+- Módulo 03 - Econometria
+* Nesta aula, veremos inflação.
+`);
+
+  assert.deepEqual(candidates, [
+    'Aula 02 - Macroeconomia',
+    'Módulo 03 - Econometria',
+  ]);
+});
+
 test('inferStudySourceSignalsFromFiles uses package folders per discipline and reports unresolved files', () => {
   const result = inferStudySourceSignalsFromFiles(
     [
@@ -568,6 +581,20 @@ test('inferStudySourceSignalsFromFiles falls back to a descriptive filename afte
   assert.equal(result.items[0].discipline, 'Economia');
   assert.equal(result.items[0].topic, 'Macroeconomia');
   assert.deepEqual(result.unresolvedLines, []);
+});
+
+test('inferStudySourceSignalsFromFiles normalizes space-prefixed numbered discipline folders', () => {
+  const result = inferStudySourceSignalsFromFiles(
+    [{
+      name: 'Aula 02 - Macroeconomia.pdf',
+      relativePath: 'Pacote BACEN/01 Economia/Aula 02 - Macroeconomia.pdf',
+      text: '',
+    }],
+    { targetSlug: 'bacen_economia_financas' },
+  );
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].discipline, 'Economia');
 });
 
 test('inferStudySourceSignalsFromText uses a discipline hint for a course heading without discipline', () => {

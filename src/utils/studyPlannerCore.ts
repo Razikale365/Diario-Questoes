@@ -809,6 +809,7 @@ export const extractStudySourceCandidatesFromText = (text: string): string[] => 
   return text
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, ' ').trim())
+    .map((line) => line.replace(/^(?:#{1,6}\s+|[-*+]\s+)/, '').trim())
     .filter((line) => line.length >= 4 && line.length <= 240)
     .filter((line) => /^(?:\d{1,3}[.)-]\s*)?(?:aula|m[oó]dulo|trilha(?:\s+estrat[eé]gica)?|disciplina|tema|assunto|cap[ií]tulo|revis[aã]o)\b/i.test(line))
     .filter((line) => !/\b(?:quest[aã]o|alternativa|gabarito|resposta|item)\b/i.test(line));
@@ -1578,13 +1579,13 @@ function inferDisciplineFromSourcePath(relativePath?: string): string {
     .reverse();
 
   const candidate = segments.find((segment) => {
-    const normalized = normalize(segment.replace(/^\d{1,3}\s*[-._]\s*/, ''));
+    const normalized = normalize(segment.replace(/^\d{1,3}(?:\s*[-._]\s*|\s+)/, ''));
     if (!normalized || /^\d+$/.test(normalized)) return false;
     return !/^(?:pacote|curso|material|materiais|aula|aulas|pdf|pdfs|estrategia|bacen|bcb|rfb|receita|sefaz)(?:\b|\s)/.test(normalized);
   });
 
   return candidate
-    ? candidate.replace(/^\d{1,3}\s*[-._]\s*/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
+    ? candidate.replace(/^\d{1,3}(?:\s*[-._]\s*|\s+)/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
     : '';
 }
 
