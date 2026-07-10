@@ -7,3 +7,5 @@ tmp/
 *.log
 .env*
 !.env.example
+.superpowers/sdd/task-*-brief.md
+.superpowers/sdd/review-*.diff

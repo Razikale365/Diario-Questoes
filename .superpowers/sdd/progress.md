@@ -4,8 +4,8 @@ Plan: `docs/superpowers/plans/2026-07-10-study-os-m1-local-service-foundation.md
 
 | Task | Status | Base | Head | Verification | Review |
 | --- | --- | --- | --- | --- | --- |
-| 1. Preserve package ingestion experiment | in progress | `5001c0d` | pending | pending | pending |
-| 2. Python package and settings | pending | pending | pending | pending | pending |
+| 1. Preserve package ingestion experiment | complete | `414dda1` | `32eb809` | 40 tests, lint, build, diff-check | approved |
+| 2. Python package and settings | in progress | `32eb809` | pending | pending | pending |
 | 3. SQLite connection and migrations | pending | pending | pending | pending | pending |
 | 4. Backup and retention | pending | pending | pending | pending | pending |
 | 5. FastAPI health endpoint | pending | pending | pending | pending | pending |
