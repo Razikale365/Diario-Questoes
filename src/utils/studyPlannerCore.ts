@@ -67,6 +67,17 @@ export interface InferStudySourceSignalsOptions {
   disciplineHint?: string;
 }
 
+export interface StudySourceFileInput {
+  name: string;
+  relativePath?: string;
+  text: string;
+}
+
+export interface StudySourceFileInferenceResult {
+  items: StudySourceItem[];
+  unresolvedLines: string[];
+}
+
 export interface StudyCoverageRow {
   targetSlug: string;
   discipline: string;
@@ -403,6 +414,24 @@ export const seedSourceSignalsForTarget = (targetSlug: string): StudySourceItem[
   return DEFAULT_STUDY_SOURCE_SIGNALS
     .filter((item) => item.targetSlug === normalizedTarget || item.targetSlug === 'shared')
     .map((item) => ({ ...item }));
+};
+
+export const mergeStudySourceItems = (
+  existingItems: StudySourceItem[],
+  incomingItems: StudySourceItem[],
+): { items: StudySourceItem[]; added: number } => {
+  const keys = new Set(existingItems.map(studySourceIdentityKey));
+  const additions = incomingItems.filter((item) => {
+    const key = studySourceIdentityKey(item);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+
+  return {
+    items: additions.length > 0 ? [...existingItems, ...additions] : existingItems,
+    added: additions.length,
+  };
 };
 
 export const mergeStudySourceItemsWithTargetSeed = (
@@ -783,6 +812,60 @@ export const extractStudySourceCandidatesFromText = (text: string): string[] => 
     .filter((line) => line.length >= 4 && line.length <= 240)
     .filter((line) => /\b(?:aula|m[oó]dulo|trilha|disciplina|tema|assunto|cap[ií]tulo|revis[aã]o)\b/i.test(line))
     .filter((line) => !/\b(?:quest[aã]o|alternativa|gabarito|resposta|item)\b/i.test(line));
+};
+
+export const inferStudySourceSignalsFromFiles = (
+  files: StudySourceFileInput[],
+  options: InferStudySourceSignalsOptions,
+): StudySourceFileInferenceResult => {
+  const items: StudySourceItem[] = [];
+  const unresolvedLines: string[] = [];
+  const itemKeys = new Set<string>();
+  const unresolvedKeys = new Set<string>();
+
+  files.forEach((file, fileIndex) => {
+    const textCandidates = extractStudySourceCandidatesFromText(file.text);
+    const fileNameCandidate = structuralFileNameCandidate(file.name);
+    const candidates = textCandidates.length > 0
+      ? textCandidates
+      : fileNameCandidate ? [fileNameCandidate] : [];
+    const disciplineHint = String(options.disciplineHint || '').trim() || inferDisciplineFromSourcePath(file.relativePath);
+
+    candidates.forEach((line, lineIndex) => {
+      const inferred = inferStudySourceSignalsFromText(line, {
+        ...options,
+        disciplineHint: disciplineHint || undefined,
+      });
+
+      if (inferred.length === 0) {
+        const unresolvedKey = normalize(line);
+        if (!unresolvedKeys.has(unresolvedKey)) {
+          unresolvedKeys.add(unresolvedKey);
+          unresolvedLines.push(line);
+        }
+        return;
+      }
+
+      inferred.forEach((item) => {
+        const key = [
+          item.sourceKind,
+          item.targetSlug,
+          normalize(item.discipline),
+          normalize(item.topic),
+          item.sourceOrder,
+        ].join('|');
+        if (itemKeys.has(key)) return;
+        itemKeys.add(key);
+        items.push({
+          ...item,
+          id: `file_${fileIndex + 1}_${lineIndex + 1}_${item.id}`,
+          taskText: [item.taskText, file.relativePath || file.name].filter(Boolean).join(' · '),
+        });
+      });
+    });
+  });
+
+  return { items, unresolvedLines };
 };
 
 export const parseStudyTargetProfileTable = (text: string): ExamTargetProfile[] => {
@@ -1329,6 +1412,16 @@ function candidateKey(prefix: string, index: number, discipline: string, topic: 
   return [prefix, index, normalize(discipline), normalize(topic), kind, normalize(source)].join(':');
 }
 
+function studySourceIdentityKey(item: StudySourceItem): string {
+  return [
+    item.sourceKind,
+    normalizeTargetSlug(item.targetSlug),
+    normalize(item.discipline),
+    normalize(item.topic),
+    item.sourceOrder || 0,
+  ].join('|');
+}
+
 function isLowTrust(value: string): boolean {
   const normalized = normalize(value);
   return normalized.includes('bizu') || normalized.includes('dicas');
@@ -1373,7 +1466,7 @@ function inferSourceKindFromLine(line: string): StudySourceKind {
   if (normalized.includes('tec')) return 'tec_incidence';
   if (normalized.includes('andrety') || normalized.includes('guia')) return 'guia_andrety';
   if (normalized.includes('trilha')) return 'trilha_estrategica';
-  if (normalized.includes('aula')) return 'estrategia_aulas';
+  if (normalized.includes('aula') || normalized.includes('modulo')) return 'estrategia_aulas';
   return 'manual';
 }
 
@@ -1398,15 +1491,15 @@ function isSourceContextOnlyLine(line: string): boolean {
 }
 
 function inferSourceOrder(line: string, fallback: number): number {
-  const aula = line.match(/\baula\s*(\d{1,3})\b/i);
-  if (aula) return Number.parseInt(aula[1], 10);
+  const structuralOrder = line.match(/\b(?:aula|m[oó]dulo|trilha)\s*(\d{1,3})\b/i);
+  if (structuralOrder) return Number.parseInt(structuralOrder[1], 10);
   return fallback;
 }
 
 function stripSourceMetadata(line: string): string {
   return line
-    .replace(/\baula\s*\d{1,3}\b/gi, '')
-    .replace(/\b(?:tec|trilha\s+estrat[eé]gica|estrat[eé]gia|andrety|guia|revis[aã]o)\b\s*:?\s*/gi, '')
+    .replace(/\b(?:aula|m[oó]dulo|trilha)\s*\d{1,3}\b/gi, '')
+    .replace(/\b(?:tec|m[oó]dulo|trilha\s+estrat[eé]gica|estrat[eé]gia|andrety|guia|revis[aã]o)\b\s*:?\s*/gi, '')
     .replace(/\b(?:incid[eê]ncia|inc|peso|weight|prioridade|priority|prior)\s*[:=]?\s*\d+(?:[,.]\d+)?\b/gi, '')
     .replace(/^\s*[-:;>]+\s*/, '')
     .replace(/\s+-\s*$/g, '')
@@ -1439,10 +1532,42 @@ function inferLesson(sourceKind: StudySourceKind, line: string): string {
   if (sourceKind === 'guia_andrety') return 'Guia Andrety';
   if (sourceKind === 'trilha_estrategica') return 'Trilha Estratégica';
   if (sourceKind === 'estrategia_aulas') {
-    const aula = line.match(/\baula\s*(\d{1,3})\b/i);
-    return aula ? `Aula ${aula[1].padStart(2, '0')} Estratégia` : 'Aula Estratégia';
+    const structuralLesson = line.match(/\b(aula|m[oó]dulo)\s*(\d{1,3})\b/i);
+    if (!structuralLesson) return 'Aula Estratégia';
+    const label = normalize(structuralLesson[1]) === 'modulo' ? 'Módulo' : 'Aula';
+    return `${label} ${structuralLesson[2].padStart(2, '0')} Estratégia`;
   }
   return 'Manual';
+}
+
+function structuralFileNameCandidate(fileName: string): string {
+  const candidate = String(fileName || '')
+    .replace(/\.(?:pdf|txt|md|html?)$/i, '')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/\b(?:aula|m[oó]dulo|trilha|revis[aã]o)\b/i.test(candidate)) return '';
+  return candidate;
+}
+
+function inferDisciplineFromSourcePath(relativePath?: string): string {
+  const segments = String(relativePath || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .slice(0, -1)
+    .reverse();
+
+  const candidate = segments.find((segment) => {
+    const normalized = normalize(segment.replace(/^\d{1,3}\s*[-._]\s*/, ''));
+    if (!normalized || /^\d+$/.test(normalized)) return false;
+    return !/^(?:pacote|curso|material|materiais|aula|aulas|pdf|pdfs|estrategia|bacen|bcb|rfb|receita|sefaz)(?:\b|\s)/.test(normalized);
+  });
+
+  return candidate
+    ? candidate.replace(/^\d{1,3}\s*[-._]\s*/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
 }
 
 function toNumber(value: string | undefined, fallback: number): number {

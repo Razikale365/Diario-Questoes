@@ -77,13 +77,14 @@ import {
   formatStudyCoverageTable,
   formatStudySourceTable,
   formatStudyTargetProfileTable,
-  extractStudySourceCandidatesFromText,
+  inferStudySourceSignalsFromFiles,
   inferStudySourceSignalsFromText,
   isQuestionBankItemRelevantToStudyTarget,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   mergeStudyCoverageWithTargetSeed,
+  mergeStudySourceItems,
   mergeStudySourceItemsWithTargetSeed,
   parseStudyCoverageTable,
   parseStudySourceTable,
@@ -449,6 +450,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsRawSourceKind, setStudyOsRawSourceKind] = useState<StudySourceKind | 'auto'>('auto');
   const [studyOsRawSourceDiscipline, setStudyOsRawSourceDiscipline] = useState('');
   const [isReadingStudyOsSourceFiles, setIsReadingStudyOsSourceFiles] = useState(false);
+  const [studyOsSourceFileProgress, setStudyOsSourceFileProgress] = useState({ processed: 0, total: 0 });
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
   const [studyOsRefreshPlan, setStudyOsRefreshPlan] = useState<StudyRefreshPlan | null>(null);
@@ -1065,33 +1067,68 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const importStudyOsSourceFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
+    const supportedFiles = files.filter((file) =>
+      file.type === 'application/pdf' || /\.(?:pdf|txt|md|html?)$/i.test(file.name),
+    );
+    if (supportedFiles.length === 0) {
+      showToast('A pasta não contém PDF, TXT, Markdown ou HTML legível.');
+      return;
+    }
+
     setIsReadingStudyOsSourceFiles(true);
+    setStudyOsSourceFileProgress({ processed: 0, total: supportedFiles.length });
     try {
-      const extractedCandidates = await Promise.all(files.map(async (file) => {
+      const readableFiles: Array<{ name: string; relativePath?: string; text: string }> = [];
+      let failedFiles = 0;
+
+      for (const [index, file] of supportedFiles.entries()) {
         try {
-          const text = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+          const rawText = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
             ? (await extractPdfText(file)).text
             : await file.text();
-          return extractStudySourceCandidatesFromText(text);
+          const text = /\.html?$/i.test(file.name)
+            ? new DOMParser().parseFromString(rawText, 'text/html').body.textContent || ''
+            : rawText;
+          readableFiles.push({
+            name: file.name,
+            relativePath: file.webkitRelativePath || file.name,
+            text,
+          });
         } catch (error) {
           console.error('[Diário LS] Study source import failed', file.name, error);
-          return [];
+          failedFiles += 1;
         }
-      }));
-      const candidates = Array.from(new Set(extractedCandidates.flat()));
-      if (candidates.length === 0) {
+        setStudyOsSourceFileProgress({ processed: index + 1, total: supportedFiles.length });
+      }
+
+      const inferred = inferStudySourceSignalsFromFiles(readableFiles, {
+        targetSlug: studyOsTarget,
+        sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
+        disciplineHint: studyOsRawSourceDiscipline.trim() || undefined,
+      });
+      if (inferred.items.length === 0 && inferred.unresolvedLines.length === 0) {
         showToast('Nenhum cabeçalho estrutural foi encontrado nos arquivos.');
         return;
       }
 
-      setStudyOsRawSourceText((current) => Array.from(new Set([
-        ...current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-        ...candidates,
-      ])).join('\n'));
+      const merged = mergeStudySourceItems(parseStudySourceTable(studyOsSourceDraft), inferred.items);
+      if (merged.added > 0) setStudyOsSourceDraft(formatStudySourceTable(merged.items));
+      if (inferred.unresolvedLines.length > 0) {
+        setStudyOsRawSourceText((current) => Array.from(new Set([
+          ...current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+          ...inferred.unresolvedLines,
+        ])).join('\n'));
+      }
       setStudyOsPlan(null);
       setStudyOsWeekPlan(null);
       setStudyOsRefreshPlan(null);
-      showToast(`${candidates.length} cabeçalho(s) extraído(s) para revisão.`);
+      const duplicateCount = inferred.items.length - merged.added;
+      showToast([
+        `${merged.added} fonte(s) adicionada(s)`,
+        duplicateCount > 0 ? `${duplicateCount} já existente(s)` : '',
+        inferred.unresolvedLines.length > 0 ? `${inferred.unresolvedLines.length} aguardando disciplina` : '',
+        failedFiles > 0 ? `${failedFiles} arquivo(s) com falha` : '',
+      ].filter(Boolean).join(' · '));
     } finally {
       setIsReadingStudyOsSourceFiles(false);
     }
@@ -1957,6 +1994,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             rawSourceDiscipline={studyOsRawSourceDiscipline}
             isReadingSourceFiles={isReadingStudyOsSourceFiles}
             sourceItemCount={studyOsManualSourceItems.length}
+            sourceFileProgress={studyOsSourceFileProgress}
             baselineComparison={studyOsBaselineComparison}
             targetDecisionRows={studyOsTargetDecisionRows}
             plan={studyOsPlan}
@@ -3035,6 +3073,7 @@ const StudyOSPlannerPanel: React.FC<{
   rawSourceDiscipline: string;
   isReadingSourceFiles: boolean;
   sourceItemCount: number;
+  sourceFileProgress: { processed: number; total: number };
   baselineComparison: StudyBaselineComparison;
   targetDecisionRows: TargetDecisionRow[];
   plan: StudyDayPlan | null;
@@ -3075,6 +3114,7 @@ const StudyOSPlannerPanel: React.FC<{
   rawSourceDiscipline,
   isReadingSourceFiles,
   sourceItemCount,
+  sourceFileProgress,
   baselineComparison,
   targetDecisionRows,
   plan,
@@ -3393,10 +3433,10 @@ const StudyOSPlannerPanel: React.FC<{
                       : 'cursor-pointer border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
                   }`}>
                     {isReadingSourceFiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-                    {isReadingSourceFiles ? 'Lendo' : 'Arquivos'}
+                    {isReadingSourceFiles ? `Lendo ${sourceFileProgress.processed}/${sourceFileProgress.total}` : 'Arquivos'}
                     <input
                       type="file"
-                      accept="application/pdf,.pdf,text/plain,.txt,.md"
+                      accept="application/pdf,.pdf,text/plain,.txt,.md,text/html,.html,.htm"
                       multiple
                       disabled={isReadingSourceFiles}
                       onChange={(event) => {
@@ -3404,6 +3444,25 @@ const StudyOSPlannerPanel: React.FC<{
                         onImportSourceFiles(files);
                         event.target.value = '';
                       }}
+                      className="hidden"
+                    />
+                  </label>
+                  <label className={`flex items-center gap-2 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition ${
+                    isReadingSourceFiles
+                      ? 'cursor-wait border-white/10 bg-white/5 text-gray-500'
+                      : 'cursor-pointer border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
+                  }`}>
+                    <Layers className="h-3.5 w-3.5" /> Pasta
+                    <input
+                      type="file"
+                      multiple
+                      disabled={isReadingSourceFiles}
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        onImportSourceFiles(files);
+                        event.target.value = '';
+                      }}
+                      {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
                       className="hidden"
                     />
                   </label>

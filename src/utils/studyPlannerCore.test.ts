@@ -12,12 +12,14 @@ import {
   formatStudySourceTable,
   formatStudyTargetProfileTable,
   extractStudySourceCandidatesFromText,
+  inferStudySourceSignalsFromFiles,
   inferStudySourceSignalsFromText,
   isQuestionBankItemRelevantToStudyTarget,
   isPlannerTaskRelevantToStudyTarget,
   materializeStudyBlocksAsPlannerTasks,
   materializeStudyWeekAsPlannerTasks,
   mergeStudyCoverageWithTargetSeed,
+  mergeStudySourceItems,
   mergeStudySourceItemsWithTargetSeed,
   parseStudyCoverageTable,
   parseStudySourceTable,
@@ -382,6 +384,24 @@ test('formatStudySourceTable round-trips editable LS replacement source signals'
   assert.equal(parsed[0].lesson, 'TEC CEBRASPE');
 });
 
+test('mergeStudySourceItems avoids package reimport duplicates and preserves manual edits', () => {
+  const [existing] = parseStudySourceTable(`
+kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
+estrategia_aulas | bacen_economia_financas | Economia | Macroeconomia | 0 | 1 | 95 | 10 | 2 | Aula 02 ajustada | Ajuste manual
+`);
+  const duplicate = { ...existing, id: 'import_duplicate', priorityHint: 76, sourceTrust: 8 };
+  const newItem = { ...existing, id: 'import_new', topic: 'Microeconomia', sourceOrder: 3 };
+
+  const result = mergeStudySourceItems([existing], [duplicate, newItem]);
+
+  assert.equal(result.added, 1);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0], existing);
+  assert.equal(result.items[0].priorityHint, 95);
+  assert.equal(result.items[0].sourceTrust, 10);
+  assert.equal(result.items[1].topic, 'Microeconomia');
+});
+
 test('buildStudyDayPlan can generate a four-block day from source signals without LS coverage', () => {
   const sourceItems = parseStudySourceTable(`
 kind | target | discipline | topic | incidence | edital_weight | priority | trust | order | hint | text
@@ -464,6 +484,49 @@ Trilha Estratégica - Revisão - Curva de Phillips
     'Aula 02 - Macroeconomia',
     'Trilha Estratégica - Revisão - Curva de Phillips',
   ]);
+});
+
+test('inferStudySourceSignalsFromFiles uses package folders per discipline and reports unresolved files', () => {
+  const result = inferStudySourceSignalsFromFiles(
+    [
+      {
+        name: 'Aula 02.pdf',
+        relativePath: 'Pacote BACEN/Economia/Aula 02.pdf',
+        text: 'Aula 02 - Macroeconomia\nQuestão 01 - conteúdo proprietário',
+      },
+      {
+        name: 'Aula 03.pdf',
+        relativePath: 'Pacote BACEN/Estatística/Aula 03.pdf',
+        text: 'Módulo 03 - Regressão Linear\nGabarito: item certo',
+      },
+      {
+        name: 'Aula 05 - Crédito Tributário.pdf',
+        relativePath: 'Pacote BACEN/Direito Tributário/Aula 05 - Crédito Tributário.pdf',
+        text: 'Material introdutório sem cabeçalho estrutural.',
+      },
+      {
+        name: 'Aula 04.pdf',
+        relativePath: 'Pacote BACEN/Aula 04.pdf',
+        text: 'Aula 04 - Sistema Financeiro Nacional',
+      },
+    ],
+    { targetSlug: 'bacen_economia_financas' },
+  );
+
+  assert.deepEqual(result.items.map((item) => item.discipline), [
+    'Economia',
+    'Estatística',
+    'Direito Tributário',
+  ]);
+  assert.deepEqual(result.items.map((item) => item.topic), [
+    'Macroeconomia',
+    'Regressão Linear',
+    'Crédito Tributário',
+  ]);
+  assert.deepEqual(result.items.map((item) => item.sourceOrder), [2, 3, 5]);
+  assert.ok(result.items.every((item) => item.targetSlug === 'bacen_economia_financas'));
+  assert.ok(result.items.every((item) => item.sourceKind === 'estrategia_aulas'));
+  assert.deepEqual(result.unresolvedLines, ['Aula 04 - Sistema Financeiro Nacional']);
 });
 
 test('inferStudySourceSignalsFromText uses a discipline hint for a course heading without discipline', () => {
