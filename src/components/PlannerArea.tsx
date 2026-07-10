@@ -340,6 +340,7 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
   return {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
+    targetSlug: plannerTask.targetSlug,
     planejamento: plannerTask.planejamento || 'Planner',
     meta: plannerTask.metaNumber ? String(plannerTask.metaNumber) : '',
     tarefa: String(plannerTask.number),

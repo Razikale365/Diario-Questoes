@@ -192,6 +192,17 @@ test('createStudyTaskFromQuestionBankItems converts bank questions into an execu
   assert.equal(task?.blocks[0].title, 'Rodada Controle');
 });
 
+test('createStudyTaskFromQuestionBankItems retains a single explicit target', () => {
+  const items = buildQuestionBankItems(importedQuestions, {
+    ...context,
+    targetSlug: 'bacen_economia_financas',
+  });
+
+  const task = createStudyTaskFromQuestionBankItems(items);
+
+  assert.equal(task?.targetSlug, 'bacen_economia_financas');
+});
+
 test('matchQuestionBankItemsToPlannerTask links compatible bank questions by discipline and task text', () => {
   const constitutional = buildQuestionBankItems(importedQuestions, context);
   const finance = buildQuestionBankItems([importedQuestions[1]], {
@@ -224,6 +235,79 @@ test('matchQuestionBankItemsToPlannerTask links compatible bank questions by dis
   assert.equal(matches.length, 2);
   assert.ok(matches.every((item) => item.discipline === 'Direito Constitucional'));
   assert.deepEqual(matches.map((item) => item.sourceQuestionNumber), [1, 2]);
+});
+
+test('matchQuestionBankItemsToPlannerTask excludes another target while retaining shared questions', () => {
+  const bacen = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    targetSlug: 'bacen_economia_financas',
+  });
+  const shared = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    sourceName: 'Base compartilhada de controle constitucional',
+    targetSlug: 'shared',
+  });
+  const rfb = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    sourceName: 'RFB Controle Constitucional',
+    targetSlug: 'rfb_auditor',
+  });
+  const legacy = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    sourceName: 'Legado sem target',
+  });
+
+  const matches = matchQuestionBankItemsToPlannerTask(
+    {
+      id: 'planner-bacen',
+      number: 3,
+      targetSlug: 'bacen_economia_financas',
+      discipline: 'Direito Constitucional',
+      format: 'Questões TEC',
+      description: 'Controle de constitucionalidade concentrado e difuso',
+      spentMinutes: 0,
+      estimatedMinutes: 60,
+      performance: null,
+      status: 'pending',
+      relevance: 9,
+      durationMinutes: 60,
+      source: 'generated',
+      plannerSourceKind: 'generated_planner',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
+    },
+    [...bacen, ...shared, ...rfb, ...legacy],
+  );
+
+  assert.deepEqual(new Set(matches.map((item) => item.targetSlug)), new Set(['bacen_economia_financas', 'shared']));
+});
+
+test('matchQuestionBankItemsToPlannerTask keeps legacy question compatibility for the SEFAZ CE baseline', () => {
+  const legacy = buildQuestionBankItems(importedQuestions, context);
+
+  const matches = matchQuestionBankItemsToPlannerTask(
+    {
+      id: 'planner-sefaz',
+      number: 3,
+      targetSlug: 'sefaz_ce',
+      discipline: 'Direito Constitucional',
+      format: 'Questões TEC',
+      description: 'Controle de constitucionalidade e orçamento',
+      spentMinutes: 0,
+      estimatedMinutes: 60,
+      performance: null,
+      status: 'pending',
+      relevance: 9,
+      durationMinutes: 60,
+      source: 'generated',
+      plannerSourceKind: 'generated_planner',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
+    },
+    legacy,
+  );
+
+  assert.equal(matches.length, 2);
 });
 
 test('matchQuestionBankItemsToPlannerTask prefers exact task-title matches when a caderno has the same law keywords', () => {
@@ -387,6 +471,42 @@ test('isStudyTaskCompatibleWithPlannerTask rejects a stale Aula 04 execution lin
         source: 'ls-meta-pdf',
         createdAt: '2026-07-04T00:00:00.000Z',
         updatedAt: '2026-07-04T00:00:00.000Z',
+      },
+      studyTask,
+    ),
+    false,
+  );
+});
+
+test('isStudyTaskCompatibleWithPlannerTask rejects a linked task from another explicit target', () => {
+  const [rfbItem] = buildQuestionBankItems([importedQuestions[0]], {
+    ...context,
+    targetSlug: 'rfb_auditor',
+  });
+  const studyTask = {
+    ...createStudyTaskFromQuestionBankItems([rfbItem], { title: 'Controle Constitucional RFB' })!,
+    targetSlug: 'rfb_auditor',
+  };
+
+  assert.equal(
+    isStudyTaskCompatibleWithPlannerTask(
+      {
+        id: 'planner-bacen-linked',
+        number: 1,
+        targetSlug: 'bacen_economia_financas',
+        discipline: 'Direito Constitucional',
+        format: 'Questões TEC',
+        description: 'Controle de constitucionalidade',
+        spentMinutes: 0,
+        estimatedMinutes: 60,
+        performance: null,
+        status: 'pending',
+        relevance: 9,
+        durationMinutes: 60,
+        source: 'generated',
+        plannerSourceKind: 'generated_planner',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        updatedAt: '2026-07-10T00:00:00.000Z',
       },
       studyTask,
     ),

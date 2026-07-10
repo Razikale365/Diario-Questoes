@@ -86,6 +86,7 @@ export interface StudyTask {
   id: string;
   date: string;
   updatedAt?: string; // ISO timestamp of last local mutation — used for per-task conflict resolution
+  targetSlug?: string;
   planejamento?: string;
   meta?: string;
   tarefa?: string;

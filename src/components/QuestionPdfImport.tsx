@@ -396,6 +396,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     const newTask: StudyTask = {
       id: crypto.randomUUID(),
       date: now,
+      targetSlug: context.targetSlug,
       planejamento: 'PDF',
       meta: '',
       tarefa: '',

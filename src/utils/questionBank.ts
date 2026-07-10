@@ -660,11 +660,16 @@ export const matchQuestionBankItemsToPlannerTask = (
     taskText,
   ].join(' '));
   const taskAulaNumbers = extractNumbersAfterLabel(taskText, 'aula');
+  const matchesPlannerTarget = (item: QuestionBankItem) => {
+    if (!plannerTask.targetSlug) return true;
+    if (item.targetSlug) return item.targetSlug === plannerTask.targetSlug || item.targetSlug === 'shared';
+    return plannerTask.targetSlug === 'sefaz_ce';
+  };
 
   if (taskTokens.length === 0) return [];
 
   const ranked = items
-    .filter((item) => item.discipline === plannerTask.discipline)
+    .filter((item) => item.discipline === plannerTask.discipline && matchesPlannerTarget(item))
     .map((item) => {
       const haystack = questionBankSearchText(item);
       const itemTaskNumbers = extractNumbersAfterLabel(haystack, 'tarefa');
@@ -710,6 +715,8 @@ export const matchQuestionBankItemsToPlannerTask = (
 };
 
 export const isStudyTaskCompatibleWithPlannerTask = (plannerTask: PlannerTask, studyTask: StudyTask) => {
+  if (plannerTask.targetSlug && studyTask.targetSlug !== plannerTask.targetSlug) return false;
+
   const plannerText = [
     plannerTask.description,
     plannerTask.format,
@@ -784,10 +791,12 @@ export const createStudyTaskFromQuestionBankItems = (
   const lesson = options.lesson || sourceNames.join(', ') || title;
   const bank = items[0].bank || 'Outra';
   const questions = items.map(questionBankItemToQuestion);
+  const itemTargets = Array.from(new Set(items.map((item) => item.targetSlug).filter(Boolean)));
 
   return {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
+    targetSlug: itemTargets.length === 1 ? itemTargets[0] : undefined,
     planejamento: 'Banco de Questões',
     meta: '',
     tarefa: '',
