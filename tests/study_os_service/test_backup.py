@@ -170,3 +170,22 @@ def test_prune_backups_ignores_unrecognized_and_future_filenames(tmp_path: Path)
     assert current.exists()
     assert future.exists()
     assert malformed.exists()
+
+
+def test_prune_backups_does_not_extend_weekly_window_across_missing_weeks(tmp_path: Path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    now = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    recent_week = _write_snapshot(backup_dir, now - timedelta(weeks=1))
+    outside_window = _write_snapshot(backup_dir, now - timedelta(weeks=9))
+
+    removed = prune_backups(
+        backup_dir,
+        daily_retention=0,
+        weekly_retention=8,
+        now=now,
+    )
+
+    assert recent_week.exists()
+    assert removed == [outside_window]
+    assert not outside_window.exists()

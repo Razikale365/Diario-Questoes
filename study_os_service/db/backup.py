@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import re
 import sqlite3
@@ -90,17 +90,12 @@ def prune_backups(
     for day in sorted(by_day, reverse=True)[:daily_retention]:
         retained.add(max(by_day[day])[1])
 
-    current_week = cutoff.isocalendar()
-    previous_weeks = sorted(
-        (
-            week
-            for week in by_week
-            if week < (current_week.year, current_week.week)
-        ),
-        reverse=True,
-    )
-    for week in previous_weeks[:weekly_retention]:
-        retained.add(max(by_week[week])[1])
+    current_week_start = cutoff.date() - timedelta(days=cutoff.weekday())
+    for weeks_ago in range(1, weekly_retention + 1):
+        iso_week = (current_week_start - timedelta(weeks=weeks_ago)).isocalendar()
+        week = (iso_week.year, iso_week.week)
+        if week in by_week:
+            retained.add(max(by_week[week])[1])
 
     removed = [
         path
