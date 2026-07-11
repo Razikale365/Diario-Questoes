@@ -11,8 +11,8 @@ Plan: `docs/superpowers/plans/2026-07-10-study-os-m1-local-service-foundation.md
 | 5. FastAPI health endpoint | complete | `052a008` | `0b25a4d` | 7 focused, 19 full pytest, compileall | manual spec and quality review approved |
 | 6. Operational CLI | complete | `426dc73` | `b785a6d` | 4 focused, 23 full pytest, compileall | manual spec and quality review approved |
 | 7. Frontend service health | complete | `12d1f21` | `817b47d` | 3 focused, 129 full tests, lint, build | manual spec and quality review approved |
-| 8. Vite proxy and Windows launcher | in progress | `817b47d` | pending | pending | pending |
-| 9. M1 full gate and M2 plan | pending | pending | pending | pending | pending |
+| 8. Vite proxy and Windows launcher | complete | `48c8d1e` | `89b1e7b` | 23 pytest, 129 frontend tests, lint, build, direct/proxy smoke | manual spec and quality review approved |
+| 9. M1 full gate and M2 plan | in progress | `89b1e7b` | pending | pending | pending |
 
 ## Notes
 
