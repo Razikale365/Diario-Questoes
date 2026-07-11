@@ -3,6 +3,10 @@ build/
 dist/
 coverage/
 tmp/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/study-os/
 .DS_Store
 *.log
 .env*

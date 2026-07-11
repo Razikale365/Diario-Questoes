@@ -7,8 +7,8 @@ Plan: `docs/superpowers/plans/2026-07-10-study-os-m1-local-service-foundation.md
 | 1. Preserve package ingestion experiment | complete | `414dda1` | `32eb809` | 40 tests, lint, build, diff-check | approved |
 | 2. Python package and settings | complete | `88e66e4` | `9673a09` | 2 pytest, 126 frontend tests, lint, build | spec and quality approved |
 | 3. SQLite connection and migrations | complete | `1ed5bf2` | `4562e0d` | 6 pytest | spec and quality approved |
-| 4. Backup and retention | in progress | `4562e0d` | pending | pending | pending |
-| 5. FastAPI health endpoint | pending | pending | pending | pending | pending |
+| 4. Backup and retention | complete | `9a2b51f` | `7e201fc` | 6 focused, 14 full pytest | manual spec and quality review approved after ISO-window fix |
+| 5. FastAPI health endpoint | in progress | `7e201fc` | pending | pending | pending |
 | 6. Operational CLI | pending | pending | pending | pending | pending |
 | 7. Frontend service health | pending | pending | pending | pending | pending |
 | 8. Vite proxy and Windows launcher | pending | pending | pending | pending | pending |
