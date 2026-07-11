@@ -67,6 +67,7 @@ import {
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
+import { ServiceStatus } from '../study-os/components/ServiceStatus';
 import {
   buildStudyBaselineComparison,
   buildTargetDecisionRows,
@@ -3175,7 +3176,8 @@ const StudyOSPlannerPanel: React.FC<{
             <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-[#84cc16]">CB {activeTarget?.costBenefit || '-'}</span>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ServiceStatus />
           <button
             type="button"
             onClick={onGenerate}
