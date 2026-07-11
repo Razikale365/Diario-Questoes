@@ -49,6 +49,8 @@ The downloader run must record:
 
 Only then can status advance from `selected` to `downloaded`. Study OS advances it to `validated` only after the scanner count equals the independent filesystem count.
 
+The downloader run also leaves `.study-os-download.json` inside the fresh package root. The manifest repeats the package id, acquisition id, downloader name/version, ordered timestamps, expected count, independently observed count, and failure count. A `downloaded` or `validated` record is rejected when that manifest is missing, outside the root, invalid, or inconsistent with the record. This prevents an old directory from being promoted simply by editing its status.
+
 ## Candidate Comparison
 
 | Candidate | Target fit | Completeness | Role in Study OS | Decision |

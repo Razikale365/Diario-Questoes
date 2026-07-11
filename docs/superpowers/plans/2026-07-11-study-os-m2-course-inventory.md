@@ -68,14 +68,22 @@ class CoursePackageChoice:
     target_slug: str
     provider: str
     package_name: str
+    package_id: str | None
     package_url: str
     edition_note: str
     acquisition_method: Literal['estrategia_downloader']
     root_path: Path | None
     download_status: Literal['candidate', 'selected', 'downloaded', 'validated']
+    downloader_name: str | None
     downloader_version: str | None
+    acquisition_id: str | None
+    catalog_checked_at: datetime
+    download_started_at: datetime | None
     downloaded_at: datetime | None
+    acquisition_manifest_path: Path | None
     expected_file_count: int | None
+    observed_file_count: int | None
+    failed_item_count: int | None
 ```
 
 - [ ] Inspect the current Estrategia catalog/account and compare owned/current BACEN Economia e Financas, RFB Auditor/Analista, and temporary SEFAZ options.
@@ -83,7 +91,7 @@ class CoursePackageChoice:
 - [ ] Select one package. Prefer current BACEN Economia e Financas if it is complete and available; record why, not just the result.
 - [ ] Locate or install the user's Estrategia Downloader and record its exact version before acquisition.
 - [ ] Download the selected package afresh to a new stable local folder outside the repository; never point production at `Pacote Regular Fiscal 2023`.
-- [ ] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require an existing root plus downloader version and timezone-aware completion time, counts are non-negative, and target/provider/name are non-empty.
+- [ ] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require complete fresh-acquisition provenance and a matching manifest inside the root, timestamps are ordered and timezone-aware, counts are non-negative, validated counts match with zero failures, and target/provider/name are non-empty.
 - [ ] Implement the immutable choice model and JSON serialization used by later API DTOs.
 - [ ] Commit: `feat: record Study OS course package choice`.
 
@@ -101,8 +109,11 @@ The task may finish with `download_status=selected` while a large download is in
 
 ```text
 course_roots
-  id, target_slug, provider, package_name, package_url, edition_note,
-  root_path, source_kind, download_status, expected_file_count,
+  id, target_slug, provider, package_name, package_id, package_url, edition_note,
+  root_path, source_kind, acquisition_method, download_status,
+  downloader_name, downloader_version, acquisition_id, catalog_checked_at,
+  download_started_at, downloaded_at, acquisition_manifest_path,
+  expected_file_count, observed_file_count, failed_item_count,
   active, last_scanned_at, created_at, updated_at
 
 courses
