@@ -11,10 +11,12 @@
 ## Binding Decisions
 
 - The old `Pacote Regular Fiscal 2023` is a fixture and scale reference, not the production package.
-- Production inventory requires a newly downloaded package selected from the user's current Estrategia account.
+- Production inventory requires a fresh download through Estrategia Downloader from the user's current Estrategia account, even if the chosen package is the same Fiscal line used before.
+- The existing `Pacote Regular Fiscal 2023` folder is never accepted as the production root because the PDFs available on the site have since been updated.
 - Default recommendation is the current complete `BACEN - Analista - Economia e Financas` package when available and when BACEN remains the active target. RFB or SEFAZ packages are selected only if the active target decision changes first.
 - Package choice is recorded as editable data: target, provider, package name/id/URL, edition note, root path, and expected filesystem count. It is never hard-coded as truth.
-- Download stays an authenticated user action through Estrategia. Study OS neither scrapes the course site nor stores credentials.
+- Download stays an authenticated user action through Estrategia Downloader. Study OS neither reimplements the downloader, scrapes the course site, nor stores credentials.
+- Acquisition provenance records downloader name/version, package id/URL, completion timestamp, destination root, and post-download filesystem count so a stale folder cannot masquerade as current.
 - The real-package acceptance count is the count observed after the new download. The historical `3,589 PDFs` remains a synthetic scale regression and must not be imposed on a different package.
 - Scan reads filesystem metadata only. No PDF text, outline, page count, or hash is read during ordinary inventory.
 - Stable material identity is `(course_id, normalized_relative_path)`. Rescan never deletes a material, lesson, progress, or session row.
@@ -68,16 +70,20 @@ class CoursePackageChoice:
     package_name: str
     package_url: str
     edition_note: str
+    acquisition_method: Literal['estrategia_downloader']
     root_path: Path | None
     download_status: Literal['candidate', 'selected', 'downloaded', 'validated']
+    downloader_version: str | None
+    downloaded_at: datetime | None
     expected_file_count: int | None
 ```
 
 - [ ] Inspect the current Estrategia catalog/account and compare owned/current BACEN Economia e Financas, RFB Auditor/Analista, and temporary SEFAZ options.
 - [ ] Record candidates against target alignment, completeness, freshness, banca, current ownership/cost, and whether the package includes all core disciplines.
 - [ ] Select one package. Prefer current BACEN Economia e Financas if it is complete and available; record why, not just the result.
-- [ ] Download the selected package to a stable local folder outside the repository.
-- [ ] Write failing domain validation tests: URL must be HTTP(S), downloaded/validated choices require an existing root, counts are non-negative, and target/provider/name are non-empty.
+- [ ] Locate or install the user's Estrategia Downloader and record its exact version before acquisition.
+- [ ] Download the selected package afresh to a new stable local folder outside the repository; never point production at `Pacote Regular Fiscal 2023`.
+- [ ] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require an existing root plus downloader version and timezone-aware completion time, counts are non-negative, and target/provider/name are non-empty.
 - [ ] Implement the immutable choice model and JSON serialization used by later API DTOs.
 - [ ] Commit: `feat: record Study OS course package choice`.
 
@@ -329,7 +335,7 @@ GET  /api/v1/materials/{id}/file
 
 M2 is complete only when all are true:
 
-1. one current Estrategia package is explicitly selected for the active target and downloaded;
+1. one current Estrategia package is explicitly selected for the active target and freshly downloaded through Estrategia Downloader;
 2. its root and independent PDF count are recorded;
 3. two scans are idempotent and equal the independent count;
 4. lesson numbers are derived from filenames across padded/unpadded variants;
