@@ -13,18 +13,18 @@ def test_migrate_initializes_foundation_schema_idempotently(tmp_path: Path):
     try:
         runner = MigrationRunner(connection)
 
-        assert runner.migrate() == 1
-        assert runner.migrate() == 1
+        assert runner.migrate() == 2
+        assert runner.migrate() == 2
 
         tables = {
             row["name"]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        assert tables - {"sqlite_sequence"} == {
+        assert {
             "schema_migrations",
             "app_settings",
             "app_events",
-        }
+        } <= tables
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     finally:
@@ -84,9 +84,9 @@ def test_migrate_rejects_newer_unsupported_schema_version(tmp_path: Path):
             )
             """
         )
-        connection.execute("INSERT INTO schema_migrations (version) VALUES (2)")
+        connection.execute("INSERT INTO schema_migrations (version) VALUES (3)")
 
-        with pytest.raises(UnsupportedSchemaVersionError, match="2"):
+        with pytest.raises(UnsupportedSchemaVersionError, match="3"):
             MigrationRunner(connection).migrate()
     finally:
         connection.close()

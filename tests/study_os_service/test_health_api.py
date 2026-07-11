@@ -12,13 +12,13 @@ def test_health_initializes_database_and_reports_contract(tmp_path):
         response = client.get("/api/v1/health")
 
         assert app.state.settings is settings
-        assert app.state.schema_version == 1
+        assert app.state.schema_version == 2
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
         "serviceVersion": "0.1.0",
-        "schemaVersion": 1,
+            "schemaVersion": 2,
         "database": "ok",
         "backup": "missing",
         "configuredRoots": 0,

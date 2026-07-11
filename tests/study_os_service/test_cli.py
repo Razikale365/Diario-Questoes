@@ -30,7 +30,7 @@ def test_initialize_creates_database_and_reports_schema(tmp_path: Path):
     assert result.returncode == 0
     assert result.stderr == ""
     assert payload["status"] == "ok"
-    assert payload["schemaVersion"] == 1
+    assert payload["schemaVersion"] == 2
     assert Path(payload["databasePath"]) == data_dir / "study-os.sqlite3"
     assert Path(payload["databasePath"]).exists()
 
@@ -46,7 +46,7 @@ def test_health_checks_initialized_database_integrity(tmp_path: Path):
     assert result.stderr == ""
     assert payload == {
         "status": "ok",
-        "schemaVersion": 1,
+            "schemaVersion": 2,
         "database": "ok",
         "databasePath": str((data_dir / "study-os.sqlite3").resolve()),
     }
@@ -63,7 +63,7 @@ def test_backup_creates_readable_snapshot_under_backup_directory(tmp_path: Path)
     assert result.returncode == 0
     assert result.stderr == ""
     assert payload["status"] == "ok"
-    assert payload["schemaVersion"] == 1
+    assert payload["schemaVersion"] == 2
     assert created_path.parent == (data_dir / "backups").resolve()
     assert created_path.exists()
     assert payload["prunedPaths"] == []
