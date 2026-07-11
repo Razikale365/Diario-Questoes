@@ -26,10 +26,10 @@ Plan: `docs/superpowers/plans/2026-07-11-study-os-m2-course-inventory.md`
 
 | Task | Status | Base | Head | Verification | Review |
 | --- | --- | --- | --- | --- | --- |
-| 1. Decide and record current Estrategia package | in progress | `5c9ef66` | pending | pending | pending |
-| 2. Inventory schema version 2 | pending | pending | pending | pending | pending |
-| 3. Lesson parser and material classifier | pending | pending | pending | pending | pending |
-| 4. Metadata-only filesystem scanner | pending | pending | pending | pending | pending |
+| 1. Decide and record current Estrategia package | in progress | `5c9ef66` | `ab52696` | 58 pytest, compileall, fresh-root gate; authenticated download still pending | spec approved; quality findings fixed, final external re-review unavailable |
+| 2. Inventory schema version 2 | complete | `ab52696` | `2c21827` | 71 pytest, compileall, diff-check | manual spec and quality review approved; external reviewer unavailable |
+| 3. Lesson parser and material classifier | complete | `2c21827` | `c878499` | 32 focused, 103 full pytest, compileall, diff-check | manual spec and quality review approved |
+| 4. Metadata-only filesystem scanner | complete | `c878499` | `77408a4` | 9 focused + 1 symlink skip, 112 full pytest, 3,589-file fixture | manual spec and quality review approved |
 | 5. Transactional scan reconciliation | pending | pending | pending | pending | pending |
 | 6. Inventory and safe file APIs | pending | pending | pending | pending | pending |
 | 7. Typed inventory client and setup UI | pending | pending | pending | pending | pending |
