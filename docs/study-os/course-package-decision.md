@@ -24,7 +24,9 @@ The package has not yet been recorded as downloaded or validated. The downloader
 
 The previous Fiscal Brain integration expected an external `Estrategia Downloader Pro` project at `C:\Docker\Cursos Estratégia`.
 
-An auditable downloader source is now checked out separately at `C:\Docker\Cursos Estratégia\AutoDownloadEstrategiaConcurso`, upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`. Its reviewed code uses Selenium with manual login and does not request or persist credentials. The upstream script is not ready to run for M2 unchanged: it downloads every visible course including videos, has no package selector, emits no acquisition manifest, and relies on selectors that must be checked against the current site. A local package-scoped PDF-only adapter must be completed and tested before authenticated execution.
+An auditable downloader source is checked out separately at `C:\Docker\Cursos Estratégia\AutoDownloadEstrategiaConcurso`, upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`. Its reviewed code uses Selenium with manual login and does not request or persist credentials. A package-scoped PDF-only adapter was added and tested in that separate repository at commit `bb2c490`; it uses current package/course/lesson URL contracts, validates `%PDF-`, records failures, and emits the canonical acquisition manifest.
+
+The first authenticated run was launched toward `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-11`. This is execution evidence only, not download completion: status remains `selected` until the process finishes and the root contains a consistent manifest and observed PDF count.
 
 ## Why This Package
 

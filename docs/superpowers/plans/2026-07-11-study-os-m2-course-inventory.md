@@ -89,11 +89,11 @@ class CoursePackageChoice:
 - [x] Inspect the current Estrategia catalog/account and compare owned/current BACEN Economia e Financas, RFB Auditor/Analista, and temporary SEFAZ options.
 - [x] Record candidates against target alignment, completeness, freshness, banca, current ownership/cost, and whether the package includes all core disciplines.
 - [x] Select one package. Use owned/current RFB Auditor package `249654` as the first source; keep BACEN as a separate target and future package root.
-- [x] Locate the external downloader source, review its credential behavior, and record upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`; finish a package-scoped PDF-only adapter before execution.
+- [x] Locate the external downloader source, review its credential behavior, and record upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`; package-scoped PDF-only adapter commit is `bb2c490` in the separate downloader repository.
 - [ ] Download the selected package afresh to a new stable local folder outside the repository; never point production at `Pacote Regular Fiscal 2023`.
-- [ ] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require complete fresh-acquisition provenance and a matching manifest inside the root, timestamps are ordered and timezone-aware, counts are non-negative, validated counts match with zero failures, and target/provider/name are non-empty.
-- [ ] Implement the immutable choice model and JSON serialization used by later API DTOs.
-- [ ] Commit: `feat: record Study OS course package choice`.
+- [x] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require complete fresh-acquisition provenance and a matching manifest inside the root, timestamps are ordered and timezone-aware, counts are non-negative, validated counts match with zero failures, and target/provider/name are non-empty.
+- [x] Implement the immutable choice model and JSON serialization used by later API DTOs.
+- [x] Commit package choice and freshness gates in `56a6bfe`, `5b50f06`, and `d6c1141`.
 
 The task may finish with `download_status=selected` while a large download is in progress, but M2 itself cannot be marked complete until the status is `validated`.
 
