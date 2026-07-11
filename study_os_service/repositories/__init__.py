@@ -1,6 +1,7 @@
 from .inventory import (
     CourseRecord,
     CourseRootRecord,
+    ImportRunSummary,
     InventoryRepository,
     LessonRecord,
     RootTargetConflictError,
@@ -9,6 +10,7 @@ from .inventory import (
 __all__ = [
     "CourseRecord",
     "CourseRootRecord",
+    "ImportRunSummary",
     "InventoryRepository",
     "LessonRecord",
     "RootTargetConflictError",

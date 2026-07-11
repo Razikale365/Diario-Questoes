@@ -118,6 +118,7 @@ CREATE TABLE materials (
   lesson_id INTEGER REFERENCES lessons(id) ON DELETE SET NULL,
   absolute_path TEXT NOT NULL,
   relative_path TEXT NOT NULL COLLATE NOCASE,
+  normalized_relative_path TEXT NOT NULL COLLATE NOCASE,
   kind TEXT NOT NULL CHECK (
     kind IN ('original','simplified','highlighted','slides','mind_map','summary','bizu','track','other')
   ),
@@ -128,10 +129,15 @@ CREATE TABLE materials (
   page_offset INTEGER NOT NULL DEFAULT 0 CHECK (page_offset >= 0),
   available INTEGER NOT NULL DEFAULT 1 CHECK (available IN (0,1)),
   is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0,1)),
+  primary_selection TEXT CHECK (primary_selection IS NULL OR primary_selection IN ('automatic','manual')),
   trust_level INTEGER NOT NULL CHECK (trust_level BETWEEN 0 AND 10),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (course_id, relative_path)
+  CHECK (
+    (is_primary = 1 AND primary_selection IS NOT NULL)
+    OR (is_primary = 0 AND primary_selection IS NULL)
+  ),
+  UNIQUE (course_id, normalized_relative_path)
 );
 """,
             """
@@ -165,6 +171,7 @@ CREATE TABLE import_issues (
             "CREATE INDEX idx_courses_root_active ON courses(root_id, active);",
             "CREATE INDEX idx_lessons_course_sequence ON lessons(course_id, sequence_index);",
             "CREATE INDEX idx_materials_lesson_available ON materials(lesson_id, available);",
+            "CREATE UNIQUE INDEX idx_materials_one_primary_per_lesson ON materials(lesson_id) WHERE is_primary = 1 AND lesson_id IS NOT NULL;",
             "CREATE INDEX idx_import_runs_root_state ON import_runs(root_id, state);",
             "CREATE INDEX idx_import_issues_root_state ON import_issues(root_id, state);",
         ),
