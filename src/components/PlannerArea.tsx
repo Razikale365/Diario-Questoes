@@ -3226,14 +3226,14 @@ const StudyOSPlannerPanel: React.FC<{
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="space-y-3 rounded-lg border border-white/10 bg-black/15 p-3">
-          <label className="grid gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-3 rounded-lg border border-white/10 bg-black/15 p-3">
+          <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
             Target
             <select
               value={targetSlug}
               onChange={(event) => onTargetChange(event.target.value)}
-              className="rounded border border-[#525252] bg-[#262626] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#84cc16]"
+              className="w-full min-w-0 max-w-full rounded border border-[#525252] bg-[#262626] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#84cc16]"
             >
               {targetProfiles.map((target) => (
                 <option key={target.slug} value={target.slug}>
@@ -3294,7 +3294,7 @@ const StudyOSPlannerPanel: React.FC<{
           </div>
 
           <div className="border border-white/10 bg-black/20">
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
               <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Auditoria rapida</p>
               <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">F forte · R rever · Fr fraca · N nao lida</span>
             </div>
@@ -3390,18 +3390,18 @@ const StudyOSPlannerPanel: React.FC<{
           </div>
         </aside>
 
-        <main className="grid gap-4 2xl:grid-cols-[minmax(0,0.95fr)_minmax(560px,1.05fr)]">
-          <div className="space-y-4">
+        <main className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,0.95fr)_minmax(560px,1.05fr)]">
+          <div className="min-w-0 space-y-4">
             <TargetDecisionTable rows={targetDecisionRows} activeSlug={targetSlug} onSelect={onTargetChange} />
 
             <textarea
               value={coverageDraft}
               onChange={(event) => onCoverageDraftChange(event.target.value)}
-              className="min-h-[220px] w-full resize-y rounded-lg border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
+              className="min-h-[220px] w-full min-w-0 max-w-full resize-y rounded-lg border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
               spellCheck={false}
             />
 
-            <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+            <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-xs font-black uppercase tracking-widest text-[#84cc16]">Fontes concorrentes</p>
@@ -3416,8 +3416,8 @@ const StudyOSPlannerPanel: React.FC<{
                 </button>
               </div>
 
-              <div className="mb-3 grid gap-2 rounded border border-white/10 bg-[#151515] p-2">
-                <div className="flex flex-wrap gap-2">
+              <div className="mb-3 grid min-w-0 gap-2 rounded border border-white/10 bg-[#151515] p-2">
+                <div className="flex min-w-0 flex-wrap gap-2">
                   <select
                     value={rawSourceKind}
                     onChange={(event) => onRawSourceKindChange(event.target.value as StudySourceKind | 'auto')}
@@ -3488,7 +3488,7 @@ const StudyOSPlannerPanel: React.FC<{
                 <textarea
                   value={rawSourceText}
                   onChange={(event) => onRawSourceTextChange(event.target.value)}
-                  className="min-h-[96px] w-full resize-y rounded border border-white/10 bg-[#0f0f0f] p-2 font-mono text-[11px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
+                  className="min-h-[96px] w-full min-w-0 max-w-full resize-y rounded border border-white/10 bg-[#0f0f0f] p-2 font-mono text-[11px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
                   spellCheck={false}
                   placeholder="TEC: Economia - Macroeconomia - incidencia 9 - peso 2"
                 />
@@ -3496,7 +3496,7 @@ const StudyOSPlannerPanel: React.FC<{
               <textarea
                 value={sourceDraft}
                 onChange={(event) => onSourceDraftChange(event.target.value)}
-                className="min-h-[170px] w-full resize-y rounded border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
+                className="min-h-[170px] w-full min-w-0 max-w-full resize-y rounded border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
                 spellCheck={false}
               />
             </div>
