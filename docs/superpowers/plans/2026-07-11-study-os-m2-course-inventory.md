@@ -13,7 +13,7 @@
 - The old `Pacote Regular Fiscal 2023` is a fixture and scale reference, not the production package.
 - Production inventory requires a fresh download through Estrategia Downloader from the user's current Estrategia account, even if the chosen package is the same Fiscal line used before.
 - The existing `Pacote Regular Fiscal 2023` folder is never accepted as the production root because the PDFs available on the site have since been updated.
-- Default recommendation is the current complete `BACEN - Analista - Economia e Financas` package when available and when BACEN remains the active target. RFB or SEFAZ packages are selected only if the active target decision changes first.
+- First production source is the currently owned RFB Auditor package `249654`, freshly downloaded because it combines current regular theory and Passo material at no additional package cost. BACEN remains a switchable planner target and receives its own package root when a current BACEN package is owned/acquired.
 - Package choice is recorded as editable data: target, provider, package name/id/URL, edition note, root path, and expected filesystem count. It is never hard-coded as truth.
 - Download stays an authenticated user action through Estrategia Downloader. Study OS neither reimplements the downloader, scrapes the course site, nor stores credentials.
 - Acquisition provenance records downloader name/version, package id/URL, completion timestamp, destination root, and post-download filesystem count so a stale folder cannot masquerade as current.
@@ -86,10 +86,10 @@ class CoursePackageChoice:
     failed_item_count: int | None
 ```
 
-- [ ] Inspect the current Estrategia catalog/account and compare owned/current BACEN Economia e Financas, RFB Auditor/Analista, and temporary SEFAZ options.
-- [ ] Record candidates against target alignment, completeness, freshness, banca, current ownership/cost, and whether the package includes all core disciplines.
-- [ ] Select one package. Prefer current BACEN Economia e Financas if it is complete and available; record why, not just the result.
-- [ ] Locate or install the user's Estrategia Downloader and record its exact version before acquisition.
+- [x] Inspect the current Estrategia catalog/account and compare owned/current BACEN Economia e Financas, RFB Auditor/Analista, and temporary SEFAZ options.
+- [x] Record candidates against target alignment, completeness, freshness, banca, current ownership/cost, and whether the package includes all core disciplines.
+- [x] Select one package. Use owned/current RFB Auditor package `249654` as the first source; keep BACEN as a separate target and future package root.
+- [x] Locate the external downloader source, review its credential behavior, and record upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`; finish a package-scoped PDF-only adapter before execution.
 - [ ] Download the selected package afresh to a new stable local folder outside the repository; never point production at `Pacote Regular Fiscal 2023`.
 - [ ] Write failing domain validation tests: URL must be HTTP(S), acquisition method must be `estrategia_downloader`, downloaded/validated choices require complete fresh-acquisition provenance and a matching manifest inside the root, timestamps are ordered and timezone-aware, counts are non-negative, validated counts match with zero failures, and target/provider/name are non-empty.
 - [ ] Implement the immutable choice model and JSON serialization used by later API DTOs.

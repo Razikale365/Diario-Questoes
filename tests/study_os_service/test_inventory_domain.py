@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -47,8 +48,8 @@ def write_acquisition_manifest(root: Path, **overrides) -> Path:
         "catalogCheckedAt": CATALOG_CHECKED_AT.isoformat(),
         "downloadStartedAt": DOWNLOAD_STARTED_AT.isoformat(),
         "downloadedAt": DOWNLOADED_AT.isoformat(),
-        "expectedFileCount": 123,
-        "observedFileCount": 123,
+        "expectedFileCount": 2,
+        "observedFileCount": 2,
         "failedItemCount": 0,
     }
     values.update(overrides)
@@ -60,6 +61,8 @@ def write_acquisition_manifest(root: Path, **overrides) -> Path:
 def downloaded_values(tmp_path: Path, status="downloaded", **overrides):
     root = tmp_path / "fresh-download"
     root.mkdir()
+    (root / "Aula 00.pdf").write_bytes(b"%PDF-fixture")
+    (root / "Aula 01.PDF").write_bytes(b"%PDF-fixture")
     manifest = write_acquisition_manifest(root)
     values = package_values(
         package_id="249654",
@@ -71,8 +74,8 @@ def downloaded_values(tmp_path: Path, status="downloaded", **overrides):
         download_started_at=DOWNLOAD_STARTED_AT,
         downloaded_at=DOWNLOADED_AT,
         acquisition_manifest_path=manifest,
-        expected_file_count=123,
-        observed_file_count=123,
+        expected_file_count=2,
+        observed_file_count=2,
         failed_item_count=0,
     )
     values.update(overrides)
@@ -101,7 +104,7 @@ def test_fresh_downloaded_states_round_trip_with_full_provenance(tmp_path: Path,
     assert restored.acquisition_manifest_path == (
         tmp_path / "fresh-download" / ".study-os-download.json"
     ).resolve()
-    assert restored.to_dict()["observedFileCount"] == 123
+    assert restored.to_dict()["observedFileCount"] == 2
 
 
 def test_historical_directory_without_acquisition_manifest_is_rejected(tmp_path: Path):
@@ -124,6 +127,16 @@ def test_acquisition_manifest_must_be_inside_package_root(tmp_path: Path):
         CoursePackageChoice(**(values | {"acquisition_manifest_path": outside}))
 
 
+def test_acquisition_manifest_must_use_canonical_filename(tmp_path: Path):
+    values = downloaded_values(tmp_path)
+    canonical = values["acquisition_manifest_path"]
+    arbitrary = values["root_path"] / "receipt.json"
+    canonical.replace(arbitrary)
+
+    with pytest.raises(ValueError, match=r"\.study-os-download\.json"):
+        CoursePackageChoice(**(values | {"acquisition_manifest_path": arbitrary}))
+
+
 def test_acquisition_manifest_must_match_recorded_run(tmp_path: Path):
     values = downloaded_values(tmp_path)
     manifest = values["acquisition_manifest_path"]
@@ -131,6 +144,24 @@ def test_acquisition_manifest_must_match_recorded_run(tmp_path: Path):
 
     with pytest.raises(ValueError, match="acquisitionId"):
         CoursePackageChoice(**(values | {"acquisition_manifest_path": manifest}))
+
+
+def test_stale_pdf_cannot_be_promoted_with_a_new_matching_manifest(tmp_path: Path):
+    values = downloaded_values(tmp_path)
+    stale_pdf = values["root_path"] / "Aula 00.pdf"
+    stale_timestamp = (CATALOG_CHECKED_AT - timedelta(days=365)).timestamp()
+    os.utime(stale_pdf, (stale_timestamp, stale_timestamp))
+
+    with pytest.raises(ValueError, match="predates the acquisition"):
+        CoursePackageChoice(**values)
+
+
+def test_observed_count_is_checked_against_real_filesystem(tmp_path: Path):
+    values = downloaded_values(tmp_path, observed_file_count=1)
+    write_acquisition_manifest(values["root_path"], observedFileCount=1)
+
+    with pytest.raises(ValueError, match="observed file count does not match"):
+        CoursePackageChoice(**values)
 
 
 @pytest.mark.parametrize(
@@ -166,8 +197,8 @@ def test_download_times_must_be_ordered_after_catalog_check(tmp_path: Path):
 
 
 def test_validated_package_requires_independent_count_match(tmp_path: Path):
-    values = downloaded_values(tmp_path, status="validated", observed_file_count=122)
-    write_acquisition_manifest(values["root_path"], observedFileCount=122)
+    values = downloaded_values(tmp_path, status="validated", observed_file_count=1)
+    write_acquisition_manifest(values["root_path"], observedFileCount=1)
 
     with pytest.raises(ValueError, match="counts must match"):
         CoursePackageChoice(**values)

@@ -171,18 +171,35 @@ class CoursePackageChoice:
             if value is None:
                 raise ValueError(f"downloaded package requires an {label}")
 
-        if manifest is None or not manifest.is_file():
+        canonical_manifest = (root / ".study-os-download.json").resolve()
+        if manifest is None:
             raise ValueError("downloaded package requires a fresh acquisition manifest")
         try:
             manifest.relative_to(root)
         except ValueError as exc:
             raise ValueError("acquisition manifest must be inside the package root") from exc
+        if manifest != canonical_manifest:
+            raise ValueError("acquisition manifest must be root/.study-os-download.json")
+        if not manifest.is_file():
+            raise ValueError("downloaded package requires a fresh acquisition manifest")
 
         if self.download_status == "validated":
             if self.expected_file_count != self.observed_file_count:
                 raise ValueError("validated package file counts must match")
             if self.failed_item_count != 0:
                 raise ValueError("validated package requires zero failed items")
+
+        pdf_files = [
+            path
+            for path in root.rglob("*")
+            if path.is_file() and path.suffix.casefold() == ".pdf"
+        ]
+        if len(pdf_files) != self.observed_file_count:
+            raise ValueError("observed file count does not match the real filesystem")
+        for pdf_path in pdf_files:
+            modified_at = datetime.fromtimestamp(pdf_path.stat().st_mtime, tz=UTC)
+            if modified_at < download_started_at:
+                raise ValueError(f"downloaded PDF predates the acquisition: {pdf_path.name}")
 
         self._validate_manifest(manifest)
 

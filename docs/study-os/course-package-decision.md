@@ -4,33 +4,35 @@ Decision date: 2026-07-11
 
 ## Decision
 
-Select the current complete theory package **BACEN (Analista - Area 2 - Economia e Financas) - Pacote** as the first production course source for Study OS.
+Select the currently owned **Receita Federal (Auditor Fiscal) Pacotaco - Pacote Teorico + Pacote Passo Estrategico** as the first production course source for Study OS.
 
-Public catalog URL:
+Authenticated package URL:
 
-`https://www.estrategiaconcursos.com.br/curso/bacen-analista-area-2-economia-e-financas-pacote/`
+`https://www.estrategiaconcursos.com.br/app/dashboard/pacote/249654`
 
-Target: `bacen_economia_financas`
+Package id: `249654`
+
+Target: `rfb_auditor`
 
 Status: `selected`
 
 Acquisition method: `estrategia_downloader`
 
-The package has not yet been recorded as downloaded or validated. Its account package id, downloader version, destination root, completion time, and filesystem PDF count remain pending until a fresh authenticated download finishes.
+The package has not yet been recorded as downloaded or validated. The downloader version, destination root, completion time, and filesystem PDF count remain pending until a fresh authenticated download finishes.
 
 ## Downloader Discovery
 
-The previous Fiscal Brain integration expected an external `Estrategia Downloader Pro` project at `C:\Docker\Cursos Estratégia`. The current directory contains only an empty `Downloads` folder; the downloader source is no longer installed there.
+The previous Fiscal Brain integration expected an external `Estrategia Downloader Pro` project at `C:\Docker\Cursos Estratégia`.
 
-The likely tool lineage is `Coruja Downloader Pro` (publicly described as version 3.1), but its source and dependencies must be reviewed before credentials are entered. Study OS will record the verified downloader version actually used, not assume `3.1` from an old integration or post.
+An auditable downloader source is now checked out separately at `C:\Docker\Cursos Estratégia\AutoDownloadEstrategiaConcurso`, upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`. Its reviewed code uses Selenium with manual login and does not request or persist credentials. The upstream script is not ready to run for M2 unchanged: it downloads every visible course including videos, has no package selector, emits no acquisition manifest, and relies on selectors that must be checked against the current site. A local package-scoped PDF-only adapter must be completed and tested before authenticated execution.
 
 ## Why This Package
 
-The public catalog currently exposes the broad BACEN Area 2 course and includes common subjects plus the target-specific core: Microeconomia, Macroeconomia, COSIF, Estatistica e Econometria, and Financas.
+Authenticated inspection on 2026-07-11 confirmed that package `249654` is available in the account and currently contains 50 course entries: 31 regular entries and 19 Passo Estrategico entries. The regular side includes the complete fiscal core plus recent additions for LTC/reforma tributaria dated 2025 and 2026. The course entries are shown as available through 2026-12-31.
 
-The separate BACEN Passo Estrategico package is not the primary course source. Estrategia explicitly warns that some subjects may be absent from that product, while complete packages include all subjects.
+This is the best first acquisition on current evidence because it is already owned, current, broad, and combines original course material with the optional Passo comparison source. It also maximizes reuse of the user's existing fiscal preparation without pretending the historical 2023 PDFs are current.
 
-The current RFB Auditor complete package remains a valid fallback, but it does not beat BACEN while `bacen_economia_financas` is the selected strategic direction. Existing fiscal study history remains transferable evidence and is not discarded.
+BACEN remains a supported exam target and may still be the better eventual concurso decision. It is not the first production course root because no current BACEN course appeared among the account's non-archived enrollments inspected on 2026-07-11. Selecting this RFB source does not silently select RFB as the only exam: the multi-target planner must label transferable subjects and keep BACEN-specific gaps explicit.
 
 ## Fresh Download Rule
 
@@ -55,17 +57,17 @@ The downloader run also leaves `.study-os-download.json` inside the fresh packag
 
 | Candidate | Target fit | Completeness | Role in Study OS | Decision |
 | --- | --- | --- | --- | --- |
-| BACEN Area 2 complete package | Highest for active direction | Complete theory package | Primary advancement source | Selected |
-| BACEN Area 2 Passo Estrategico | High | Provider warns some subjects may be absent | Optional comparative/review signal | Not primary |
-| RFB Auditor complete package | High fiscal transfer | Complete theory package | Fallback if target changes | Not selected now |
+| RFB Auditor package 249654 | Owned; strongest immediate fiscal fit | 31 regular + 19 Passo entries | First production source and transfer baseline | Selected |
+| BACEN Area 2 complete package | Highest direct fit if BACEN becomes the exam | Not present in inspected non-archived enrollments | Add as a later source when owned/current | Not first acquisition |
+| BACEN Area 2 Passo Estrategico | High direct review fit | May omit subjects and is not primary theory | Optional later comparison source | Not primary |
 | Existing Fiscal 2023 directory | Historical only | Stale local snapshot | Fixture and regression evidence | Never production |
 
 ## Acquisition Gate
 
-1. Restore or install the user's Estrategia Downloader in its dedicated external directory after reviewing its source and dependencies.
-2. Record its version and verify authenticated access to the selected package.
-3. Resolve the account package id corresponding to the public BACEN complete package.
-4. Download all available PDFs into a new stable directory.
+1. Finish the package-scoped PDF-only adapter in the dedicated downloader directory and test its selectors without storing credentials.
+2. Record the adapter/upstream versions and verify authenticated access to package `249654`.
+3. Start a new acquisition id and create a previously nonexistent stable destination root.
+4. Download all available PDFs from package `249654` into that root.
 5. Count PDFs independently and record download failures.
 6. Register that exact root in Study OS M2.
 
