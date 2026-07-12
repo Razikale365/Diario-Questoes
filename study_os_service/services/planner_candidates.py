@@ -123,6 +123,7 @@ class ReviewEvidence:
     doubt_count: int = 0
     favorite_count: int = 0
     failed_sessions: int = 0
+    skipped_blocks: int = 0
     weak_progress: bool = False
 
     def __post_init__(self) -> None:
@@ -131,6 +132,7 @@ class ReviewEvidence:
             "doubt_count",
             "favorite_count",
             "failed_sessions",
+            "skipped_blocks",
         ):
             _non_negative(getattr(self, name), name.replace("_", " "))
         if not isinstance(self.weak_progress, bool):
@@ -143,6 +145,7 @@ class ReviewEvidence:
             + self.doubt_count
             + self.favorite_count
             + self.failed_sessions
+            + self.skipped_blocks
             > 0
             or self.weak_progress
         )
@@ -360,6 +363,7 @@ def _evidence(
         "doubtCount": row.review.doubt_count,
         "favoriteCount": row.review.favorite_count,
         "failedSessions": row.review.failed_sessions,
+        "skippedBlocks": row.review.skipped_blocks,
         "weakProgress": row.review.weak_progress,
         "reviewDebt": topic.review_debt,
         "stopReason": stop_reason,
@@ -476,7 +480,7 @@ def _collect_review(
         parameter = topic.lesson_id
     else:
         return ReviewEvidence(weak_progress=topic.coverage_status == "weak")
-    row = connection.execute(
+    session_row = connection.execute(
         f"""
         SELECT COALESCE(SUM(wrong_count), 0) AS wrong_count,
                COALESCE(SUM(doubt_count), 0) AS doubt_count,
@@ -487,11 +491,30 @@ def _collect_review(
         """,
         (parameter,),
     ).fetchone()
+    block_row = connection.execute(
+        """
+        SELECT COALESCE(SUM(blocks.wrong_count), 0) AS wrong_count,
+               COALESCE(SUM(blocks.doubt_count), 0) AS doubt_count,
+               COALESCE(SUM(blocks.favorite_count), 0) AS favorite_count,
+               COALESCE(SUM(CASE WHEN blocks.state='failed' THEN 1 ELSE 0 END), 0)
+                 AS failed_blocks,
+               COALESCE(SUM(CASE WHEN blocks.state='skipped' THEN 1 ELSE 0 END), 0)
+                 AS skipped_blocks
+        FROM planner_blocks AS blocks
+        JOIN planner_candidates AS candidates
+          ON candidates.id=blocks.candidate_id
+        WHERE candidates.target_topic_id=?
+        """,
+        (topic.id,),
+    ).fetchone()
     return ReviewEvidence(
-        wrong_count=row["wrong_count"],
-        doubt_count=row["doubt_count"],
-        favorite_count=row["favorite_count"],
-        failed_sessions=row["failed_sessions"],
+        wrong_count=session_row["wrong_count"] + block_row["wrong_count"],
+        doubt_count=session_row["doubt_count"] + block_row["doubt_count"],
+        favorite_count=session_row["favorite_count"] + block_row["favorite_count"],
+        failed_sessions=(
+            session_row["failed_sessions"] + block_row["failed_blocks"]
+        ),
+        skipped_blocks=block_row["skipped_blocks"],
         weak_progress=(
             topic.coverage_status == "weak"
             or any(material.progress_status == "weak" for material in materials)

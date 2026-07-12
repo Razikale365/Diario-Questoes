@@ -6,6 +6,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from study_os_service.api.health import router as health_router
+from study_os_service.api.planner import (
+    PlannerApiError,
+    planner_api_error_handler,
+    router as planner_router,
+)
 from study_os_service.api.inventory import (
     InventoryApiError,
     inventory_api_error_handler,
@@ -50,8 +55,10 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.add_exception_handler(
         PlannerProfileApiError, planner_profile_api_error_handler
     )
+    app.add_exception_handler(PlannerApiError, planner_api_error_handler)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(inventory_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
     app.include_router(planner_profiles_router, prefix="/api/v1")
+    app.include_router(planner_router, prefix="/api/v1")
     return app

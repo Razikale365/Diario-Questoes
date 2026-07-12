@@ -244,7 +244,8 @@ def _weakness(evidence: Mapping[str, Any], status: str) -> int:
         2500,
         int(evidence["wrongCount"]) * 250
         + int(evidence["doubtCount"]) * 125
-        + int(evidence["failedSessions"]) * 750,
+        + int(evidence["failedSessions"]) * 750
+        + int(evidence["skippedBlocks"]) * 500,
     )
     if evidence["weakProgress"]:
         error_signal = max(error_signal, 1500)
@@ -259,6 +260,7 @@ def _review_debt(evidence: Mapping[str, Any]) -> int:
         + int(evidence["doubtCount"]) * 400
         + int(evidence["favoriteCount"]) * 200
         + int(evidence["failedSessions"]) * 2000
+        + int(evidence["skippedBlocks"]) * 1500
         + (2000 if evidence["weakProgress"] else 0),
     )
     return max(explicit, observed)
