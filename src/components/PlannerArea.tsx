@@ -68,6 +68,7 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import { ServiceStatus } from '../study-os/components/ServiceStatus';
+import { CourseInventory } from '../study-os/components/CourseInventory';
 import {
   buildStudyBaselineComparison,
   buildTargetDecisionRows,
@@ -112,7 +113,7 @@ import {
 } from '../utils/studyPlannerCore';
 
 type PlannerView = 'month' | 'week';
-type PlannerSection = 'today' | 'meta' | 'calendar' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
+type PlannerSection = 'today' | 'meta' | 'calendar' | 'courses' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
 type DraftTaskItem = { key: string; task: PlannerDraftTask };
 type DraftTaskEdit = Partial<Pick<PlannerDraftTask, 'description' | 'durationMinutes' | 'relevance'>>;
 
@@ -139,6 +140,7 @@ const SECTION_NAV: Array<{ id: PlannerSection; label: string; icon: React.Elemen
   { id: 'today', label: 'Hoje', icon: Home },
   { id: 'meta', label: 'Meta Atual', icon: LayoutDashboard },
   { id: 'calendar', label: 'Calendário', icon: CalendarDays },
+  { id: 'courses', label: 'Cursos', icon: DatabaseIcon },
   { id: 'insights', label: 'Insights', icon: Lightbulb },
   { id: 'generator', label: 'Gerador', icon: Sparkles },
   { id: 'history', label: 'Histórico', icon: History },
@@ -1981,6 +1983,14 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             archivePlannerTask(selectedTask.id);
             setSelectedTaskId(null);
           }}
+        />
+      )}
+
+      {activeSection === 'courses' && (
+        <CourseInventory
+          targetSlug={studyOsTarget}
+          targets={studyOsTargetProfiles.map((target) => ({ slug: target.slug, name: target.name }))}
+          onTargetChange={setStudyOsTarget}
         />
       )}
 
