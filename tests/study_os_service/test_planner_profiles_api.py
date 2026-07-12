@@ -48,6 +48,7 @@ def test_seed_profiles_are_editable_target_scoped_defaults(tmp_path: Path):
         "Estatistica e Econometria",
     }
     assert not any(item["discipline"] == "Direito Aduaneiro" for item in bacen_topics)
+    assert all(item["tecSourceUrl"].startswith("https://www.tecconcursos.com.br/") for item in bacen_topics)
 
     financas = next(
         item

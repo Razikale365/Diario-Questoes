@@ -11,6 +11,7 @@
       "dailyQuota": 4,
       "priorityScore": 88,
       "sourceUrls": ["https://www.bcb.gov.br/detalhenoticia/776/noticia"],
+      "defaultTecSourceUrl": "https://www.tecconcursos.com.br/questoes/cadernos",
       "notes": "Default local editavel; confirmar pesos no proximo edital.",
       "topics": [
         {"discipline": "Macroeconomia", "topic": "Contas nacionais e politica macroeconomica", "editalWeight": 2, "incidence": 92, "tier": 1, "bancaFit": 95, "overlapValue": 55, "transferKind": "target_specific", "notes": "Nucleo BACEN."},
@@ -32,6 +33,7 @@
       "dailyQuota": 4,
       "priorityScore": 82,
       "sourceUrls": ["https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/servidores/concurso-publico-2022"],
+      "defaultTecSourceUrl": "https://www.tecconcursos.com.br/questoes/cadernos",
       "notes": "Default local editavel baseado no ultimo ciclo; nao e edital vigente.",
       "topics": [
         {"discipline": "Direito Tributario", "topic": "Credito tributario", "editalWeight": 2, "incidence": 94, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
@@ -53,6 +55,7 @@
       "dailyQuota": 4,
       "priorityScore": 72,
       "sourceUrls": ["https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/servidores/concurso-publico-2022"],
+      "defaultTecSourceUrl": "https://www.tecconcursos.com.br/questoes/cadernos",
       "notes": "Default local editavel baseado no ultimo ciclo; nao e edital vigente.",
       "topics": [
         {"discipline": "Direito Tributario", "topic": "Obrigacao e credito tributario", "editalWeight": 2, "incidence": 94, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
@@ -74,6 +77,7 @@
       "dailyQuota": 4,
       "priorityScore": 96,
       "sourceUrls": ["https://www.sefaz.ce.gov.br/"],
+      "defaultTecSourceUrl": "https://www.tecconcursos.com.br/questoes/cadernos",
       "notes": "Perfil editavel do ciclo em andamento; conferir data e pesos oficiais.",
       "topics": [
         {"discipline": "Legislacao Tributaria Estadual", "topic": "ICMS Ceara", "editalWeight": 2, "incidence": 100, "tier": 1, "bancaFit": 98, "overlapValue": 15, "transferKind": "target_specific", "notes": "Lei estadual nao transfere para outro fisco."},

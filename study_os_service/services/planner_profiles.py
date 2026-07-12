@@ -134,7 +134,13 @@ class PlannerProfileService:
             topics_payload = payload.get("topics")
             if not isinstance(topics_payload, list):
                 raise ValueError(f"target seed {target.target_slug} requires topics")
-            topics = tuple(_new_topic(target.target_slug, item) for item in topics_payload)
+            defaults = {
+                "tecSourceUrl": payload.get("defaultTecSourceUrl"),
+            }
+            topics = tuple(
+                _new_topic(target.target_slug, defaults | item)
+                for item in topics_payload
+            )
             validated.append((target, topics))
 
         targets_seeded = 0
