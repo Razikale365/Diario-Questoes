@@ -61,6 +61,7 @@ class PlannerWeekRun:
     week_start: date
     phase: PlanPhase
     algorithm_version: str
+    request_hash: str
     input_hash: str
     supersedes_week_run_id: int | None
     status: PlannerWeekStatus
@@ -82,6 +83,7 @@ class PlannerWeekRun:
         object.__setattr__(
             self, "algorithm_version", _text(self.algorithm_version, "algorithm version")
         )
+        object.__setattr__(self, "request_hash", _text(self.request_hash, "request hash"))
         object.__setattr__(self, "input_hash", _text(self.input_hash, "input hash"))
         if self.supersedes_week_run_id is not None:
             _positive(self.supersedes_week_run_id, "supersedes week run id")

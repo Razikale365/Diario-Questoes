@@ -576,6 +576,8 @@ CREATE TABLE planner_blocks (
               ),
               phase TEXT NOT NULL CHECK (phase IN ('pre_edital','pos_edital')),
               algorithm_version TEXT NOT NULL CHECK (length(trim(algorithm_version)) > 0),
+              request_hash TEXT NOT NULL DEFAULT 'legacy'
+                CHECK (length(trim(request_hash)) > 0),
               input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
               supersedes_week_run_id INTEGER REFERENCES planner_week_runs(id),
               status TEXT NOT NULL CHECK (status IN ('generated','shortfall')),

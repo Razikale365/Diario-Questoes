@@ -571,7 +571,9 @@ def _collect_topic_evidence(
 ) -> CandidateTopicEvidence:
     material_mapping_present = topic.lesson_id is not None or topic.material_id is not None
     materials = _collect_materials(connection, topic)
-    review = _collect_review(connection, topic, materials, selected_target_slug)
+    review = _collect_review(
+        connection, topic, materials, selected_target_slug, as_of
+    )
     state = connection.execute(
         """
         SELECT * FROM topic_learning_states
@@ -667,6 +669,7 @@ def _collect_review(
     topic: TargetTopic,
     materials: tuple[MaterialEvidence, ...],
     selected_target_slug: str,
+    as_of: date | None,
 ) -> ReviewEvidence:
     session_counts = {
         "wrong_count": 0,
@@ -717,9 +720,15 @@ def _collect_review(
         SELECT * FROM review_queue_items
         WHERE target_slug=? AND target_topic_id=?
           AND state IN ('pending','deferred')
+          AND (state='deferred' OR ? IS NULL OR due_date<=?)
         ORDER BY due_date, id LIMIT 1
         """,
-        (selected_target_slug, topic.id),
+        (
+            selected_target_slug,
+            topic.id,
+            as_of.isoformat() if as_of else None,
+            as_of.isoformat() if as_of else None,
+        ),
     ).fetchone()
     return ReviewEvidence(
         wrong_count=session_counts["wrong_count"] + block_row["wrong_count"],

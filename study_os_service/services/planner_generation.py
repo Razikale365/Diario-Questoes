@@ -32,6 +32,11 @@ from study_os_service.services.planner_scoring import (
     score_candidates,
 )
 from study_os_service.services.review_queue import ReviewQueueService
+from study_os_service.repositories.weekly import WeeklyRepository
+from study_os_service.services.weekly_planner import (
+    WeeklyPlannerService,
+    align_pool_to_forecast,
+)
 
 
 class PlannerIdempotencyConflictError(RuntimeError):
@@ -68,6 +73,8 @@ class PlannerGenerationService:
         self.repository = PlannerRunRepository(connection)
         self.learning = LearningProjectionService(connection)
         self.review_queue = ReviewQueueService(connection)
+        self.weekly_repository = WeeklyRepository(connection)
+        self.weekly = WeeklyPlannerService(connection)
 
     def generate_day(
         self,
@@ -169,6 +176,12 @@ class PlannerGenerationService:
                 self.connection, target_name, resolved_date
             )
             pool = build_candidates(target_name, evidence)
+            forecast_slots = self.weekly_repository.latest_slots_for_date(
+                target_name, resolved_date
+            )
+            pool = align_pool_to_forecast(
+                pool, {slot.candidate_key for slot in forecast_slots}
+            )
             base_context = ScoringContext(
                 target=target,
                 plan_date=resolved_date,
@@ -214,6 +227,14 @@ class PlannerGenerationService:
             )
             persisted = self._persist_candidates(run, scored, chosen)
             self._persist_blocks(run, persisted)
+            result = self.get_day_by_run(run.id)
+            self.weekly.link_day(
+                target_name,
+                resolved_date,
+                run.id,
+                result.blocks,
+                result.candidates,
+            )
             result = self.get_day_by_run(run.id)
             self.connection.commit()
             return result

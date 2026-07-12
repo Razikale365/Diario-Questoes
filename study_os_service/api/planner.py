@@ -23,6 +23,14 @@ from study_os_service.services.planner_generation import (
     PlannerRunNotFoundError,
 )
 from study_os_service.services.planner_profiles import TargetProfileNotFoundError
+from study_os_service.services.weekly_planner import (
+    GeneratedWeek,
+    WeeklyIdempotencyConflictError,
+    WeeklyPlanNotFoundError,
+    WeeklyPlannerService,
+    WeeklyRefreshConflictError,
+    WeeklyRunNotFoundError,
+)
 
 
 router = APIRouter()
@@ -49,6 +57,10 @@ def _service(request: Request) -> PlannerGenerationService:
     return PlannerGenerationService(request.app.state.connection)
 
 
+def _weekly_service(request: Request) -> WeeklyPlannerService:
+    return WeeklyPlannerService(request.app.state.connection)
+
+
 def _date(value: Any) -> date:
     if not isinstance(value, str):
         raise ValueError("date must use YYYY-MM-DD")
@@ -63,6 +75,19 @@ def _integer(payload: dict[str, Any], key: str, *, default: int | None = None) -
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{key} must be an integer")
     return value
+
+
+def _date_map(value: Any, label: str) -> dict[date, int] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    result = {}
+    for key, item in value.items():
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"{label} values must be integers")
+        result[_date(key)] = item
+    return result
 
 
 def _run_payload(run: PlannerRun) -> dict[str, Any]:
@@ -167,6 +192,47 @@ def _block_payload(
     return payload
 
 
+def _week_payload(week: GeneratedWeek) -> dict[str, Any]:
+    run = week.run
+    return {
+        "run": {
+            "id": run.id,
+            "targetSlug": run.target_slug,
+            "weekStart": run.week_start.isoformat(),
+            "phase": run.phase,
+            "algorithmVersion": run.algorithm_version,
+            "requestHash": run.request_hash,
+            "inputHash": run.input_hash,
+            "supersedesWeekRunId": run.supersedes_week_run_id,
+            "status": run.status,
+            "shortfallCount": run.shortfall_count,
+            "shortfallReasons": list(run.shortfall_reasons),
+            "generatedAt": run.generated_at.isoformat(),
+        },
+        "slots": [
+            {
+                "id": slot.id,
+                "weekRunId": slot.week_run_id,
+                "targetSlug": slot.target_slug,
+                "date": slot.scheduled_date.isoformat(),
+                "position": slot.position,
+                "candidateKey": slot.candidate_key,
+                "topicTargetSlug": slot.topic_target_slug,
+                "targetTopicId": slot.target_topic_id,
+                "blockKind": slot.block_kind,
+                "durationMinutes": slot.duration_minutes,
+                "plannedQuestions": slot.planned_questions,
+                "score": dict(slot.score),
+                "evidence": dict(slot.evidence),
+                "state": slot.state,
+                "dayRunId": slot.day_run_id,
+                "dayBlockId": slot.day_block_id,
+            }
+            for slot in week.slots
+        ],
+    }
+
+
 def _day_payload(day: GeneratedDay) -> dict[str, Any]:
     candidates = {item.id: item for item in day.candidates}
     return {
@@ -205,6 +271,14 @@ def _translate(exc: Exception) -> PlannerApiError:
         return PlannerApiError(409, "stale_planner_block", str(exc))
     if isinstance(exc, PlannerRefreshConflictError):
         return PlannerApiError(409, "planner_refresh_conflict", str(exc))
+    if isinstance(exc, WeeklyPlanNotFoundError):
+        return PlannerApiError(404, "planner_week_not_found", "planner week does not exist")
+    if isinstance(exc, WeeklyRunNotFoundError):
+        return PlannerApiError(404, "planner_week_run_not_found", str(exc))
+    if isinstance(exc, WeeklyIdempotencyConflictError):
+        return PlannerApiError(409, "planner_idempotency_conflict", str(exc))
+    if isinstance(exc, WeeklyRefreshConflictError):
+        return PlannerApiError(409, "planner_refresh_conflict", str(exc))
     if isinstance(exc, sqlite3.IntegrityError):
         return PlannerApiError(409, "planner_write_conflict", str(exc))
     return PlannerApiError(422, "invalid_planner_request", str(exc))
@@ -228,6 +302,62 @@ async def generate_day(
     except Exception as exc:
         raise _translate(exc) from exc
     return _day_payload(day)
+
+
+@router.post("/planner/generate-week", status_code=201)
+async def generate_week(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    try:
+        week = _weekly_service(request).generate_week(
+            payload.get("targetSlug"),
+            _date(payload.get("weekStart")),
+            idempotency_key=idempotency_key,
+            daily_quotas=_date_map(payload.get("dailyQuotas"), "dailyQuotas"),
+            daily_time_budgets=_date_map(
+                payload.get("dailyTimeBudgets"), "dailyTimeBudgets"
+            ),
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return _week_payload(week)
+
+
+@router.post("/planner/refresh-week", status_code=201)
+async def refresh_week(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    try:
+        week = _weekly_service(request).refresh_week(
+            _integer(payload, "previousWeekRunId"),
+            payload.get("targetSlug"),
+            _date(payload.get("weekStart")),
+            idempotency_key=idempotency_key,
+            daily_quotas=_date_map(payload.get("dailyQuotas"), "dailyQuotas"),
+            daily_time_budgets=_date_map(
+                payload.get("dailyTimeBudgets"), "dailyTimeBudgets"
+            ),
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return _week_payload(week)
+
+
+@router.get("/planner/week")
+async def get_week(
+    request: Request,
+    target_slug: str = Query(alias="targetSlug", min_length=1),
+    week_start: str = Query(alias="weekStart", min_length=1),
+) -> dict[str, Any]:
+    try:
+        week = _weekly_service(request).get_week(target_slug, _date(week_start))
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return _week_payload(week)
 
 
 @router.post("/planner/refresh-day", status_code=201)

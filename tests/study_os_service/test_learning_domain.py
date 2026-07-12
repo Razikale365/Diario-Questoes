@@ -92,6 +92,7 @@ def make_week(**overrides) -> PlannerWeekRun:
         "week_start": date(2026, 7, 13),
         "phase": "pre_edital",
         "algorithm_version": "m5-v1",
+        "request_hash": "request-abc",
         "input_hash": "abc123",
         "supersedes_week_run_id": None,
         "status": "generated",

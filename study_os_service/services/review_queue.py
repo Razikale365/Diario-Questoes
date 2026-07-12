@@ -242,7 +242,11 @@ class ReviewQueueService:
             target_slug=target["target_slug"],
             topic_target_slug=topic["target_slug"],
             target_topic_id=topic["id"],
-            due_date=as_of,
+            due_date=(
+                min(existing.due_date, as_of)
+                if existing is not None and existing.state == "pending"
+                else as_of
+            ),
             state="pending",
             bounded_questions=questions,
             trigger_event_ids=trigger_ids,
