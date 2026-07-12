@@ -256,6 +256,185 @@ CREATE TABLE study_sessions (
             "CREATE UNIQUE INDEX idx_sessions_one_active_material ON study_sessions(lesson_id, material_id) WHERE state='active';",
         ),
     ),
+    (
+        5,
+        (
+            """
+CREATE TABLE exam_targets (
+  target_slug TEXT PRIMARY KEY CHECK (length(trim(target_slug)) > 0),
+  display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+  institution TEXT NOT NULL CHECK (length(trim(institution)) > 0),
+  role TEXT NOT NULL CHECK (length(trim(role)) > 0),
+  banca TEXT NOT NULL CHECK (length(trim(banca)) > 0),
+  phase TEXT NOT NULL CHECK (phase IN ('pre_edital','pos_edital')),
+  deadline TEXT,
+  daily_quota INTEGER NOT NULL DEFAULT 4 CHECK (daily_quota BETWEEN 1 AND 8),
+  priority_score REAL NOT NULL DEFAULT 50 CHECK (priority_score BETWEEN 0 AND 100),
+  source_urls_json TEXT NOT NULL DEFAULT '[]'
+    CHECK (json_valid(source_urls_json) AND json_type(source_urls_json) = 'array'),
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (deadline IS NULL OR (length(deadline) = 10 AND date(deadline) = deadline))
+);
+""",
+            """
+CREATE TABLE target_topics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+  discipline TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(discipline)) > 0),
+  topic TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(topic)) > 0),
+  coverage_status TEXT NOT NULL DEFAULT 'unread'
+    CHECK (coverage_status IN ('unread','in_progress','covered','stale','weak','strong')),
+  edital_weight REAL NOT NULL DEFAULT 1 CHECK (edital_weight BETWEEN 0 AND 10),
+  incidence REAL NOT NULL DEFAULT 0 CHECK (incidence BETWEEN 0 AND 100),
+  tier INTEGER NOT NULL DEFAULT 3 CHECK (tier BETWEEN 1 AND 5),
+  banca_fit REAL NOT NULL DEFAULT 0 CHECK (banca_fit BETWEEN 0 AND 100),
+  overlap_value REAL NOT NULL DEFAULT 0 CHECK (overlap_value BETWEEN 0 AND 100),
+  transfer_kind TEXT NOT NULL DEFAULT 'target_specific'
+    CHECK (transfer_kind IN ('target_specific','shared','partial')),
+  source_kind TEXT NOT NULL DEFAULT 'manual'
+    CHECK (source_kind IN ('course','tec','ls','trilha','manual','bizu')),
+  lesson_id INTEGER REFERENCES lessons(id) ON DELETE RESTRICT,
+  material_id INTEGER REFERENCES materials(id) ON DELETE RESTRICT,
+  tec_source_url TEXT,
+  tec_source_id TEXT,
+  planned_questions INTEGER NOT NULL DEFAULT 0 CHECK (planned_questions >= 0),
+  review_debt REAL NOT NULL DEFAULT 0 CHECK (review_debt BETWEEN 0 AND 100),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (target_slug, discipline, topic),
+  CHECK (material_id IS NULL OR lesson_id IS NOT NULL),
+  CHECK (tec_source_url IS NULL OR tec_source_url GLOB 'http*://*')
+);
+""",
+            """
+CREATE TABLE planner_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
+  target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+  plan_date TEXT NOT NULL CHECK (length(plan_date) = 10 AND date(plan_date) = plan_date),
+  phase TEXT NOT NULL CHECK (phase IN ('pre_edital','pos_edital')),
+  daily_quota INTEGER NOT NULL CHECK (daily_quota BETWEEN 1 AND 8),
+  time_budget_minutes INTEGER NOT NULL CHECK (time_budget_minutes BETWEEN 15 AND 720),
+  algorithm_version TEXT NOT NULL CHECK (length(trim(algorithm_version)) > 0),
+  input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
+  supersedes_run_id INTEGER REFERENCES planner_runs(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL CHECK (status IN ('generated','shortfall')),
+  shortfall_count INTEGER NOT NULL DEFAULT 0 CHECK (shortfall_count >= 0),
+  shortfall_reasons_json TEXT NOT NULL DEFAULT '[]'
+    CHECK (
+      json_valid(shortfall_reasons_json)
+      AND json_type(shortfall_reasons_json) = 'array'
+      AND json_array_length(shortfall_reasons_json) = shortfall_count
+    ),
+  generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (
+    (status='generated' AND shortfall_count=0)
+    OR (status='shortfall' AND shortfall_count > 0)
+  )
+);
+""",
+            """
+CREATE TABLE planner_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES planner_runs(id) ON DELETE RESTRICT,
+  candidate_key TEXT NOT NULL CHECK (length(trim(candidate_key)) > 0),
+  target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+  discipline TEXT NOT NULL CHECK (length(trim(discipline)) > 0),
+  topic TEXT NOT NULL CHECK (length(trim(topic)) > 0),
+  block_kind TEXT NOT NULL CHECK (block_kind IN ('theory','questions','review')),
+  source_kind TEXT NOT NULL
+    CHECK (source_kind IN ('course','tec','ls','trilha','manual','bizu')),
+  target_topic_id INTEGER REFERENCES target_topics(id) ON DELETE RESTRICT,
+  lesson_id INTEGER REFERENCES lessons(id) ON DELETE RESTRICT,
+  material_id INTEGER REFERENCES materials(id) ON DELETE RESTRICT,
+  duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 45 AND 75),
+  planned_questions INTEGER NOT NULL DEFAULT 0 CHECK (planned_questions >= 0),
+  weakness INTEGER NOT NULL CHECK (weakness BETWEEN 0 AND 10000),
+  incidence INTEGER NOT NULL CHECK (incidence BETWEEN 0 AND 10000),
+  tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 10000),
+  coverage_need INTEGER NOT NULL CHECK (coverage_need BETWEEN 0 AND 10000),
+  review_debt INTEGER NOT NULL CHECK (review_debt BETWEEN 0 AND 10000),
+  ls_alignment INTEGER NOT NULL CHECK (ls_alignment BETWEEN 0 AND 10000),
+  target_fit INTEGER NOT NULL CHECK (target_fit BETWEEN 0 AND 10000),
+  overlap_value INTEGER NOT NULL CHECK (overlap_value BETWEEN 0 AND 10000),
+  deadline_pressure INTEGER NOT NULL CHECK (deadline_pressure BETWEEN 0 AND 10000),
+  banca_fit INTEGER NOT NULL CHECK (banca_fit BETWEEN 0 AND 10000),
+  edital_weight INTEGER NOT NULL CHECK (edital_weight BETWEEN 0 AND 10000),
+  balance_penalty INTEGER NOT NULL DEFAULT 0 CHECK (balance_penalty BETWEEN 0 AND 10000),
+  low_trust_penalty INTEGER NOT NULL DEFAULT 0 CHECK (low_trust_penalty BETWEEN 0 AND 10000),
+  final_score INTEGER NOT NULL CHECK (final_score BETWEEN -1000000000 AND 1000000000),
+  chosen_position INTEGER CHECK (chosen_position IS NULL OR chosen_position > 0),
+  displaced_by_candidate_key TEXT,
+  stop_reason TEXT,
+  evidence_json TEXT NOT NULL DEFAULT '{}'
+    CHECK (json_valid(evidence_json) AND json_type(evidence_json) = 'object'),
+  UNIQUE (run_id, candidate_key),
+  UNIQUE (run_id, chosen_position),
+  CHECK (material_id IS NULL OR lesson_id IS NOT NULL),
+  CHECK (
+    (block_kind='theory' AND planned_questions=0)
+    OR (block_kind IN ('questions','review') AND planned_questions > 0)
+  ),
+  CHECK (
+    chosen_position IS NULL
+    OR (stop_reason IS NULL AND displaced_by_candidate_key IS NULL)
+  ),
+  CHECK (stop_reason IS NULL OR displaced_by_candidate_key IS NULL)
+);
+""",
+            """
+CREATE TABLE planner_blocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES planner_runs(id) ON DELETE RESTRICT,
+  candidate_id INTEGER NOT NULL UNIQUE REFERENCES planner_candidates(id) ON DELETE RESTRICT,
+  target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+  scheduled_date TEXT NOT NULL
+    CHECK (length(scheduled_date) = 10 AND date(scheduled_date) = scheduled_date),
+  position INTEGER NOT NULL CHECK (position > 0),
+  block_kind TEXT NOT NULL CHECK (block_kind IN ('theory','questions','review')),
+  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+  duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 45 AND 75),
+  planned_questions INTEGER NOT NULL DEFAULT 0 CHECK (planned_questions >= 0),
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending','active','completed','skipped','failed')),
+  execution_session_id INTEGER REFERENCES study_sessions(id) ON DELETE RESTRICT,
+  questions_done INTEGER NOT NULL DEFAULT 0 CHECK (questions_done >= 0),
+  correct_count INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
+  wrong_count INTEGER NOT NULL DEFAULT 0 CHECK (wrong_count >= 0),
+  doubt_count INTEGER NOT NULL DEFAULT 0 CHECK (doubt_count >= 0),
+  favorite_count INTEGER NOT NULL DEFAULT 0 CHECK (favorite_count >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (run_id, position),
+  CHECK (correct_count + wrong_count <= questions_done),
+  CHECK (
+    (block_kind='theory' AND planned_questions=0 AND questions_done=0)
+    OR (block_kind IN ('questions','review') AND planned_questions > 0)
+  ),
+  CHECK (
+    state NOT IN ('pending','active')
+    OR (
+      questions_done=0 AND correct_count=0 AND wrong_count=0
+      AND doubt_count=0 AND favorite_count=0
+    )
+  )
+);
+""",
+            "CREATE INDEX idx_target_topics_target_active ON target_topics(target_slug, active);",
+            "CREATE INDEX idx_target_topics_material ON target_topics(material_id);",
+            "CREATE INDEX idx_planner_runs_target_date ON planner_runs(target_slug, plan_date, id);",
+            "CREATE INDEX idx_planner_candidates_run_score ON planner_candidates(run_id, final_score DESC, candidate_key);",
+            "CREATE INDEX idx_planner_candidates_run_chosen ON planner_candidates(run_id, chosen_position);",
+            "CREATE INDEX idx_planner_blocks_target_date_state ON planner_blocks(target_slug, scheduled_date, state);",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

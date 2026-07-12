@@ -4,7 +4,11 @@ import sqlite3
 import pytest
 
 from study_os_service.db.connection import connect_database
-from study_os_service.db.migrations import MIGRATIONS, MigrationRunner
+from study_os_service.db.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MIGRATIONS,
+    MigrationRunner,
+)
 
 
 def install_version_three(connection: sqlite3.Connection) -> None:
@@ -91,7 +95,7 @@ def test_version_three_upgrades_without_losing_inventory(tmp_path: Path):
         install_version_three(connection)
         lesson_id, material_id = seed_inventory(connection)
 
-        assert MigrationRunner(connection).migrate() == 4
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
 
         assert {"progress_states", "study_sessions"} <= table_names(connection)
         assert connection.execute(
@@ -105,7 +109,7 @@ def test_version_three_upgrades_without_losing_inventory(tmp_path: Path):
             for row in connection.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2, 3, 4]
+        ] == list(range(1, CURRENT_SCHEMA_VERSION + 1))
     finally:
         connection.close()
 
