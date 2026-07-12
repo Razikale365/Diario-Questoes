@@ -156,11 +156,11 @@ import_issues
 - JSON columns have valid defaults;
 - enum-like fields use CHECK constraints.
 
-- [ ] Write empty-to-v2 and v1-to-v2 migration tests.
-- [ ] Test idempotence, exact constraints, and rollback on migration failure.
-- [ ] Add repository CRUD for package/root registration and inventory reads.
-- [ ] Test target isolation and canonical-path uniqueness.
-- [ ] Commit: `feat: add Study OS inventory schema`.
+- [x] Write empty-to-v2 and v1-to-v2 migration tests.
+- [x] Test idempotence, exact constraints, and rollback on migration failure.
+- [x] Add repository CRUD for package/root registration and inventory reads.
+- [x] Test target isolation and canonical-path uniqueness.
+- [x] Commit: `feat: add Study OS inventory schema` (`2c21827`).
 
 ## Task 3: Parse Lessons and Classify Material Variants
 
@@ -198,10 +198,10 @@ Default trust/primary behavior:
 | track | 4 | no |
 | bizu | 2 | never |
 
-- [ ] Write failing tests for every audited filename and false positives.
-- [ ] Test original preference, simplified override, and Bizu-only returning no primary.
-- [ ] Implement pure functions without filesystem or database access.
-- [ ] Commit: `feat: parse Study OS course materials`.
+- [x] Write failing tests for every audited filename and false positives.
+- [x] Test original preference, simplified override, and Bizu-only returning no primary.
+- [x] Implement pure functions without filesystem or database access.
+- [x] Commit: `feat: parse Study OS course materials` (`c878499`).
 
 ## Task 4: Build a Metadata-Only Filesystem Scanner
 
@@ -218,16 +218,16 @@ scan_course_root(root: Path, target_slug: str, provider: str) -> CourseScanSnaps
 
 The immutable snapshot contains discovered courses, discipline candidates, lessons, materials, and issues. Each material records only resolved path, normalized relative path, size, and nanosecond modified time.
 
-- [ ] Build temporary fixture trees using the exact audited names above.
-- [ ] Prove the course directory is the segment immediately above `PDF`, not `PDF` itself.
-- [ ] Prove lesson number comes from the filename.
-- [ ] Reject a nonexistent root, a file passed as root, and files resolving outside the root.
-- [ ] Ignore unsupported files and count uppercase `.PDF`.
-- [ ] Keep duplicate course providers as separate courses.
-- [ ] Emit issues for unknown discipline/lesson mappings without dropping the file.
-- [ ] Monkeypatch PDF readers to fail if called; scanner tests must still pass.
-- [ ] Generate 3,589 empty PDFs and assert exact count and bounded runtime without reading content.
-- [ ] Commit: `feat: scan Study OS course metadata`.
+- [x] Build temporary fixture trees using the exact audited names above.
+- [x] Prove the course directory is the segment immediately above `PDF`, not `PDF` itself.
+- [x] Prove lesson number comes from the filename.
+- [x] Reject a nonexistent root, a file passed as root, and files resolving outside the root.
+- [x] Ignore unsupported files and count uppercase `.PDF`.
+- [x] Keep duplicate course providers as separate courses.
+- [x] Emit issues for unknown discipline/lesson mappings without dropping the file.
+- [x] Monkeypatch PDF readers to fail if called; scanner tests must still pass.
+- [x] Generate 3,589 empty PDFs and assert exact count and bounded runtime without reading content.
+- [x] Commit: `feat: scan Study OS course metadata` (`77408a4`).
 
 ## Task 5: Reconcile Scans Transactionally
 
@@ -243,16 +243,16 @@ The immutable snapshot contains discovered courses, discipline candidates, lesso
 InventoryService.scan_and_reconcile(root_id: int) -> ImportRunSummary
 ```
 
-- [ ] Register an import run before scanning and finish it as `completed` or `failed` with an error message.
-- [ ] Reconcile courses, disciplines, lessons, and materials in one `BEGIN IMMEDIATE` transaction.
-- [ ] Prove identical rescan preserves IDs and produces no duplicates.
-- [ ] Mark missing materials and empty lessons unavailable; do not delete rows.
-- [ ] Preserve manually selected primary material unless it disappeared or became disallowed.
-- [ ] Recompute automatic primary deterministically for new lessons.
-- [ ] Emit a rename proposal issue when size, lesson, kind, and modified metadata plausibly match; do not silently move identity.
-- [ ] Roll back all inventory changes if reconciliation fails, while recording the failed import run in a separate short transaction.
-- [ ] Prove a future progress row referencing a material would remain valid after the material disappears.
-- [ ] Commit: `feat: reconcile Study OS course scans`.
+- [x] Register an import run before scanning and finish it as `completed` or `failed` with an error message.
+- [x] Reconcile courses, disciplines, lessons, and materials in one `BEGIN IMMEDIATE` transaction.
+- [x] Prove identical rescan preserves IDs and produces no duplicates.
+- [x] Mark missing materials and empty lessons unavailable; do not delete rows.
+- [x] Preserve manually selected primary material unless it disappeared or became disallowed.
+- [x] Recompute automatic primary deterministically for new lessons.
+- [x] Emit a rename proposal issue when size, lesson, kind, and modified metadata plausibly match; do not silently move identity.
+- [x] Roll back all inventory changes if reconciliation fails, while recording the failed import run in a separate short transaction.
+- [x] Prove a future progress row referencing a material would remain valid after the material disappears.
+- [x] Commit: `feat: reconcile Study OS course scans` (`1104b8e`).
 
 ## Task 6: Expose Inventory and Safe File APIs
 
@@ -277,16 +277,16 @@ PUT  /api/v1/lessons/{id}/mapping
 GET  /api/v1/materials/{id}/file
 ```
 
-- [ ] Validate root paths and package metadata with structured `{code,message}` errors.
-- [ ] Make root registration idempotent by canonical path.
-- [ ] Run scan/reconcile off the event loop with a new SQLite connection owned by the worker.
-- [ ] Return a scan id immediately; expose `queued`, `running`, `completed`, and `failed` states.
-- [ ] Make repeated scan submission for the same active root return the active run instead of duplicating work.
-- [ ] Return courses grouped with counts and issue summaries; paginate lesson lists.
-- [ ] Allow manual discipline/title mapping without mutating filesystem-derived evidence.
-- [ ] Resolve file requests by material id, re-resolve the registered root and file path, reject escape/traversal, require an available PDF, and serve inline with range support.
-- [ ] Test another target/root cannot access mismatched inventory through query filters.
-- [ ] Commit: `feat: expose Study OS course inventory API`.
+- [x] Validate root paths and package metadata with structured `{code,message}` errors.
+- [x] Make root registration idempotent by canonical path.
+- [x] Run scan/reconcile off the event loop with a new SQLite connection owned by the worker.
+- [x] Return a scan id immediately; expose `queued`, `running`, `completed`, and `failed` states.
+- [x] Make repeated scan submission for the same active root return the active run instead of duplicating work.
+- [x] Return courses grouped with counts and issue summaries; paginate lesson lists in SQLite.
+- [x] Allow manual discipline/title mapping without mutating filesystem-derived evidence.
+- [x] Resolve file requests by material id, re-resolve the registered root and file path, reject escape/traversal, require an available PDF, and serve inline with range support.
+- [x] Test another target/root cannot access mismatched inventory through query filters.
+- [x] Commit: `feat: expose Study OS course inventory API` (`c5e65a8`).
 
 ## Task 7: Add Typed Inventory Client and Package Setup UI
 
@@ -306,12 +306,12 @@ GET  /api/v1/materials/{id}/file
 - empty state for `selected but not downloaded`, `downloaded but not registered`, and `registered but not scanned`;
 - service unavailable state keeps existing planner usable.
 
-- [ ] Write parser tests for every DTO and structured API error.
-- [ ] Fetch setup and inventory in parallel after service health succeeds.
-- [ ] Do not poll globally; poll only an active scan and abort on unmount.
-- [ ] Keep the operational layout dense, unframed where possible, and responsive without document overflow.
-- [ ] Preserve the existing target selector and current Study OS planning state.
-- [ ] Commit: `feat: manage Study OS course inventory`.
+- [x] Write parser tests for every DTO and structured API error.
+- [x] Fetch setup and inventory in parallel after service health succeeds.
+- [x] Do not poll globally; poll only an active scan and abort on unmount.
+- [x] Keep the operational layout dense, unframed where possible, and responsive without document overflow.
+- [x] Preserve the existing target selector and current Study OS planning state.
+- [x] Commit: `feat: manage Study OS course inventory` (`0544b9c`).
 
 ## Task 8: Verify the Newly Downloaded Real Package
 

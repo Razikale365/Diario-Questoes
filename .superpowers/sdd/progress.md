@@ -30,8 +30,8 @@ Plan: `docs/superpowers/plans/2026-07-11-study-os-m2-course-inventory.md`
 | 2. Inventory schema version 2 | complete | `ab52696` | `2c21827` | 71 pytest, compileall, diff-check | manual spec and quality review approved; external reviewer unavailable |
 | 3. Lesson parser and material classifier | complete | `2c21827` | `c878499` | 32 focused, 103 full pytest, compileall, diff-check | manual spec and quality review approved |
 | 4. Metadata-only filesystem scanner | complete | `c878499` | `77408a4` | 9 focused + 1 symlink skip, 112 full pytest, 3,589-file fixture | manual spec and quality review approved |
-| 5. Transactional scan reconciliation | pending | pending | pending | pending | pending |
-| 6. Inventory and safe file APIs | pending | pending | pending | pending | pending |
-| 7. Typed inventory client and setup UI | pending | pending | pending | pending | pending |
+| 5. Transactional scan reconciliation | complete | `46c3fa8` | `1104b8e` | 8 focused, 120 full pytest, compileall, diff-check | manual spec and quality review approved; external reviewer unavailable |
+| 6. Inventory and safe file APIs | complete | `1104b8e` | `c5e65a8` | 133 pytest, compileall, diff-check; async/range/target/error tests | manual spec and quality review approved; external reviewer usage-limited |
+| 7. Typed inventory client and setup UI | complete | `c5e65a8` | `0544b9c` | 132 frontend tests, tsc, build; empty/fixture/rescan smoke at desktop and 390px | manual spec and quality review approved; polling defect found and fixed during browser smoke |
 | 8. Newly downloaded real package verification | pending | pending | pending | pending | pending |
 | 9. M2 gate and M3 plan | pending | pending | pending | pending | pending |
