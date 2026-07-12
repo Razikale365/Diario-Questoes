@@ -156,7 +156,7 @@ def test_version_two_database_adds_manual_lesson_mapping_state(tmp_path: Path):
     try:
         install_version_two(connection)
 
-        assert MigrationRunner(connection).migrate() == 3
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
         columns = {
             row["name"]: row
             for row in connection.execute("PRAGMA table_info(lessons)")

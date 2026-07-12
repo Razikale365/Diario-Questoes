@@ -186,6 +186,76 @@ ADD COLUMN mapping_source TEXT NOT NULL DEFAULT 'automatic'
 """,
         ),
     ),
+    (
+        4,
+        (
+            """
+CREATE TABLE progress_states (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE RESTRICT,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL DEFAULT 'unread'
+    CHECK (status IN ('unread','in_progress','covered','stale','weak','strong')),
+  cursor_page INTEGER NOT NULL DEFAULT 1 CHECK (cursor_page >= 1),
+  furthest_page INTEGER NOT NULL DEFAULT 1 CHECK (furthest_page >= cursor_page),
+  completed_at TEXT,
+  last_seen_at TEXT,
+  confidence REAL NOT NULL DEFAULT 0 CHECK (confidence BETWEEN 0 AND 1),
+  total_seconds INTEGER NOT NULL DEFAULT 0 CHECK (total_seconds >= 0),
+  session_count INTEGER NOT NULL DEFAULT 0 CHECK (session_count >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (lesson_id, material_id)
+);
+""",
+            """
+CREATE TABLE study_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
+  target_slug TEXT NOT NULL CHECK (length(trim(target_slug)) > 0),
+  lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE RESTRICT,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+  state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active','finished')),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+  start_page INTEGER NOT NULL CHECK (start_page >= 1),
+  end_page INTEGER CHECK (end_page IS NULL OR end_page >= start_page),
+  questions_done INTEGER NOT NULL DEFAULT 0 CHECK (questions_done >= 0),
+  correct_count INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
+  wrong_count INTEGER NOT NULL DEFAULT 0 CHECK (wrong_count >= 0),
+  doubt_count INTEGER NOT NULL DEFAULT 0 CHECK (doubt_count >= 0),
+  favorite_count INTEGER NOT NULL DEFAULT 0 CHECK (favorite_count >= 0),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN ('partial','completed','failed','skipped','abandoned')
+  ),
+  skip_reason TEXT CHECK (
+    skip_reason IS NULL OR skip_reason IN (
+      'lack_of_time','fatigue','wrong_material',
+      'blocked_prerequisite','too_difficult','other'
+    )
+  ),
+  notes TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (
+    (state='active' AND outcome IS NULL AND ended_at IS NULL)
+    OR (state='finished' AND outcome IS NOT NULL AND ended_at IS NOT NULL)
+  ),
+  CHECK (
+    (outcome='skipped' AND skip_reason IS NOT NULL)
+    OR (outcome IS NULL AND skip_reason IS NULL)
+    OR (outcome IS NOT NULL AND outcome!='skipped' AND skip_reason IS NULL)
+  )
+);
+""",
+            "CREATE INDEX idx_progress_material_status ON progress_states(material_id, status);",
+            "CREATE INDEX idx_sessions_target_started ON study_sessions(target_slug, started_at);",
+            "CREATE UNIQUE INDEX idx_sessions_one_active_material ON study_sessions(lesson_id, material_id) WHERE state='active';",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
