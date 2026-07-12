@@ -441,6 +441,198 @@ CREATE TABLE planner_blocks (
             "ALTER TABLE target_topics ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         ),
     ),
+    (
+        7,
+        (
+            "CREATE UNIQUE INDEX ux_target_topics_target_id ON target_topics(target_slug, id);",
+            """
+            CREATE TABLE learning_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              topic_target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              source_kind TEXT NOT NULL CHECK (source_kind IN (
+                'planner_block','study_session','legacy_aggregate','manual'
+              )),
+              source_id TEXT NOT NULL CHECK (length(trim(source_id)) > 0),
+              event_kind TEXT NOT NULL CHECK (event_kind IN (
+                'theory','questions','review','coverage_audit'
+              )),
+              outcome TEXT NOT NULL CHECK (outcome IN (
+                'completed','partial','skipped','failed','imported','audited'
+              )),
+              questions_done INTEGER NOT NULL DEFAULT 0 CHECK (questions_done >= 0),
+              correct_count INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
+              wrong_count INTEGER NOT NULL DEFAULT 0 CHECK (wrong_count >= 0),
+              doubt_count INTEGER NOT NULL DEFAULT 0 CHECK (doubt_count >= 0),
+              favorite_count INTEGER NOT NULL DEFAULT 0 CHECK (favorite_count >= 0),
+              elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+              start_page INTEGER CHECK (start_page >= 1),
+              end_page INTEGER CHECK (end_page >= 1),
+              occurred_at TEXT NOT NULL,
+              evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(evidence_json) AND json_type(evidence_json)='object'),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (source_kind, source_id),
+              FOREIGN KEY (topic_target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              CHECK (correct_count + wrong_count <= questions_done),
+              CHECK (
+                event_kind NOT IN ('theory','coverage_audit') OR (
+                  questions_done=0 AND correct_count=0 AND wrong_count=0
+                  AND doubt_count=0 AND favorite_count=0
+                )
+              ),
+              CHECK (
+                event_kind NOT IN ('questions','review')
+                OR outcome='skipped' OR questions_done > 0
+              ),
+              CHECK (
+                outcome!='skipped' OR (
+                  questions_done=0 AND correct_count=0 AND wrong_count=0
+                  AND doubt_count=0 AND favorite_count=0
+                )
+              ),
+              CHECK (outcome!='partial' OR event_kind='theory'),
+              CHECK (
+                (start_page IS NULL AND end_page IS NULL)
+                OR (event_kind='theory' AND start_page IS NOT NULL
+                    AND end_page IS NOT NULL AND end_page >= start_page)
+              )
+            );
+            """,
+            """
+            CREATE TABLE topic_learning_states (
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              topic_target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              mastery_bp INTEGER NOT NULL DEFAULT 0 CHECK (mastery_bp BETWEEN 0 AND 10000),
+              confidence_bp INTEGER NOT NULL DEFAULT 0 CHECK (confidence_bp BETWEEN 0 AND 10000),
+              coverage_status TEXT NOT NULL DEFAULT 'unread' CHECK (coverage_status IN (
+                'unread','in_progress','covered','stale','weak','strong'
+              )),
+              review_debt_bp INTEGER NOT NULL DEFAULT 0 CHECK (review_debt_bp BETWEEN 0 AND 10000),
+              last_activity_at TEXT,
+              last_success_at TEXT,
+              next_review_date TEXT,
+              stale_at TEXT,
+              success_streak INTEGER NOT NULL DEFAULT 0 CHECK (success_streak >= 0),
+              failure_streak INTEGER NOT NULL DEFAULT 0 CHECK (failure_streak >= 0),
+              event_cursor INTEGER NOT NULL DEFAULT 0 CHECK (event_cursor >= 0),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              PRIMARY KEY (target_slug, target_topic_id),
+              FOREIGN KEY (topic_target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              CHECK (last_success_at IS NULL OR last_activity_at IS NOT NULL),
+              CHECK (next_review_date IS NULL OR date(next_review_date)=next_review_date),
+              CHECK (stale_at IS NULL OR date(stale_at)=stale_at)
+            );
+            """,
+            """
+            CREATE TABLE review_queue_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              topic_target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              due_date TEXT NOT NULL CHECK (date(due_date)=due_date),
+              state TEXT NOT NULL DEFAULT 'pending'
+                CHECK (state IN ('pending','deferred','resolved')),
+              bounded_questions INTEGER NOT NULL
+                CHECK (bounded_questions BETWEEN 5 AND 10),
+              trigger_event_ids_json TEXT NOT NULL
+                CHECK (json_valid(trigger_event_ids_json)
+                  AND json_type(trigger_event_ids_json)='array'
+                  AND json_array_length(trigger_event_ids_json) > 0),
+              reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+              debt_bp INTEGER NOT NULL CHECK (debt_bp BETWEEN 0 AND 10000),
+              attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+              resolved_event_id INTEGER REFERENCES learning_events(id),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              FOREIGN KEY (topic_target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              CHECK (
+                (state='resolved' AND resolved_event_id IS NOT NULL)
+                OR (state!='resolved' AND resolved_event_id IS NULL)
+              )
+            );
+            """,
+            """
+            CREATE TABLE planner_week_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              week_start TEXT NOT NULL CHECK (
+                date(week_start)=week_start AND strftime('%w', week_start)='1'
+              ),
+              phase TEXT NOT NULL CHECK (phase IN ('pre_edital','pos_edital')),
+              algorithm_version TEXT NOT NULL CHECK (length(trim(algorithm_version)) > 0),
+              input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
+              supersedes_week_run_id INTEGER REFERENCES planner_week_runs(id),
+              status TEXT NOT NULL CHECK (status IN ('generated','shortfall')),
+              shortfall_count INTEGER NOT NULL DEFAULT 0 CHECK (shortfall_count >= 0),
+              shortfall_reasons_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(shortfall_reasons_json)
+                  AND json_type(shortfall_reasons_json)='array'),
+              generated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              CHECK (supersedes_week_run_id IS NULL OR supersedes_week_run_id != id),
+              CHECK (
+                (status='generated' AND shortfall_count=0
+                  AND json_array_length(shortfall_reasons_json)=0)
+                OR (status='shortfall' AND shortfall_count > 0
+                  AND json_array_length(shortfall_reasons_json)=shortfall_count)
+              )
+            );
+            """,
+            "CREATE UNIQUE INDEX ux_planner_week_runs_id_target ON planner_week_runs(id, target_slug);",
+            """
+            CREATE TABLE planner_week_slots (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              week_run_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              scheduled_date TEXT NOT NULL CHECK (date(scheduled_date)=scheduled_date),
+              position INTEGER NOT NULL CHECK (position >= 1),
+              candidate_key TEXT NOT NULL CHECK (length(trim(candidate_key)) > 0),
+              topic_target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              block_kind TEXT NOT NULL CHECK (block_kind IN ('theory','questions','review')),
+              duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 45 AND 75),
+              planned_questions INTEGER NOT NULL DEFAULT 0 CHECK (planned_questions >= 0),
+              score_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(score_json) AND json_type(score_json)='object'),
+              evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(evidence_json) AND json_type(evidence_json)='object'),
+              state TEXT NOT NULL DEFAULT 'forecast'
+                CHECK (state IN ('forecast','materialized','skipped')),
+              day_run_id INTEGER REFERENCES planner_runs(id),
+              day_block_id INTEGER REFERENCES planner_blocks(id),
+              UNIQUE (week_run_id, scheduled_date, position),
+              FOREIGN KEY (week_run_id, target_slug)
+                REFERENCES planner_week_runs(id, target_slug),
+              FOREIGN KEY (topic_target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              CHECK (
+                (block_kind='theory' AND planned_questions=0)
+                OR (block_kind IN ('questions','review') AND planned_questions > 0)
+              ),
+              CHECK (
+                (state='materialized' AND day_run_id IS NOT NULL AND day_block_id IS NOT NULL)
+                OR (state!='materialized' AND day_run_id IS NULL AND day_block_id IS NULL)
+              )
+            );
+            """,
+            "CREATE INDEX idx_learning_events_target_topic_time ON learning_events(target_slug, target_topic_id, occurred_at, id);",
+            "CREATE INDEX idx_learning_events_source ON learning_events(source_kind, source_id);",
+            "CREATE INDEX idx_topic_learning_states_due ON topic_learning_states(target_slug, next_review_date, stale_at);",
+            "CREATE INDEX idx_review_queue_due ON review_queue_items(target_slug, state, due_date, debt_bp DESC);",
+            "CREATE UNIQUE INDEX ux_review_queue_open_topic ON review_queue_items(target_slug, target_topic_id) WHERE state IN ('pending','deferred');",
+            "CREATE INDEX idx_planner_week_runs_target_week ON planner_week_runs(target_slug, week_start, id);",
+            "CREATE INDEX idx_planner_week_slots_date ON planner_week_slots(target_slug, scheduled_date, position);",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
