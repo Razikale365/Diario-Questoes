@@ -8,6 +8,14 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $venvRoot = Join-Path $repoRoot '.venv-study-os'
 $venvPython = Join-Path $venvRoot 'Scripts\python.exe'
+$pyprojectPath = Join-Path $repoRoot 'pyproject.toml'
+$dependencyStamp = Join-Path $venvRoot 'study-os-pyproject.sha256'
+$dependencyHash = (Get-FileHash -LiteralPath $pyprojectPath -Algorithm SHA256).Hash
+$installedDependencyHash = if (Test-Path -LiteralPath $dependencyStamp) {
+  (Get-Content -LiteralPath $dependencyStamp -Raw).Trim()
+} else {
+  ''
+}
 $healthUrl = 'http://127.0.0.1:4317/api/v1/health'
 $service = $null
 $viteExitCode = 0
@@ -30,17 +38,19 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
   if ($LASTEXITCODE -ne 0) {
     throw 'Could not create .venv-study-os.'
   }
-  if (-not $SkipInstall) {
-    Write-Host 'Installing Study OS local service dependencies...'
-    & $venvPython -m pip install '.[dev]'
-    if ($LASTEXITCODE -ne 0) {
-      throw 'Could not install Study OS service dependencies.'
-    }
-  }
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
   throw 'Study OS virtual environment is incomplete: python.exe is missing.'
+}
+
+if (-not $SkipInstall -and $installedDependencyHash -ne $dependencyHash) {
+  Write-Host 'Installing updated Study OS local service dependencies...'
+  & $venvPython -m pip install '.[dev]'
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Could not install Study OS service dependencies.'
+  }
+  Set-Content -LiteralPath $dependencyStamp -Value $dependencyHash -NoNewline
 }
 
 try {

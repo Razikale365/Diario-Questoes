@@ -290,6 +290,24 @@ class InventoryRepository:
     def count_roots(self) -> int:
         return self.connection.execute("SELECT COUNT(*) FROM course_roots").fetchone()[0]
 
+    def update_material_page_metadata(
+        self, material_id: int, *, page_count: int, page_offset: int
+    ) -> None:
+        if isinstance(page_count, bool) or not isinstance(page_count, int) or page_count < 1:
+            raise ValueError("page count must be a positive integer")
+        if isinstance(page_offset, bool) or not isinstance(page_offset, int) or page_offset < 0:
+            raise ValueError("page offset must be a non-negative integer")
+        cursor = self.connection.execute(
+            """
+            UPDATE materials
+            SET page_count=?, page_offset=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (page_count, page_offset, material_id),
+        )
+        if cursor.rowcount == 0:
+            raise KeyError(f"material {material_id} does not exist")
+
     def list_courses(
         self,
         *,
