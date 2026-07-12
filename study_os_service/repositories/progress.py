@@ -154,6 +154,38 @@ class ProgressRepository:
             raise ProgressConflictError("progress changed before session update")
         return self._required(lesson_id, material_id)
 
+    def set_status(
+        self,
+        lesson_id: int,
+        material_id: int,
+        *,
+        status: ProgressStatus,
+        expected_version: int,
+    ) -> ProgressState:
+        if status not in {"unread", "in_progress", "covered", "stale", "weak", "strong"}:
+            raise ValueError("invalid progress status")
+        self._validate_positive(expected_version, "expected version")
+        current = self.get_or_create(lesson_id, material_id)
+        self._validate_version(current, expected_version)
+        confidence = current.confidence
+        if status == "weak":
+            confidence = min(confidence, 0.3)
+        elif status == "strong":
+            confidence = max(confidence, 0.9)
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            UPDATE progress_states
+            SET status=?, confidence=?, last_seen_at=?, version=version+1,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND version=?
+            """,
+            (status, confidence, now, current.id, expected_version),
+        )
+        if cursor.rowcount == 0:
+            raise ProgressConflictError("progress changed before status update")
+        return self._required(lesson_id, material_id)
+
     def list_for_target(self, target_slug: str) -> list[ProgressState]:
         rows = self.connection.execute(
             """
