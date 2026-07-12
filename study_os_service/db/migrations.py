@@ -449,9 +449,9 @@ CREATE TABLE planner_blocks (
             CREATE TABLE learning_events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
-              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
-              topic_target_slug TEXT NOT NULL,
-              target_topic_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL CHECK (length(trim(target_slug)) > 0),
+              topic_target_slug TEXT,
+              target_topic_id INTEGER,
               source_kind TEXT NOT NULL CHECK (source_kind IN (
                 'planner_block','study_session','legacy_aggregate','manual'
               )),
@@ -460,7 +460,7 @@ CREATE TABLE planner_blocks (
                 'theory','questions','review','coverage_audit'
               )),
               outcome TEXT NOT NULL CHECK (outcome IN (
-                'completed','partial','skipped','failed','imported','audited'
+                'completed','partial','skipped','failed','abandoned','imported','audited'
               )),
               questions_done INTEGER NOT NULL DEFAULT 0 CHECK (questions_done >= 0),
               correct_count INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
@@ -477,16 +477,20 @@ CREATE TABLE planner_blocks (
               UNIQUE (source_kind, source_id),
               FOREIGN KEY (topic_target_slug, target_topic_id)
                 REFERENCES target_topics(target_slug, id),
+              CHECK (
+                (topic_target_slug IS NULL AND target_topic_id IS NULL)
+                OR (topic_target_slug IS NOT NULL AND target_topic_id IS NOT NULL)
+              ),
               CHECK (correct_count + wrong_count <= questions_done),
               CHECK (
-                event_kind NOT IN ('theory','coverage_audit') OR (
+                event_kind!='coverage_audit' OR (
                   questions_done=0 AND correct_count=0 AND wrong_count=0
                   AND doubt_count=0 AND favorite_count=0
                 )
               ),
               CHECK (
                 event_kind NOT IN ('questions','review')
-                OR outcome='skipped' OR questions_done > 0
+                OR outcome IN ('skipped','failed') OR questions_done > 0
               ),
               CHECK (
                 outcome!='skipped' OR (

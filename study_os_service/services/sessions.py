@@ -19,6 +19,7 @@ from study_os_service.repositories.sessions import (
     MaterialExecutionContext,
     SessionRepository,
 )
+from study_os_service.services.learning_projection import LearningProjectionService
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class SessionService:
         self.sessions = SessionRepository(connection)
         self.progress = ProgressRepository(connection)
         self.planner = PlannerRunRepository(connection)
+        self.learning = LearningProjectionService(connection)
 
     def start(
         self,
@@ -215,6 +217,7 @@ class SessionService:
                     "abandoned": "pending",
                 }[outcome],
             )
+            self.learning.record_study_session(session)
             self.connection.commit()
             return SessionResult(session=session, progress=progress)
         except Exception:
@@ -263,6 +266,7 @@ class SessionService:
                 session.id,
                 state="skipped",
             )
+            self.learning.record_study_session(session)
             self.connection.commit()
             return SessionResult(session=session, progress=progress)
         except Exception:

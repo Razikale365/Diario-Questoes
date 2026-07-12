@@ -22,6 +22,7 @@ from study_os_service.services.planner_candidates import (
     build_candidates,
     collect_candidate_evidence,
 )
+from study_os_service.services.learning_projection import LearningProjectionService
 from study_os_service.services.planner_profiles import TargetProfileNotFoundError
 from study_os_service.services.planner_scoring import (
     ALGORITHM_VERSION,
@@ -64,6 +65,7 @@ class PlannerGenerationService:
         self.connection = connection
         self.profiles = PlannerProfileRepository(connection)
         self.repository = PlannerRunRepository(connection)
+        self.learning = LearningProjectionService(connection)
 
     def generate_day(
         self,
@@ -291,6 +293,7 @@ class PlannerGenerationService:
                 favorite_count=favorite_count,
                 expected_version=expected_version,
             )
+            self.learning.record_planner_block(saved)
             self.connection.commit()
             return saved
         except Exception:

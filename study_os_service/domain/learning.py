@@ -14,7 +14,7 @@ LearningEventKind = Literal[
     "theory", "questions", "review", "coverage_audit"
 ]
 LearningOutcome = Literal[
-    "completed", "partial", "skipped", "failed", "imported", "audited"
+    "completed", "partial", "skipped", "failed", "abandoned", "imported", "audited"
 ]
 ReviewQueueState = Literal["pending", "deferred", "resolved"]
 CoverageStatus = Literal[
@@ -25,7 +25,9 @@ _SOURCE_KINDS = {
     "planner_block", "study_session", "legacy_aggregate", "manual"
 }
 _EVENT_KINDS = {"theory", "questions", "review", "coverage_audit"}
-_OUTCOMES = {"completed", "partial", "skipped", "failed", "imported", "audited"}
+_OUTCOMES = {
+    "completed", "partial", "skipped", "failed", "abandoned", "imported", "audited"
+}
 _REVIEW_STATES = {"pending", "deferred", "resolved"}
 _COVERAGE_STATUSES = {
     "unread", "in_progress", "covered", "stale", "weak", "strong"
@@ -125,8 +127,8 @@ class LearningEvent:
     id: int
     idempotency_key: str
     target_slug: str
-    topic_target_slug: str
-    target_topic_id: int
+    topic_target_slug: str | None
+    target_topic_id: int | None
     source_kind: LearningSourceKind
     source_id: str
     event_kind: LearningEventKind
@@ -149,12 +151,15 @@ class LearningEvent:
             self, "idempotency_key", _text(self.idempotency_key, "idempotency key")
         )
         object.__setattr__(self, "target_slug", _text(self.target_slug, "target"))
-        object.__setattr__(
-            self,
-            "topic_target_slug",
-            _text(self.topic_target_slug, "topic target"),
-        )
-        _positive(self.target_topic_id, "target topic id")
+        if (self.topic_target_slug is None) != (self.target_topic_id is None):
+            raise ValueError("topic target and topic id must be provided together")
+        if self.topic_target_slug is not None and self.target_topic_id is not None:
+            object.__setattr__(
+                self,
+                "topic_target_slug",
+                _text(self.topic_target_slug, "topic target"),
+            )
+            _positive(self.target_topic_id, "target topic id")
         if self.source_kind not in _SOURCE_KINDS:
             raise ValueError("invalid learning source kind")
         object.__setattr__(self, "source_id", _text(self.source_id, "source id"))
@@ -171,11 +176,11 @@ class LearningEvent:
         }
         if counts["correct count"] + counts["wrong count"] > counts["questions done"]:
             raise ValueError("result counts exceed questions done")
-        if self.event_kind in {"theory", "coverage_audit"} and any(counts.values()):
-            raise ValueError("theory and coverage audit events cannot contain question counts")
+        if self.event_kind == "coverage_audit" and any(counts.values()):
+            raise ValueError("coverage audit events cannot contain question counts")
         if (
             self.event_kind in {"questions", "review"}
-            and self.outcome != "skipped"
+            and self.outcome not in {"skipped", "failed"}
             and counts["questions done"] < 1
         ):
             raise ValueError("question and review events require a result count")

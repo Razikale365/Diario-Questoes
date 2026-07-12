@@ -151,9 +151,9 @@ def test_learning_event_rejects_proprietary_question_payloads(evidence):
 def test_learning_event_checks_aggregate_and_page_contracts():
     with pytest.raises(ValueError, match="result counts"):
         make_event(questions_done=10, correct_count=8, wrong_count=3)
-    with pytest.raises(ValueError, match="theory"):
+    with pytest.raises(ValueError, match="coverage audit"):
         make_event(
-            event_kind="theory",
+            event_kind="coverage_audit",
             questions_done=1,
             correct_count=0,
             wrong_count=0,
@@ -171,6 +171,16 @@ def test_learning_event_checks_aggregate_and_page_contracts():
         start_page=1,
         end_page=25,
     ).end_page == 25
+    assert make_event(
+        topic_target_slug=None,
+        target_topic_id=None,
+        event_kind="theory",
+        outcome="abandoned",
+        questions_done=0,
+        correct_count=0,
+        wrong_count=0,
+        doubt_count=0,
+    ).target_topic_id is None
 
 
 @pytest.mark.parametrize("questions", [4, 11])
