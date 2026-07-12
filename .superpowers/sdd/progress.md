@@ -60,3 +60,43 @@ Plan: `docs/superpowers/plans/2026-07-11-study-os-m3-progress-sessions.md`
 - With all HTTPS requests blocked, the app reloaded, loaded the course inventory, finished and resumed a session, opened the local PDF, and completed the session. CDP observed only `http://localhost:3000` requests and no console errors.
 - The legacy gate path `src/lib/question-deck.test.mjs` never existed in this repository; the maintained equivalent is `src/utils/questionCardDeck.test.ts`, which is also included by `npm test`.
 - M3 completion is fixture-backed. M2 Tasks 1, 8, and 9 remain open until package `249654` is freshly downloaded and validated from Estratégia.
+
+## M4: Autonomous Target-Aware Day
+
+Plan: `docs/superpowers/plans/2026-07-12-study-os-m4-autonomous-day.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Planner schema and domain | complete | `eed0df9` | `b2651c9` | migration/domain regression, full pytest | target-owned immutable records approved |
+| 2. Editable targets and topic evidence | complete | `b2651c9` | `1fa9049` | seed/profile/API tests | reseed preserves edits; SEFAZ Finanças Públicas weight 2 covered |
+| 3. Executable candidates and stop evidence | complete | `1fa9049` | `7037e1c` | all ten stop conditions | low-trust and transfer safeguards approved |
+| 4. Deterministic target-aware scoring | complete | `7037e1c` | `ef9ba2a` | scoring/tie/input-hash tests | basis-point ordering approved |
+| 5. Idempotent balanced day and refresh | complete | `ef9ba2a` | `c4d4829` | BACEN/RFB full-day, shortfall, concurrency, refresh tests | immutable supersession approved |
+| 6. Strict client and execution links | complete | `c4d4829` | `2d70475` | parser/request/session-link tests | exact-page linkage and partial resume approved |
+| 7. Autonomous Home command center | complete | `2d70475` | `ed90f43` | 151 frontend tests, tsc, build, desktop/390px smoke | target/day/score/result flow approved |
+| 8. Durability and adaptive refresh gate | complete | `ed90f43` | `c94dc28` | 277 pytest, 1 skipped; 151 frontend; compileall, tsc, build, fresh-process/backup/offline gates | TEC-without-PDF evidence and target-load race found and fixed |
+
+### M4 Acceptance Evidence
+
+- A second fresh Uvicorn process opened the same schema-v6 database and returned byte-identical persisted day JSON (`BF90FD06EF076F0E` hash prefix) to the running service.
+- Backup `data/study-os/backups/study-os-20260712T223719Z.sqlite3` passed `PRAGMA integrity_check` and matched target, topic, run, candidate, block, and session table counts/hashes.
+- `test_planner_durability.py` proves partial exact-page theory, completed TEC, skipped TEC, failed review, adaptive supersession, prior-run immutability, restart, and backup restore in one regression.
+- The durability gate exposed and fixed aggregate TEC evidence being ignored for topics without PDF mappings.
+- The compact offline browser gate rendered the persisted shortfall day at 1440x900 and 390x844 with two real blocks, no horizontal overflow, no external request, and no console error.
+- BACEN and RFB fixture/manual profiles generate the full `theory, questions, questions, review` mix; real-package acceptance remains blocked on the fresh Estratégia download.
+- M2 Tasks 1, 8, and 9 remain open. No M4 fixture, seed, or browser proof is being presented as validation of package `249654`.
+
+## M5: Adaptive Review and Weekly Planning
+
+Plan: `docs/superpowers/plans/2026-07-12-study-os-m5-adaptive-review-tec.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Learning/review/weekly schema v7 | pending | pending | pending | pending | pending |
+| 2. Outcome event projection | pending | pending | pending | pending | pending |
+| 3. Bounded review queue and stale detector | pending | pending | pending | pending | pending |
+| 4. Adaptive day feedback | pending | pending | pending | pending | pending |
+| 5. Immutable weekly forecast | pending | pending | pending | pending | pending |
+| 6. Strict clients and aggregate migration | pending | pending | pending | pending | pending |
+| 7. Weekly/review Home surfaces | pending | pending | pending | pending | pending |
+| 8. M5 durability gate and M6 plan | pending | pending | pending | pending | pending |
