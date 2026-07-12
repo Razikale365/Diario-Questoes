@@ -153,6 +153,58 @@ def test_manual_primary_is_preserved_then_replaced_when_it_disappears(inventory)
     assert replacement["primary_selection"] == "automatic"
 
 
+def test_manual_lesson_mapping_survives_rescan(inventory):
+    connection, _, service, _, root_id = inventory
+    service.scan_and_reconcile(root_id)
+    lesson_id = connection.execute(
+        """
+        SELECT lessons.id
+        FROM lessons
+        JOIN courses ON courses.id=lessons.course_id
+        WHERE courses.display_name='Economia e Financas Publicas'
+        """
+    ).fetchone()[0]
+    discipline_id = connection.execute(
+        "INSERT INTO disciplines (canonical_name) VALUES ('Economia Aplicada')"
+    ).lastrowid
+    connection.execute(
+        """
+        UPDATE lessons
+        SET discipline_id=?, title='Aula 01 - Politica fiscal', mapping_source='manual'
+        WHERE id=?
+        """,
+        (discipline_id, lesson_id),
+    )
+
+    service.scan_and_reconcile(root_id)
+
+    row = connection.execute(
+        """
+        SELECT lessons.title, lessons.mapping_source, disciplines.canonical_name
+        FROM lessons
+        LEFT JOIN disciplines ON disciplines.id=lessons.discipline_id
+        WHERE lessons.id=?
+        """,
+        (lesson_id,),
+    ).fetchone()
+    assert dict(row) == {
+        "title": "Aula 01 - Politica fiscal",
+        "mapping_source": "manual",
+        "canonical_name": "Economia Aplicada",
+    }
+
+
+def test_reconcile_can_finish_an_api_created_import_run(inventory):
+    connection, repository, service, _, root_id = inventory
+    run_id = repository.create_import_run(root_id)
+
+    summary = service.scan_and_reconcile(root_id, run_id=run_id)
+
+    assert summary.id == run_id
+    assert summary.state == "completed"
+    assert connection.execute("SELECT COUNT(*) FROM import_runs").fetchone()[0] == 1
+
+
 def test_probable_rename_creates_new_identity_and_durable_issue(inventory):
     connection, _, service, root, root_id = inventory
     first = service.scan_and_reconcile(root_id)

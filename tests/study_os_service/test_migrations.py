@@ -5,7 +5,11 @@ import pytest
 
 import study_os_service.db.connection as connection_module
 from study_os_service.db.connection import connect_database
-from study_os_service.db.migrations import MigrationRunner, UnsupportedSchemaVersionError
+from study_os_service.db.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MigrationRunner,
+    UnsupportedSchemaVersionError,
+)
 
 
 def test_migrate_initializes_foundation_schema_idempotently(tmp_path: Path):
@@ -13,8 +17,8 @@ def test_migrate_initializes_foundation_schema_idempotently(tmp_path: Path):
     try:
         runner = MigrationRunner(connection)
 
-        assert runner.migrate() == 2
-        assert runner.migrate() == 2
+        assert runner.migrate() == CURRENT_SCHEMA_VERSION
+        assert runner.migrate() == CURRENT_SCHEMA_VERSION
 
         tables = {
             row["name"]
@@ -84,9 +88,12 @@ def test_migrate_rejects_newer_unsupported_schema_version(tmp_path: Path):
             )
             """
         )
-        connection.execute("INSERT INTO schema_migrations (version) VALUES (3)")
+        newer_version = CURRENT_SCHEMA_VERSION + 1
+        connection.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?)", (newer_version,)
+        )
 
-        with pytest.raises(UnsupportedSchemaVersionError, match="3"):
+        with pytest.raises(UnsupportedSchemaVersionError, match=str(newer_version)):
             MigrationRunner(connection).migrate()
     finally:
         connection.close()

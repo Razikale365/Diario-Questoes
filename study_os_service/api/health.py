@@ -22,5 +22,7 @@ async def health(request: Request) -> dict[str, str | int]:
         "schemaVersion": state.schema_version,
         "database": database_status,
         "backup": backup_status,
-        "configuredRoots": 0,
+        "configuredRoots": state.connection.execute(
+            "SELECT COUNT(*) FROM course_roots"
+        ).fetchone()[0],
     }

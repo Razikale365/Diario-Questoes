@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from study_os_service.db.migrations import CURRENT_SCHEMA_VERSION
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,7 +32,7 @@ def test_initialize_creates_database_and_reports_schema(tmp_path: Path):
     assert result.returncode == 0
     assert result.stderr == ""
     assert payload["status"] == "ok"
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == CURRENT_SCHEMA_VERSION
     assert Path(payload["databasePath"]) == data_dir / "study-os.sqlite3"
     assert Path(payload["databasePath"]).exists()
 
@@ -46,7 +48,7 @@ def test_health_checks_initialized_database_integrity(tmp_path: Path):
     assert result.stderr == ""
     assert payload == {
         "status": "ok",
-            "schemaVersion": 2,
+        "schemaVersion": CURRENT_SCHEMA_VERSION,
         "database": "ok",
         "databasePath": str((data_dir / "study-os.sqlite3").resolve()),
     }
@@ -63,7 +65,7 @@ def test_backup_creates_readable_snapshot_under_backup_directory(tmp_path: Path)
     assert result.returncode == 0
     assert result.stderr == ""
     assert payload["status"] == "ok"
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == CURRENT_SCHEMA_VERSION
     assert created_path.parent == (data_dir / "backups").resolve()
     assert created_path.exists()
     assert payload["prunedPaths"] == []

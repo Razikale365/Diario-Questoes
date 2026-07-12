@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 
 from study_os_service.db.connection import connect_database
-from study_os_service.db.migrations import MIGRATIONS, MigrationRunner
+from study_os_service.db.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS, MigrationRunner
 
 
 INVENTORY_TABLES = {
@@ -42,6 +42,27 @@ def install_version_one(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
+def install_version_two(connection: sqlite3.Connection) -> None:
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    for version, statements in MIGRATIONS:
+        if version > 2:
+            break
+        for statement in statements:
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?)", (version,)
+        )
+    connection.commit()
+
+
 def insert_root(connection: sqlite3.Connection, root_path: str, **overrides) -> int:
     values = {
         "target_slug": "rfb_auditor",
@@ -75,17 +96,17 @@ def insert_root(connection: sqlite3.Connection, root_path: str, **overrides) -> 
     return cursor.lastrowid
 
 
-def test_empty_database_migrates_to_inventory_schema_version_two(tmp_path: Path):
+def test_empty_database_migrates_to_current_inventory_schema(tmp_path: Path):
     connection = connect_database(tmp_path / "study.sqlite3")
     try:
-        assert MigrationRunner(connection).migrate() == 2
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
         assert INVENTORY_TABLES <= table_names(connection)
         assert [
             row["version"]
             for row in connection.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2]
+        ] == list(range(1, CURRENT_SCHEMA_VERSION + 1))
     finally:
         connection.close()
 
@@ -98,7 +119,7 @@ def test_version_one_database_upgrades_without_losing_foundation_data(tmp_path: 
             "INSERT INTO app_settings (key, value_json) VALUES ('theme', '\"dark\"')"
         )
 
-        assert MigrationRunner(connection).migrate() == 2
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
         assert connection.execute(
             "SELECT value_json FROM app_settings WHERE key='theme'"
         ).fetchone()[0] == '"dark"'
@@ -119,13 +140,28 @@ def test_inventory_migration_is_idempotent(tmp_path: Path):
             )
         }
 
-        assert runner.migrate() == 2
+        assert runner.migrate() == CURRENT_SCHEMA_VERSION
         assert {
             row["name"]: row["sql"]
             for row in connection.execute(
                 "SELECT name, sql FROM sqlite_master WHERE type='table'"
             )
         } == first_sql
+    finally:
+        connection.close()
+
+
+def test_version_two_database_adds_manual_lesson_mapping_state(tmp_path: Path):
+    connection = connect_database(tmp_path / "study.sqlite3")
+    try:
+        install_version_two(connection)
+
+        assert MigrationRunner(connection).migrate() == 3
+        columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(lessons)")
+        }
+        assert columns["mapping_source"]["dflt_value"] == "'automatic'"
     finally:
         connection.close()
 

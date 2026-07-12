@@ -176,6 +176,16 @@ CREATE TABLE import_issues (
             "CREATE INDEX idx_import_issues_root_state ON import_issues(root_id, state);",
         ),
     ),
+    (
+        3,
+        (
+            """
+ALTER TABLE lessons
+ADD COLUMN mapping_source TEXT NOT NULL DEFAULT 'automatic'
+  CHECK (mapping_source IN ('automatic','manual'));
+""",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

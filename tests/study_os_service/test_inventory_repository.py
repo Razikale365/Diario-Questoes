@@ -213,3 +213,34 @@ def test_inventory_reads_are_scoped_to_target_and_course(
     assert len(lessons) == 1
     assert lessons[0].lesson_number == 0
     assert lessons[0].title == "Obrigacao tributaria"
+
+
+def test_lesson_pagination_is_applied_by_sqlite(
+    repository: InventoryRepository, tmp_path: Path
+):
+    root_id = repository.register_root(make_validated_choice(tmp_path))
+    course_id = repository.connection.execute(
+        """
+        INSERT INTO courses (
+          root_id, display_name, provider, relative_path, active, scan_state
+        ) VALUES (?, 'Economia', 'Estrategia Concursos', 'Economia', 1, 'available')
+        """,
+        (root_id,),
+    ).lastrowid
+    for lesson_number in range(3):
+        repository.connection.execute(
+            """
+            INSERT INTO lessons (
+              course_id, lesson_number, title, sequence_index, status, available
+            ) VALUES (?, ?, ?, ?, 'unread', 1)
+            """,
+            (course_id, lesson_number, f"Aula {lesson_number:02d}", lesson_number),
+        )
+    statements: list[str] = []
+    repository.connection.set_trace_callback(statements.append)
+
+    page = repository.list_lessons(course_id, limit=1, offset=1)
+
+    repository.connection.set_trace_callback(None)
+    assert [lesson.lesson_number for lesson in page] == [1]
+    assert any("LIMIT 1 OFFSET 1" in statement for statement in statements)

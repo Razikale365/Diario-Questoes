@@ -18,11 +18,22 @@ class InventoryService:
         self.repository = repository
         self.scanner = scanner
 
-    def scan_and_reconcile(self, root_id: int) -> ImportRunSummary:
+    def scan_and_reconcile(
+        self, root_id: int, *, run_id: int | None = None
+    ) -> ImportRunSummary:
         root = self.repository.get_root(root_id)
         if root is None:
             raise KeyError(f"course root {root_id} does not exist")
-        run_id = self.repository.create_import_run(root_id)
+        if run_id is None:
+            run_id = self.repository.create_import_run(root_id)
+        else:
+            run = self.repository.get_import_run(run_id)
+            if run is None:
+                raise KeyError(f"import run {run_id} does not exist")
+            if run.root_id != root_id:
+                raise ValueError("import run does not belong to the course root")
+            if run.state not in {"queued", "running"}:
+                raise ValueError("import run is already finished")
         self.repository.mark_import_running(run_id)
         try:
             snapshot = self.scanner(root.root_path, root.target_slug, root.provider)

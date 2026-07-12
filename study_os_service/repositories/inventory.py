@@ -70,6 +70,7 @@ class LessonRecord:
     status: str
     estimated_minutes: int | None
     available: bool
+    mapping_source: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,16 +334,31 @@ class InventoryRepository:
         ]
 
     def list_lessons(
-        self, course_id: int, *, available_only: bool = False
+        self,
+        course_id: int,
+        *,
+        available_only: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[LessonRecord]:
+        if limit is not None and limit < 1:
+            raise ValueError("lesson limit must be positive")
+        if offset < 0:
+            raise ValueError("lesson offset must be non-negative")
         available_clause = " AND available = 1" if available_only else ""
+        pagination_clause = ""
+        parameters: list[object] = [course_id]
+        if limit is not None:
+            pagination_clause = " LIMIT ? OFFSET ?"
+            parameters.extend((limit, offset))
         rows = self.connection.execute(
             f"""
             SELECT * FROM lessons
             WHERE course_id = ?{available_clause}
             ORDER BY sequence_index, id
+            {pagination_clause}
             """,
-            (course_id,),
+            parameters,
         ).fetchall()
         return [
             LessonRecord(
@@ -355,9 +371,21 @@ class InventoryRepository:
                 status=row["status"],
                 estimated_minutes=row["estimated_minutes"],
                 available=bool(row["available"]),
+                mapping_source=row["mapping_source"],
             )
             for row in rows
         ]
+
+    def get_active_import_run(self, root_id: int) -> ImportRunSummary | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM import_runs
+            WHERE root_id=? AND state IN ('queued','running')
+            ORDER BY id DESC LIMIT 1
+            """,
+            (root_id,),
+        ).fetchone()
+        return _run_summary(row) if row else None
 
     def create_import_run(self, root_id: int) -> int:
         cursor = self.connection.execute(
@@ -517,7 +545,7 @@ class InventoryRepository:
                     ),
                 )
 
-            discipline_id = self._ensure_discipline(scanned_course.discipline_candidate)
+            discipline_id = self.ensure_discipline(scanned_course.discipline_candidate)
             if discipline_id is not None:
                 self.connection.execute(
                     """
@@ -534,7 +562,7 @@ class InventoryRepository:
             for scanned_lesson in scanned_course.lessons:
                 lesson_row = self.connection.execute(
                     """
-                    SELECT id FROM lessons
+                    SELECT id, discipline_id, mapping_source FROM lessons
                     WHERE course_id=? AND lesson_number=?
                     ORDER BY id LIMIT 1
                     """,
@@ -558,15 +586,38 @@ class InventoryRepository:
                     ).lastrowid
                 else:
                     lesson_id = lesson_row["id"]
-                    self.connection.execute(
-                        """
-                        UPDATE lessons
-                        SET discipline_id=?, sequence_index=?, available=1,
-                            updated_at=CURRENT_TIMESTAMP
-                        WHERE id=?
-                        """,
-                        (discipline_id, scanned_lesson.sequence_index, lesson_id),
-                    )
+                    if lesson_row["mapping_source"] == "manual":
+                        self.connection.execute(
+                            """
+                            UPDATE lessons
+                            SET sequence_index=?, available=1,
+                                updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?
+                            """,
+                            (scanned_lesson.sequence_index, lesson_id),
+                        )
+                        manual_discipline_id = lesson_row["discipline_id"]
+                        if manual_discipline_id is not None:
+                            self.connection.execute(
+                                """
+                                INSERT INTO course_disciplines (
+                                  course_id, discipline_id, display_order, active
+                                ) VALUES (?, ?, 0, 1)
+                                ON CONFLICT(course_id, discipline_id)
+                                DO UPDATE SET active=1
+                                """,
+                                (course_id, manual_discipline_id),
+                            )
+                    else:
+                        self.connection.execute(
+                            """
+                            UPDATE lessons
+                            SET discipline_id=?, sequence_index=?, available=1,
+                                updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?
+                            """,
+                            (discipline_id, scanned_lesson.sequence_index, lesson_id),
+                        )
                 lesson_ids[scanned_lesson.lesson_number] = lesson_id
 
             current_material_ids: dict[str, int] = {}
@@ -713,7 +764,7 @@ class InventoryRepository:
         )
         return discovered_count, issue_count
 
-    def _ensure_discipline(self, canonical_name: str) -> int | None:
+    def ensure_discipline(self, canonical_name: str) -> int | None:
         name = canonical_name.strip()
         if not name:
             return None
