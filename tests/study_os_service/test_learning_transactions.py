@@ -47,8 +47,17 @@ def test_planner_result_appends_event_and_projection_in_same_transaction(
         favorite_count=0,
         expected_version=block.version,
     )
-    event = connection.execute("SELECT * FROM learning_events").fetchone()
-    state = connection.execute("SELECT * FROM topic_learning_states").fetchone()
+    event = connection.execute(
+        "SELECT * FROM learning_events WHERE source_kind='planner_block' AND source_id=?",
+        (str(block.id),),
+    ).fetchone()
+    state = connection.execute(
+        """
+        SELECT * FROM topic_learning_states
+        WHERE target_slug=? AND target_topic_id=?
+        """,
+        (event["target_slug"], event["target_topic_id"]),
+    ).fetchone()
     replayed = planner.learning.record_planner_block(saved)
 
     assert saved.state == "completed"
@@ -59,12 +68,19 @@ def test_planner_result_appends_event_and_projection_in_same_transaction(
     )) == (20, 16, 4, 1)
     assert state["event_cursor"] == event["id"]
     assert replayed.event.id == event["id"]
-    assert connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == 1
+    assert connection.execute(
+        """
+        SELECT COUNT(*) FROM learning_events
+        WHERE source_kind='planner_block' AND source_id=?
+        """,
+        (str(block.id),),
+    ).fetchone()[0] == 1
 
 
 def test_learning_failure_rolls_back_planner_result(learning_plan):
     connection, planner, day = learning_plan
     block = next(item for item in day.blocks if item.block_kind == "questions")
+    baseline = connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0]
     connection.executescript(
         """
         CREATE TRIGGER reject_learning_event
@@ -88,7 +104,7 @@ def test_learning_failure_rolls_back_planner_result(learning_plan):
         )
 
     assert planner.repository.get_block(block.id).state == "pending"
-    assert connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == baseline
 
 
 def test_partial_session_appends_page_event_and_releases_theory_block(
@@ -139,6 +155,7 @@ def test_learning_failure_rolls_back_session_finish(learning_plan):
         "rollback-session",
         planner_block_id=theory.id,
     )
+    baseline = connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0]
     connection.executescript(
         """
         CREATE TRIGGER reject_session_learning
@@ -165,4 +182,4 @@ def test_learning_failure_rolls_back_session_finish(learning_plan):
         )
 
     assert sessions.sessions.get(started.session.id).state == "active"
-    assert connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == baseline

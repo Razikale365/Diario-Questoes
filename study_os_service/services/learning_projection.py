@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import json
 import sqlite3
 from typing import Mapping
 
@@ -160,7 +161,7 @@ def project_topic_state(
         stale_at=stale_at,
         success_streak=success_streak,
         failure_streak=failure_streak,
-        event_cursor=ordered[-1].id,
+        event_cursor=max(event.id for event in ordered),
         version=len(ordered),
     )
 
@@ -225,6 +226,10 @@ class LearningProjectionService:
         )
         if occurred_at.tzinfo is None:
             occurred_at = occurred_at.replace(tzinfo=UTC)
+        candidate_evidence = json.loads(context["evidence_json"]).get(
+            "candidateEvidence", {}
+        )
+        review_queue_item_id = candidate_evidence.get("reviewQueueItemId")
         return self.append_event_in_transaction(
             idempotency_key=f"planner-block:{block.id}:result",
             target_slug=block.target_slug,
@@ -248,6 +253,11 @@ class LearningProjectionService:
                 "plannerBlockId": block.id,
                 "candidateId": block.candidate_id,
                 "plannedQuestions": block.planned_questions,
+                **(
+                    {"reviewQueueItemId": review_queue_item_id}
+                    if review_queue_item_id is not None
+                    else {}
+                ),
             },
         )
 

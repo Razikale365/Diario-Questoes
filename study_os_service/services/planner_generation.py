@@ -31,6 +31,7 @@ from study_os_service.services.planner_scoring import (
     canonical_input_hash,
     score_candidates,
 )
+from study_os_service.services.review_queue import ReviewQueueService
 
 
 class PlannerIdempotencyConflictError(RuntimeError):
@@ -66,6 +67,7 @@ class PlannerGenerationService:
         self.profiles = PlannerProfileRepository(connection)
         self.repository = PlannerRunRepository(connection)
         self.learning = LearningProjectionService(connection)
+        self.review_queue = ReviewQueueService(connection)
 
     def generate_day(
         self,
@@ -162,6 +164,7 @@ class PlannerGenerationService:
                 target.daily_quota,
                 max(1, budget // 60),
             )
+            self.review_queue.rebuild_in_transaction(target_name, resolved_date)
             evidence = collect_candidate_evidence(self.connection, target_name)
             pool = build_candidates(target_name, evidence)
             base_context = ScoringContext(
@@ -293,7 +296,10 @@ class PlannerGenerationService:
                 favorite_count=favorite_count,
                 expected_version=expected_version,
             )
-            self.learning.record_planner_block(saved)
+            learning = self.learning.record_planner_block(saved)
+            self.review_queue.consume_event_in_transaction(
+                learning.event, learning.state
+            )
             self.connection.commit()
             return saved
         except Exception:

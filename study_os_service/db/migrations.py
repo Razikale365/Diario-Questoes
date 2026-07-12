@@ -591,6 +591,16 @@ CREATE TABLE planner_blocks (
               )
             );
             """,
+            """
+            CREATE TABLE review_queue_mutations (
+              idempotency_key TEXT PRIMARY KEY CHECK (length(trim(idempotency_key)) > 0),
+              action_kind TEXT NOT NULL CHECK (action_kind='defer'),
+              item_id INTEGER NOT NULL REFERENCES review_queue_items(id),
+              request_hash TEXT NOT NULL CHECK (length(trim(request_hash)) > 0),
+              result_version INTEGER NOT NULL CHECK (result_version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            );
+            """,
             "CREATE UNIQUE INDEX ux_planner_week_runs_id_target ON planner_week_runs(id, target_slug);",
             """
             CREATE TABLE planner_week_slots (

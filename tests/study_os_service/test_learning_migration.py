@@ -16,6 +16,7 @@ ADAPTIVE_TABLES = {
     "learning_events",
     "topic_learning_states",
     "review_queue_items",
+    "review_queue_mutations",
     "planner_week_runs",
     "planner_week_slots",
 }

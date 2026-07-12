@@ -261,7 +261,8 @@ class LearningRepository:
             """
             SELECT blocks.id AS block_id, blocks.run_id, blocks.candidate_id,
                    blocks.updated_at,
-                   candidates.target_topic_id, topics.target_slug AS topic_target_slug
+                   candidates.target_topic_id, candidates.evidence_json,
+                   topics.target_slug AS topic_target_slug
             FROM planner_blocks AS blocks
             JOIN planner_candidates AS candidates ON candidates.id=blocks.candidate_id
             LEFT JOIN target_topics AS topics ON topics.id=candidates.target_topic_id

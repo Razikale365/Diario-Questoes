@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import math
 import sqlite3
 from types import MappingProxyType
@@ -125,6 +126,12 @@ class ReviewEvidence:
     failed_sessions: int = 0
     skipped_blocks: int = 0
     weak_progress: bool = False
+    queue_item_id: int | None = None
+    proof_questions: int = 0
+    trigger_event_ids: tuple[int, ...] = ()
+    projected_debt_bp: int = 0
+    queue_reason: str | None = None
+    deferred_until: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -137,6 +144,21 @@ class ReviewEvidence:
             _non_negative(getattr(self, name), name.replace("_", " "))
         if not isinstance(self.weak_progress, bool):
             raise ValueError("weak progress must be boolean")
+        if self.queue_item_id is not None:
+            _positive(self.queue_item_id, "queue item id")
+            if not 5 <= _positive(self.proof_questions, "proof questions") <= 10:
+                raise ValueError("proof questions must be between 5 and 10")
+            if not self.trigger_event_ids:
+                raise ValueError("queue evidence requires trigger events")
+        else:
+            _non_negative(self.proof_questions, "proof questions")
+        for event_id in self.trigger_event_ids:
+            _positive(event_id, "trigger event id")
+        _non_negative(self.projected_debt_bp, "projected debt")
+        if self.queue_reason is not None and not self.queue_reason.strip():
+            raise ValueError("queue reason cannot be blank")
+        if self.deferred_until is not None and not self.deferred_until.strip():
+            raise ValueError("deferred until cannot be blank")
 
     @property
     def has_error_evidence(self) -> bool:
@@ -148,6 +170,7 @@ class ReviewEvidence:
             + self.skipped_blocks
             > 0
             or self.weak_progress
+            or self.queue_item_id is not None
         )
 
 
@@ -247,7 +270,9 @@ def _candidate(
         if row.topic.tec_source_url is None:
             stop_reason = "tec_source_missing"
     elif stop_reason is None and block_kind == "review":
-        if not (
+        if row.review.deferred_until is not None:
+            stop_reason = "review_evidence_missing"
+        elif not (
             row.review.has_error_evidence
             or row.topic.review_debt > 0
             or row.topic.coverage_status == "weak"
@@ -261,7 +286,7 @@ def _candidate(
     if block_kind == "questions":
         planned_questions = max(1, row.topic.planned_questions or 20)
     elif block_kind == "review":
-        planned_questions = min(
+        planned_questions = row.review.proof_questions or min(
             10, max(5, math.ceil((row.topic.planned_questions or 20) / 3))
         )
         duration_minutes = 45
@@ -366,6 +391,12 @@ def _evidence(
         "skippedBlocks": row.review.skipped_blocks,
         "weakProgress": row.review.weak_progress,
         "reviewDebt": topic.review_debt,
+        "reviewQueueItemId": row.review.queue_item_id,
+        "reviewProofQuestions": row.review.proof_questions,
+        "reviewTriggerEventIds": list(row.review.trigger_event_ids),
+        "projectedReviewDebtBp": row.review.projected_debt_bp,
+        "reviewQueueReason": row.review.queue_reason,
+        "reviewDeferredUntil": row.review.deferred_until,
         "stopReason": stop_reason,
     }
 
@@ -400,7 +431,7 @@ def collect_candidate_evidence(
             }:
                 topics.append(topic)
     return tuple(
-        _collect_topic_evidence(connection, topic)
+        _collect_topic_evidence(connection, topic, target_slug)
         for topic in sorted(topics, key=lambda item: item.id)
     )
 
@@ -408,10 +439,11 @@ def collect_candidate_evidence(
 def _collect_topic_evidence(
     connection: sqlite3.Connection,
     topic: TargetTopic,
+    selected_target_slug: str,
 ) -> CandidateTopicEvidence:
     material_mapping_present = topic.lesson_id is not None or topic.material_id is not None
     materials = _collect_materials(connection, topic)
-    review = _collect_review(connection, topic, materials)
+    review = _collect_review(connection, topic, materials, selected_target_slug)
     return CandidateTopicEvidence(
         topic=topic,
         material_mapping_present=material_mapping_present,
@@ -471,6 +503,7 @@ def _collect_review(
     connection: sqlite3.Connection,
     topic: TargetTopic,
     materials: tuple[MaterialEvidence, ...],
+    selected_target_slug: str,
 ) -> ReviewEvidence:
     session_counts = {
         "wrong_count": 0,
@@ -516,6 +549,22 @@ def _collect_review(
         """,
         (topic.id,),
     ).fetchone()
+    queue_row = connection.execute(
+        """
+        SELECT * FROM review_queue_items
+        WHERE target_slug=? AND target_topic_id=?
+          AND state IN ('pending','deferred')
+        ORDER BY due_date, id LIMIT 1
+        """,
+        (selected_target_slug, topic.id),
+    ).fetchone()
+    state_row = connection.execute(
+        """
+        SELECT review_debt_bp FROM topic_learning_states
+        WHERE target_slug=? AND target_topic_id=?
+        """,
+        (selected_target_slug, topic.id),
+    ).fetchone()
     return ReviewEvidence(
         wrong_count=session_counts["wrong_count"] + block_row["wrong_count"],
         doubt_count=session_counts["doubt_count"] + block_row["doubt_count"],
@@ -529,5 +578,19 @@ def _collect_review(
         weak_progress=(
             topic.coverage_status == "weak"
             or any(material.progress_status == "weak" for material in materials)
+        ),
+        queue_item_id=queue_row["id"] if queue_row else None,
+        proof_questions=queue_row["bounded_questions"] if queue_row else 0,
+        trigger_event_ids=(
+            tuple(json.loads(queue_row["trigger_event_ids_json"]))
+            if queue_row
+            else ()
+        ),
+        projected_debt_bp=(state_row["review_debt_bp"] if state_row else 0),
+        queue_reason=queue_row["reason"] if queue_row else None,
+        deferred_until=(
+            queue_row["due_date"]
+            if queue_row and queue_row["state"] == "deferred"
+            else None
         ),
     )
