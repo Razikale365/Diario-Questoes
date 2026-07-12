@@ -475,7 +475,7 @@ python -m compileall -q study_os_service
 npm.cmd test
 npm.cmd run lint
 npm.cmd run build
-node --test src/lib/question-deck.test.mjs
+node --import tsx --test src/utils/questionCardDeck.test.ts
 git diff --check
 ```
 
