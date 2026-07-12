@@ -32,6 +32,7 @@ import {
   type LessonSummary,
   type SetupStatus,
 } from '../api/inventory';
+import { StudySessionPanel } from './StudySessionPanel';
 
 interface CourseInventoryProps {
   targetSlug: string;
@@ -559,12 +560,20 @@ const LessonMaterialPanel: React.FC<{
       </button>
 
       <div className="mt-4 space-y-1.5">
-        {lesson.materials.map((material) => (
-          <div key={material.id} className={`grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border px-2 py-2 ${material.isPrimary ? 'border-[#84cc16]/35 bg-[#84cc16]/5' : 'border-white/5 bg-[#151515]'}`}>
-            <FileText className={`h-4 w-4 ${material.isPrimary ? 'text-[#84cc16]' : 'text-gray-600'}`} />
+        {lesson.materials.map((material) => material.isPrimary ? (
+          <StudySessionPanel
+            key={material.id}
+            targetSlug={targetSlug}
+            lessonId={lesson.id}
+            material={material}
+            materialLabel={materialKindLabel[material.kind] || material.kind}
+          />
+        ) : (
+          <div key={material.id} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border border-white/5 bg-[#151515] px-2 py-2">
+            <FileText className="h-4 w-4 text-gray-600" />
             <div className="min-w-0">
               <p className="truncate text-xs font-black text-white" title={material.relativePath}>{materialKindLabel[material.kind] || material.kind}</p>
-              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-600">Confiança {material.trustLevel}{material.isPrimary ? ' · Primário' : ''}</p>
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-600">Confiança {material.trustLevel}</p>
             </div>
             {material.available ? (
               <a
