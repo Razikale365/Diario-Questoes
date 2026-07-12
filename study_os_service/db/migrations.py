@@ -435,6 +435,12 @@ CREATE TABLE planner_blocks (
             "CREATE INDEX idx_planner_blocks_target_date_state ON planner_blocks(target_slug, scheduled_date, state);",
         ),
     ),
+    (
+        6,
+        (
+            "ALTER TABLE target_topics ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

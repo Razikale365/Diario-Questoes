@@ -149,6 +149,7 @@ class TargetTopic:
     tec_source_id: str | None
     planned_questions: int
     review_debt: float
+    notes: str
     active: bool
     version: int
 
@@ -194,6 +195,8 @@ class TargetTopic:
         object.__setattr__(
             self, "review_debt", _range(self.review_debt, "review debt", 0, 100)
         )
+        if not isinstance(self.notes, str):
+            raise ValueError("notes must be text")
         if not isinstance(self.active, bool):
             raise ValueError("active must be boolean")
         _positive(self.version, "version")

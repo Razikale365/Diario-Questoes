@@ -1,0 +1,88 @@
+{
+  "targets": [
+    {
+      "targetSlug": "bacen_economia_financas",
+      "displayName": "BACEN Economia e Financas",
+      "institution": "Banco Central do Brasil",
+      "role": "Analista - Economia e Financas",
+      "banca": "CEBRASPE",
+      "phase": "pre_edital",
+      "deadline": null,
+      "dailyQuota": 4,
+      "priorityScore": 88,
+      "sourceUrls": ["https://www.bcb.gov.br/detalhenoticia/776/noticia"],
+      "notes": "Default local editavel; confirmar pesos no proximo edital.",
+      "topics": [
+        {"discipline": "Macroeconomia", "topic": "Contas nacionais e politica macroeconomica", "editalWeight": 2, "incidence": 92, "tier": 1, "bancaFit": 95, "overlapValue": 55, "transferKind": "target_specific", "notes": "Nucleo BACEN."},
+        {"discipline": "Microeconomia", "topic": "Teoria do consumidor e do produtor", "editalWeight": 2, "incidence": 90, "tier": 1, "bancaFit": 95, "overlapValue": 45, "transferKind": "target_specific", "notes": "Nucleo BACEN."},
+        {"discipline": "Economia Monetaria", "topic": "Moeda, inflacao e politica monetaria", "editalWeight": 2, "incidence": 94, "tier": 1, "bancaFit": 98, "overlapValue": 50, "transferKind": "target_specific", "notes": "Nucleo BACEN."},
+        {"discipline": "Sistema Financeiro Nacional", "topic": "Instituicoes, mercados e regulacao", "editalWeight": 2, "incidence": 96, "tier": 1, "bancaFit": 98, "overlapValue": 35, "transferKind": "target_specific", "notes": "Nucleo BACEN."},
+        {"discipline": "Estatistica e Econometria", "topic": "Inferencia, regressao e series temporais", "editalWeight": 2, "incidence": 91, "tier": 1, "bancaFit": 96, "overlapValue": 75, "transferKind": "shared", "notes": "Transferivel com validacao do programa."},
+        {"discipline": "Financas", "topic": "Risco, retorno e precificacao de ativos", "editalWeight": 2, "incidence": 86, "tier": 1, "bancaFit": 92, "overlapValue": 50, "transferKind": "partial", "notes": "Transferencia parcial de Financas Publicas."}
+      ]
+    },
+    {
+      "targetSlug": "rfb_auditor",
+      "displayName": "RFB Auditor Fiscal",
+      "institution": "Receita Federal do Brasil",
+      "role": "Auditor-Fiscal",
+      "banca": "FGV",
+      "phase": "pre_edital",
+      "deadline": null,
+      "dailyQuota": 4,
+      "priorityScore": 82,
+      "sourceUrls": ["https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/servidores/concurso-publico-2022"],
+      "notes": "Default local editavel baseado no ultimo ciclo; nao e edital vigente.",
+      "topics": [
+        {"discipline": "Direito Tributario", "topic": "Credito tributario", "editalWeight": 2, "incidence": 94, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
+        {"discipline": "Legislacao Tributaria", "topic": "Tributos federais", "editalWeight": 2, "incidence": 98, "tier": 1, "bancaFit": 96, "overlapValue": 30, "transferKind": "target_specific", "notes": "Nao transferir lei especifica sem conferir vigencia."},
+        {"discipline": "Direito Aduaneiro", "topic": "Regimes e controle aduaneiro", "editalWeight": 2, "incidence": 96, "tier": 1, "bancaFit": 95, "overlapValue": 10, "transferKind": "target_specific", "notes": "Especifica RFB."},
+        {"discipline": "Contabilidade Geral", "topic": "Demonstracoes contabeis", "editalWeight": 2, "incidence": 93, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
+        {"discipline": "Contabilidade Avancada", "topic": "Consolidacao e equivalencia patrimonial", "editalWeight": 2, "incidence": 88, "tier": 1, "bancaFit": 92, "overlapValue": 85, "transferKind": "shared", "notes": "Conferir profundidade do alvo."},
+        {"discipline": "Auditoria", "topic": "Evidencias, riscos e procedimentos", "editalWeight": 2, "incidence": 90, "tier": 1, "bancaFit": 95, "overlapValue": 95, "transferKind": "shared", "notes": "Alta transferencia fiscal."}
+      ]
+    },
+    {
+      "targetSlug": "rfb_analista",
+      "displayName": "RFB Analista Tributario",
+      "institution": "Receita Federal do Brasil",
+      "role": "Analista-Tributario",
+      "banca": "FGV",
+      "phase": "pre_edital",
+      "deadline": null,
+      "dailyQuota": 4,
+      "priorityScore": 72,
+      "sourceUrls": ["https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/servidores/concurso-publico-2022"],
+      "notes": "Default local editavel baseado no ultimo ciclo; nao e edital vigente.",
+      "topics": [
+        {"discipline": "Direito Tributario", "topic": "Obrigacao e credito tributario", "editalWeight": 2, "incidence": 94, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
+        {"discipline": "Legislacao Tributaria", "topic": "Tributos federais", "editalWeight": 2, "incidence": 97, "tier": 1, "bancaFit": 96, "overlapValue": 35, "transferKind": "target_specific", "notes": "Nao transferir lei especifica sem conferir vigencia."},
+        {"discipline": "Direito Administrativo", "topic": "Atos, poderes e agentes publicos", "editalWeight": 1, "incidence": 82, "tier": 2, "bancaFit": 90, "overlapValue": 95, "transferKind": "shared", "notes": "Compartilhada entre alvos."},
+        {"discipline": "Direito Constitucional", "topic": "Administracao publica e direitos fundamentais", "editalWeight": 1, "incidence": 80, "tier": 2, "bancaFit": 90, "overlapValue": 95, "transferKind": "shared", "notes": "Compartilhada entre alvos."},
+        {"discipline": "Contabilidade Geral", "topic": "Patrimonio e demonstracoes contabeis", "editalWeight": 1, "incidence": 84, "tier": 2, "bancaFit": 92, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
+        {"discipline": "Administracao Publica", "topic": "Gestao publica e governanca", "editalWeight": 1, "incidence": 78, "tier": 2, "bancaFit": 88, "overlapValue": 80, "transferKind": "shared", "notes": "Conferir programa do alvo."}
+      ]
+    },
+    {
+      "targetSlug": "sefaz_ce",
+      "displayName": "SEFAZ CE Auditor Fiscal",
+      "institution": "Secretaria da Fazenda do Ceara",
+      "role": "Auditor Fiscal",
+      "banca": "CEBRASPE",
+      "phase": "pos_edital",
+      "deadline": null,
+      "dailyQuota": 4,
+      "priorityScore": 96,
+      "sourceUrls": ["https://www.sefaz.ce.gov.br/"],
+      "notes": "Perfil editavel do ciclo em andamento; conferir data e pesos oficiais.",
+      "topics": [
+        {"discipline": "Legislacao Tributaria Estadual", "topic": "ICMS Ceara", "editalWeight": 2, "incidence": 100, "tier": 1, "bancaFit": 98, "overlapValue": 15, "transferKind": "target_specific", "notes": "Lei estadual nao transfere para outro fisco."},
+        {"discipline": "Direito Tributario", "topic": "Obrigacao, credito e administracao tributaria", "editalWeight": 1, "incidence": 94, "tier": 1, "bancaFit": 94, "overlapValue": 100, "transferKind": "shared", "notes": "Transferir teoria geral, nao lei local."},
+        {"discipline": "Contabilidade Geral", "topic": "Demonstracoes e escrituracao", "editalWeight": 1, "incidence": 90, "tier": 1, "bancaFit": 92, "overlapValue": 100, "transferKind": "shared", "notes": "Alta transferencia fiscal."},
+        {"discipline": "Auditoria Fiscal", "topic": "Procedimentos e evidencias", "editalWeight": 1, "incidence": 88, "tier": 1, "bancaFit": 94, "overlapValue": 90, "transferKind": "shared", "notes": "Conferir recorte fiscal do edital."},
+        {"discipline": "Financas Publicas", "topic": "Orcamento, receita e despesa publica", "editalWeight": 2, "incidence": 92, "tier": 1, "bancaFit": 94, "overlapValue": 75, "transferKind": "shared", "notes": "Peso 2 no SEFAZ CE; override explicito do perfil."},
+        {"discipline": "Estatistica", "topic": "Probabilidade e inferencia", "editalWeight": 1, "incidence": 72, "tier": 2, "bancaFit": 88, "overlapValue": 85, "transferKind": "shared", "notes": "Transferivel com ajuste de banca."}
+      ]
+    }
+  ]
+}

@@ -4,7 +4,11 @@ import sqlite3
 import pytest
 
 from study_os_service.db.connection import connect_database
-from study_os_service.db.migrations import MIGRATIONS, MigrationRunner
+from study_os_service.db.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MIGRATIONS,
+    MigrationRunner,
+)
 from tests.study_os_service.test_session_migration import seed_inventory
 
 
@@ -90,7 +94,7 @@ def test_version_four_upgrades_without_losing_progress_or_sessions(tmp_path: Pat
             (lesson_id, material_id),
         ).lastrowid
 
-        assert MigrationRunner(connection).migrate() == 5
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
 
         assert PLANNER_TABLES <= _tables(connection)
         assert tuple(connection.execute(
@@ -106,7 +110,7 @@ def test_version_four_upgrades_without_losing_progress_or_sessions(tmp_path: Pat
             for row in connection.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
-        ] == [1, 2, 3, 4, 5]
+        ] == list(range(1, CURRENT_SCHEMA_VERSION + 1))
     finally:
         connection.close()
 
@@ -121,13 +125,17 @@ def test_planner_schema_checks_json_enums_and_stable_identities(tmp_path: Path):
             INSERT INTO target_topics (
               target_slug, discipline, topic, coverage_status, edital_weight,
               incidence, tier, banca_fit, overlap_value, transfer_kind,
-              source_kind, review_debt
+              source_kind, review_debt, notes
             ) VALUES (
               'rfb_auditor', 'Direito Tributario', 'Credito tributario',
-              'weak', 2, 85, 1, 90, 100, 'target_specific', 'manual', 60
+              'weak', 2, 85, 1, 90, 100, 'target_specific', 'manual', 60,
+              'Priorizar erros recentes'
             )
             """
         ).lastrowid
+        assert connection.execute(
+            "SELECT notes FROM target_topics WHERE id=?", (topic_id,)
+        ).fetchone()[0] == "Priorizar erros recentes"
         run_id = connection.execute(
             """
             INSERT INTO planner_runs (

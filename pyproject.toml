@@ -21,3 +21,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests/study_os_service"]
 pythonpath = ["."]
+
+[tool.setuptools.package-data]
+study_os_service = ["data/*.json"]

@@ -55,6 +55,7 @@ def make_topic(**overrides) -> TargetTopic:
         "tec_source_id": "1",
         "planned_questions": 20,
         "review_debt": 60.0,
+        "notes": "",
         "active": True,
         "version": 1,
     }
