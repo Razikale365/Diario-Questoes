@@ -326,13 +326,22 @@ async def start_session(
     target = _required_text(payload, "targetSlug")
     lesson_id = _positive_integer(payload, "lessonId")
     material_id = _positive_integer(payload, "materialId")
+    planner_block_id = (
+        _positive_integer(payload, "plannerBlockId")
+        if "plannerBlockId" in payload
+        else None
+    )
     context = _material_context(
         request.app.state.connection, material_id, target, lesson_id
     )
     _validated_pdf_path(context)
     try:
         result = SessionService(request.app.state.connection).start(
-            target, lesson_id, material_id, idempotency_key
+            target,
+            lesson_id,
+            material_id,
+            idempotency_key,
+            planner_block_id=planner_block_id,
         )
     except (RuntimeError, KeyError, ValueError, sqlite3.IntegrityError) as exc:
         raise _translate_session_error(exc) from exc

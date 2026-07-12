@@ -13,6 +13,7 @@ from study_os_service.domain.sessions import (
     StudySession,
 )
 from study_os_service.repositories.progress import ProgressRepository
+from study_os_service.repositories.planner_runs import PlannerRunRepository
 from study_os_service.repositories.sessions import (
     IdempotencyConflictError,
     MaterialExecutionContext,
@@ -38,6 +39,7 @@ class SessionService:
         self.connection = connection
         self.sessions = SessionRepository(connection)
         self.progress = ProgressRepository(connection)
+        self.planner = PlannerRunRepository(connection)
 
     def start(
         self,
@@ -45,6 +47,7 @@ class SessionService:
         lesson_id: int,
         material_id: int,
         idempotency_key: str,
+        planner_block_id: int | None = None,
     ) -> SessionStart:
         target = target_slug.strip()
         key = idempotency_key.strip()
@@ -54,6 +57,7 @@ class SessionService:
             raise ValueError("idempotency key is required")
         self.connection.execute("BEGIN IMMEDIATE")
         try:
+            self._execution_context(target, lesson_id, material_id)
             existing = self.sessions.get_by_idempotency_key(key)
             if existing is not None:
                 if (
@@ -64,15 +68,32 @@ class SessionService:
                     raise IdempotencyConflictError(
                         "idempotency key already belongs to another request"
                     )
+                linked = self.planner.get_block_by_execution_session(existing.id)
+                linked_id = linked.id if linked is not None else None
+                if linked_id != planner_block_id:
+                    raise IdempotencyConflictError(
+                        "idempotency key already belongs to another planner request"
+                    )
                 progress = self.progress.get_or_create(lesson_id, material_id)
                 result = self._start_result(existing, progress)
                 self.connection.commit()
                 return result
 
-            context = self._execution_context(target, lesson_id, material_id)
+            planner_block = (
+                self._planner_block(
+                    planner_block_id,
+                    target,
+                    lesson_id,
+                    material_id,
+                )
+                if planner_block_id is not None
+                else None
+            )
             active = self.sessions.get_active(lesson_id, material_id)
             progress = self.progress.get_or_create(lesson_id, material_id)
             if active is not None:
+                if planner_block is not None:
+                    self._claim_planner_block(planner_block.id, active.id)
                 result = self._start_result(active, progress)
                 self.connection.commit()
                 return result
@@ -91,6 +112,8 @@ class SessionService:
                 start_page=progress.cursor_page,
                 started_at=datetime.now(UTC),
             )
+            if planner_block is not None:
+                self._claim_planner_block(planner_block.id, session.id)
             result = self._start_result(session, progress)
             self.connection.commit()
             return result
@@ -183,6 +206,15 @@ class SessionService:
                 status=status,
                 expected_version=progress.version,
             )
+            self.planner.transition_block_for_session(
+                session.id,
+                state={
+                    "completed": "completed",
+                    "failed": "failed",
+                    "partial": "pending",
+                    "abandoned": "pending",
+                }[outcome],
+            )
             self.connection.commit()
             return SessionResult(session=session, progress=progress)
         except Exception:
@@ -227,6 +259,10 @@ class SessionService:
                     status="weak",
                     expected_version=progress.version,
                 )
+            self.planner.transition_block_for_session(
+                session.id,
+                state="skipped",
+            )
             self.connection.commit()
             return SessionResult(session=session, progress=progress)
         except Exception:
@@ -250,6 +286,48 @@ class SessionService:
         if not context.absolute_path.resolve().is_file():
             raise ValueError("material file is unavailable")
         return context
+
+    def _planner_block(
+        self,
+        planner_block_id: int,
+        target_slug: str,
+        lesson_id: int,
+        material_id: int,
+    ):
+        if (
+            isinstance(planner_block_id, bool)
+            or not isinstance(planner_block_id, int)
+            or planner_block_id < 1
+        ):
+            raise ValueError("planner block id must be a positive integer")
+        context = self.planner.get_block_with_candidate(planner_block_id)
+        if context is None:
+            raise KeyError(f"planner block {planner_block_id} does not exist")
+        block, candidate = context
+        if block.target_slug != target_slug:
+            raise ValueError("planner block belongs to another target")
+        if block.block_kind != "theory":
+            raise ValueError("planner block is not a theory block")
+        if candidate.lesson_id != lesson_id or candidate.material_id != material_id:
+            raise ValueError("planner block material does not match the session")
+        if block.state not in {"pending", "active"}:
+            raise ValueError("planner block is already finished")
+        return block
+
+    def _claim_planner_block(self, block_id: int, session_id: int) -> None:
+        current = self.planner.get_block(block_id)
+        if current is None:
+            raise KeyError(f"planner block {block_id} does not exist")
+        linked = self.planner.get_block_by_execution_session(session_id)
+        if linked is not None and linked.id != block_id:
+            raise ValueError("study session already belongs to another planner block")
+        if current.execution_session_id == session_id and current.state == "active":
+            return
+        self.planner.claim_theory_block(
+            block_id,
+            session_id=session_id,
+            expected_version=current.version,
+        )
 
     @staticmethod
     def _start_result(

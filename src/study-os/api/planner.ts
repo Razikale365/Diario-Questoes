@@ -1,0 +1,569 @@
+import { requestJson } from './client';
+
+export type PlannerPhase = 'pre_edital' | 'pos_edital';
+export type CoverageStatus = 'unread' | 'in_progress' | 'covered' | 'stale' | 'weak' | 'strong';
+export type TransferKind = 'target_specific' | 'shared' | 'partial';
+export type PlannerSourceKind = 'course' | 'tec' | 'ls' | 'trilha' | 'manual' | 'bizu';
+export type PlannerBlockKind = 'theory' | 'questions' | 'review';
+export type PlannerBlockState = 'pending' | 'active' | 'completed' | 'skipped' | 'failed';
+
+export interface PlannerTarget {
+  targetSlug: string;
+  displayName: string;
+  institution: string;
+  role: string;
+  banca: string;
+  phase: PlannerPhase;
+  deadline: string | null;
+  dailyQuota: number;
+  priorityScore: number;
+  sourceUrls: string[];
+  notes: string;
+  active: boolean;
+  version: number;
+}
+
+export interface TargetTopic {
+  id: number;
+  targetSlug: string;
+  discipline: string;
+  topic: string;
+  coverageStatus: CoverageStatus;
+  editalWeight: number;
+  incidence: number;
+  tier: number;
+  bancaFit: number;
+  overlapValue: number;
+  transferKind: TransferKind;
+  sourceKind: PlannerSourceKind;
+  lessonId: number | null;
+  materialId: number | null;
+  tecSourceUrl: string | null;
+  tecSourceId: string | null;
+  plannedQuestions: number;
+  reviewDebt: number;
+  notes: string;
+  active: boolean;
+  version: number;
+}
+
+export interface PlannerRun {
+  id: number;
+  targetSlug: string;
+  date: string;
+  phase: PlannerPhase;
+  dailyQuota: number;
+  timeBudgetMinutes: number;
+  algorithmVersion: string;
+  inputHash: string;
+  supersedesRunId: number | null;
+  status: 'generated' | 'shortfall';
+  shortfallCount: number;
+  shortfallReasons: string[];
+  generatedAt: string;
+}
+
+export interface PlannerScoreBreakdown {
+  weakness: number;
+  incidence: number;
+  tier: number;
+  coverageNeed: number;
+  reviewDebt: number;
+  lsAlignment: number;
+  targetFit: number;
+  overlapValue: number;
+  deadlinePressure: number;
+  bancaFit: number;
+  editalWeight: number;
+  balancePenalty: number;
+  lowTrustPenalty: number;
+  finalScore: number;
+}
+
+export interface PlannerCandidateEvidence {
+  targetTopicId: number;
+  selectedTargetSlug: string;
+  sourceTargetSlug: string;
+  transferKind: TransferKind;
+  transferConfidence: number;
+  coverageStatus: CoverageStatus;
+  incidence: number;
+  tier: number;
+  bancaFit: number;
+  overlapValue: number;
+  editalWeight: number;
+  profileSourceKind: PlannerSourceKind;
+  materialMappingPresent: boolean;
+  lessonId: number | null;
+  materialId: number | null;
+  materialKind: string | null;
+  materialTrust: number | null;
+  progressStatus: CoverageStatus | null;
+  cursorPage: number | null;
+  pageCount: number | null;
+  tecSourceUrl: string | null;
+  tecSourceId: string | null;
+  wrongCount: number;
+  doubtCount: number;
+  favoriteCount: number;
+  failedSessions: number;
+  skippedBlocks: number;
+  weakProgress: boolean;
+  reviewDebt: number;
+  stopReason: string | null;
+}
+
+export interface PlannerScoreEvidence {
+  algorithmVersion: string;
+  inputHash: string;
+  candidateKey: string;
+  targetSlug: string;
+  phase: PlannerPhase;
+  components: PlannerScoreBreakdown;
+  weightsMilli: Record<string, number>;
+  penaltyWeightsMilli: Record<string, number>;
+}
+
+export interface PlannerEvidence {
+  candidateEvidence: PlannerCandidateEvidence;
+  scoreEvidence: PlannerScoreEvidence;
+}
+
+export interface PlannerCandidate {
+  id: number;
+  runId: number;
+  candidateKey: string;
+  targetSlug: string;
+  discipline: string;
+  topic: string;
+  blockKind: PlannerBlockKind;
+  sourceKind: PlannerSourceKind;
+  targetTopicId: number | null;
+  lessonId: number | null;
+  materialId: number | null;
+  durationMinutes: number;
+  plannedQuestions: number;
+  scoreBreakdown: PlannerScoreBreakdown;
+  chosenPosition: number | null;
+  displacedBy: string | null;
+  stopReason: string | null;
+  evidence: PlannerEvidence;
+}
+
+export interface PlannerBlock {
+  id: number;
+  runId: number;
+  candidateId: number;
+  targetSlug: string;
+  date: string;
+  position: number;
+  blockKind: PlannerBlockKind;
+  title: string;
+  durationMinutes: number;
+  plannedQuestions: number;
+  state: PlannerBlockState;
+  executionSessionId: number | null;
+  questionsDone: number;
+  correctCount: number;
+  wrongCount: number;
+  doubtCount: number;
+  favoriteCount: number;
+  version: number;
+  discipline?: string;
+  topic?: string;
+  sourceKind?: PlannerSourceKind;
+  lessonId?: number | null;
+  materialId?: number | null;
+  scoreBreakdown?: PlannerScoreBreakdown;
+  evidence?: PlannerEvidence;
+}
+
+export interface PlannerDay {
+  run: PlannerRun;
+  blocks: PlannerBlock[];
+  scoreboard: PlannerCandidate[];
+}
+
+export interface PlannerTargetList { items: PlannerTarget[] }
+export interface TargetTopicList { items: TargetTopic[] }
+export interface PlannerScoreboard { items: PlannerCandidate[] }
+
+export type PlannerTargetUpdate = Partial<Omit<PlannerTarget, 'targetSlug' | 'version'>> & {
+  targetSlug: string;
+  expectedVersion: number;
+};
+
+export type TargetTopicUpdate = Partial<Omit<TargetTopic, 'targetSlug' | 'version'>> & {
+  id?: number;
+  expectedVersion?: number;
+};
+
+export interface GeneratePlannerDayInput {
+  targetSlug: string;
+  date: string;
+  timeBudgetMinutes?: number;
+  lsTargetSlug?: string;
+}
+
+export interface RefreshPlannerDayInput extends GeneratePlannerDayInput {
+  previousRunId: number;
+}
+
+export interface PlannerBlockResultInput {
+  state: Extract<PlannerBlockState, 'completed' | 'skipped' | 'failed'>;
+  questionsDone: number;
+  correctCount: number;
+  wrongCount: number;
+  doubtCount: number;
+  favoriteCount: number;
+  expectedVersion: number;
+}
+
+const phases = ['pre_edital', 'pos_edital'] as const;
+const coverageStatuses = ['unread', 'in_progress', 'covered', 'stale', 'weak', 'strong'] as const;
+const transferKinds = ['target_specific', 'shared', 'partial'] as const;
+const sourceKinds = ['course', 'tec', 'ls', 'trilha', 'manual', 'bizu'] as const;
+const blockKinds = ['theory', 'questions', 'review'] as const;
+const blockStates = ['pending', 'active', 'completed', 'skipped', 'failed'] as const;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isNonEmptyString = (value: unknown): value is string => isString(value) && Boolean(value.trim());
+const isInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
+const isPositiveInteger = (value: unknown): value is number => isInteger(value) && value > 0;
+const isNonNegativeInteger = (value: unknown): value is number => isInteger(value) && value >= 0;
+const isNullablePositiveInteger = (value: unknown): value is number | null =>
+  value === null || isPositiveInteger(value);
+const isNullableString = (value: unknown): value is string | null => value === null || isString(value);
+const isFiniteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum;
+const oneOf = <T extends string>(value: unknown, options: readonly T[]): value is T =>
+  typeof value === 'string' && options.includes(value as T);
+const isIsoDate = (value: unknown): value is string =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+const isNullableIsoDate = (value: unknown): value is string | null => value === null || isIsoDate(value);
+
+const invalid = (label: string): never => {
+  throw new TypeError(`Invalid Study OS planner ${label} response`);
+};
+
+const parseNumberRecord = (value: unknown, label: string): Record<string, number> => {
+  if (!isRecord(value) || !Object.values(value).every((item) => isInteger(item))) invalid(label);
+  return value as Record<string, number>;
+};
+
+export function parsePlannerTarget(value: unknown): PlannerTarget {
+  if (!isRecord(value)
+    || !isNonEmptyString(value.targetSlug)
+    || !isNonEmptyString(value.displayName)
+    || !isNonEmptyString(value.institution)
+    || !isNonEmptyString(value.role)
+    || !isNonEmptyString(value.banca)
+    || !oneOf(value.phase, phases)
+    || !isNullableIsoDate(value.deadline)
+    || !isPositiveInteger(value.dailyQuota)
+    || value.dailyQuota > 8
+    || !isFiniteInRange(value.priorityScore, 0, 100)
+    || !Array.isArray(value.sourceUrls)
+    || !value.sourceUrls.every(isNonEmptyString)
+    || !isString(value.notes)
+    || typeof value.active !== 'boolean'
+    || !isPositiveInteger(value.version)) invalid('target');
+  return value as unknown as PlannerTarget;
+}
+
+export function parsePlannerTargetList(value: unknown): PlannerTargetList {
+  const record = isRecord(value) ? value : invalid('target list');
+  const items = record.items;
+  if (!Array.isArray(items)) invalid('target list');
+  return { items: (items as unknown[]).map(parsePlannerTarget) };
+}
+
+export function parseTargetTopic(value: unknown): TargetTopic {
+  if (!isRecord(value)
+    || !isPositiveInteger(value.id)
+    || !isNonEmptyString(value.targetSlug)
+    || !isNonEmptyString(value.discipline)
+    || !isNonEmptyString(value.topic)
+    || !oneOf(value.coverageStatus, coverageStatuses)
+    || !isFiniteInRange(value.editalWeight, 0, 10)
+    || !isFiniteInRange(value.incidence, 0, 100)
+    || !isInteger(value.tier)
+    || value.tier < 1
+    || value.tier > 5
+    || !isFiniteInRange(value.bancaFit, 0, 100)
+    || !isFiniteInRange(value.overlapValue, 0, 100)
+    || !oneOf(value.transferKind, transferKinds)
+    || !oneOf(value.sourceKind, sourceKinds)
+    || !isNullablePositiveInteger(value.lessonId)
+    || !isNullablePositiveInteger(value.materialId)
+    || (value.materialId !== null && value.lessonId === null)
+    || !isNullableString(value.tecSourceUrl)
+    || !isNullableString(value.tecSourceId)
+    || !isNonNegativeInteger(value.plannedQuestions)
+    || !isFiniteInRange(value.reviewDebt, 0, 100)
+    || !isString(value.notes)
+    || typeof value.active !== 'boolean'
+    || !isPositiveInteger(value.version)) invalid('topic');
+  return value as unknown as TargetTopic;
+}
+
+export function parseTargetTopicList(value: unknown): TargetTopicList {
+  const record = isRecord(value) ? value : invalid('topic list');
+  const items = record.items;
+  if (!Array.isArray(items)) invalid('topic list');
+  return { items: (items as unknown[]).map(parseTargetTopic) };
+}
+
+export function parsePlannerRun(value: unknown): PlannerRun {
+  if (!isRecord(value)
+    || !isPositiveInteger(value.id)
+    || !isNonEmptyString(value.targetSlug)
+    || !isIsoDate(value.date)
+    || !oneOf(value.phase, phases)
+    || !isPositiveInteger(value.dailyQuota)
+    || !isPositiveInteger(value.timeBudgetMinutes)
+    || !isNonEmptyString(value.algorithmVersion)
+    || !isNonEmptyString(value.inputHash)
+    || !isNullablePositiveInteger(value.supersedesRunId)
+    || !oneOf(value.status, ['generated', 'shortfall'] as const)
+    || !isNonNegativeInteger(value.shortfallCount)
+    || !Array.isArray(value.shortfallReasons)
+    || !value.shortfallReasons.every(isNonEmptyString)
+    || value.shortfallReasons.length !== value.shortfallCount
+    || (value.status === 'generated' && value.shortfallCount !== 0)
+    || (value.status === 'shortfall' && value.shortfallCount < 1)
+    || !isNonEmptyString(value.generatedAt)) invalid('run');
+  return value as unknown as PlannerRun;
+}
+
+export function parsePlannerScore(value: unknown): PlannerScoreBreakdown {
+  const record = isRecord(value) ? value : invalid('score');
+  const boundedKeys = [
+    'weakness', 'incidence', 'tier', 'coverageNeed', 'reviewDebt', 'lsAlignment',
+    'targetFit', 'overlapValue', 'deadlinePressure', 'bancaFit', 'editalWeight',
+    'balancePenalty', 'lowTrustPenalty',
+  ];
+  if (!boundedKeys.every((key) => isInteger(record[key]) && Number(record[key]) >= 0 && Number(record[key]) <= 10000)
+    || !isInteger(record.finalScore)) invalid('score');
+  return record as unknown as PlannerScoreBreakdown;
+}
+
+function parseCandidateEvidence(value: unknown): PlannerCandidateEvidence {
+  const record = isRecord(value) ? value : invalid('evidence');
+  if (!isPositiveInteger(record.targetTopicId)
+    || !isNonEmptyString(record.selectedTargetSlug)
+    || !isNonEmptyString(record.sourceTargetSlug)
+    || !oneOf(record.transferKind, transferKinds)
+    || !isFiniteInRange(record.transferConfidence, 0, 100)
+    || !oneOf(record.coverageStatus, coverageStatuses)
+    || !isFiniteInRange(record.incidence, 0, 100)
+    || !isInteger(record.tier)
+    || !isFiniteInRange(record.bancaFit, 0, 100)
+    || !isFiniteInRange(record.overlapValue, 0, 100)
+    || !isFiniteInRange(record.editalWeight, 0, 10)
+    || !oneOf(record.profileSourceKind, sourceKinds)
+    || typeof record.materialMappingPresent !== 'boolean'
+    || !isNullablePositiveInteger(record.lessonId)
+    || !isNullablePositiveInteger(record.materialId)
+    || !isNullableString(record.materialKind)
+    || !(record.materialTrust === null || isFiniteInRange(record.materialTrust, 0, 10))
+    || !(record.progressStatus === null || oneOf(record.progressStatus, coverageStatuses))
+    || !isNullablePositiveInteger(record.cursorPage)
+    || !isNullablePositiveInteger(record.pageCount)
+    || !isNullableString(record.tecSourceUrl)
+    || !isNullableString(record.tecSourceId)
+    || !isNonNegativeInteger(record.wrongCount)
+    || !isNonNegativeInteger(record.doubtCount)
+    || !isNonNegativeInteger(record.favoriteCount)
+    || !isNonNegativeInteger(record.failedSessions)
+    || !isNonNegativeInteger(record.skippedBlocks)
+    || typeof record.weakProgress !== 'boolean'
+    || !isFiniteInRange(record.reviewDebt, 0, 100)
+    || !isNullableString(record.stopReason)) invalid('evidence');
+  return record as unknown as PlannerCandidateEvidence;
+}
+
+function parseScoreEvidence(value: unknown): PlannerScoreEvidence {
+  const record = isRecord(value) ? value : invalid('evidence');
+  if (!isNonEmptyString(record.algorithmVersion)
+    || !isNonEmptyString(record.inputHash)
+    || !isNonEmptyString(record.candidateKey)
+    || !isNonEmptyString(record.targetSlug)
+    || !oneOf(record.phase, phases)) invalid('evidence');
+  return {
+    algorithmVersion: record.algorithmVersion as string,
+    inputHash: record.inputHash as string,
+    candidateKey: record.candidateKey as string,
+    targetSlug: record.targetSlug as string,
+    phase: record.phase as PlannerPhase,
+    components: parsePlannerScore(record.components),
+    weightsMilli: parseNumberRecord(record.weightsMilli, 'evidence'),
+    penaltyWeightsMilli: parseNumberRecord(record.penaltyWeightsMilli, 'evidence'),
+  };
+}
+
+export function parsePlannerEvidence(value: unknown): PlannerEvidence {
+  const record = isRecord(value) ? value : invalid('evidence');
+  return {
+    candidateEvidence: parseCandidateEvidence(record.candidateEvidence),
+    scoreEvidence: parseScoreEvidence(record.scoreEvidence),
+  };
+}
+
+export function parsePlannerCandidate(value: unknown): PlannerCandidate {
+  const record = isRecord(value) ? value : invalid('candidate');
+  if (!isPositiveInteger(record.id)
+    || !isPositiveInteger(record.runId)
+    || !isNonEmptyString(record.candidateKey)
+    || !isNonEmptyString(record.targetSlug)
+    || !isNonEmptyString(record.discipline)
+    || !isNonEmptyString(record.topic)
+    || !oneOf(record.blockKind, blockKinds)
+    || !oneOf(record.sourceKind, sourceKinds)
+    || !isNullablePositiveInteger(record.targetTopicId)
+    || !isNullablePositiveInteger(record.lessonId)
+    || !isNullablePositiveInteger(record.materialId)
+    || !isPositiveInteger(record.durationMinutes)
+    || record.durationMinutes < 45
+    || record.durationMinutes > 75
+    || !isNonNegativeInteger(record.plannedQuestions)
+    || (record.blockKind === 'theory' && record.plannedQuestions !== 0)
+    || (record.blockKind !== 'theory' && record.plannedQuestions < 1)
+    || !isNullablePositiveInteger(record.chosenPosition)
+    || !isNullableString(record.displacedBy)
+    || !isNullableString(record.stopReason)
+    || (record.chosenPosition !== null && (record.displacedBy !== null || record.stopReason !== null))) invalid('candidate');
+  const score = parsePlannerScore(record.scoreBreakdown);
+  const evidence = parsePlannerEvidence(record.evidence);
+  if (evidence.scoreEvidence.candidateKey !== record.candidateKey
+    || evidence.scoreEvidence.components.finalScore !== score.finalScore) invalid('evidence');
+  return { ...record, scoreBreakdown: score, evidence } as unknown as PlannerCandidate;
+}
+
+export function parsePlannerBlock(value: unknown, requireCandidate = false): PlannerBlock {
+  const record = isRecord(value) ? value : invalid('block');
+  if (!isPositiveInteger(record.id)
+    || !isPositiveInteger(record.runId)
+    || !isPositiveInteger(record.candidateId)
+    || !isNonEmptyString(record.targetSlug)
+    || !isIsoDate(record.date)
+    || !isPositiveInteger(record.position)
+    || !oneOf(record.blockKind, blockKinds)
+    || !isNonEmptyString(record.title)
+    || !isPositiveInteger(record.durationMinutes)
+    || !isNonNegativeInteger(record.plannedQuestions)
+    || !oneOf(record.state, blockStates)
+    || !isNullablePositiveInteger(record.executionSessionId)
+    || !isNonNegativeInteger(record.questionsDone)
+    || !isNonNegativeInteger(record.correctCount)
+    || !isNonNegativeInteger(record.wrongCount)
+    || !isNonNegativeInteger(record.doubtCount)
+    || !isNonNegativeInteger(record.favoriteCount)
+    || Number(record.correctCount) + Number(record.wrongCount) > Number(record.questionsDone)
+    || !isPositiveInteger(record.version)) invalid('block');
+  if (requireCandidate && (!isNonEmptyString(record.discipline)
+    || !isNonEmptyString(record.topic)
+    || !oneOf(record.sourceKind, sourceKinds)
+    || !isNullablePositiveInteger(record.lessonId)
+    || !isNullablePositiveInteger(record.materialId))) invalid('block');
+  const parsed = { ...record };
+  if (requireCandidate) {
+    parsed.scoreBreakdown = parsePlannerScore(record.scoreBreakdown);
+    parsed.evidence = parsePlannerEvidence(record.evidence);
+  }
+  return parsed as unknown as PlannerBlock;
+}
+
+export function parsePlannerDay(value: unknown): PlannerDay {
+  const record = isRecord(value) ? value : invalid('day');
+  const blockItems = record.blocks;
+  const scoreboardItems = record.scoreboard;
+  if (!Array.isArray(blockItems) || !Array.isArray(scoreboardItems)) invalid('day');
+  const run = parsePlannerRun(record.run);
+  const blocks = (blockItems as unknown[]).map((item) => parsePlannerBlock(item, true));
+  const scoreboard = (scoreboardItems as unknown[]).map(parsePlannerCandidate);
+  if (!blocks.every((item) => item.runId === run.id && item.targetSlug === run.targetSlug)
+    || !scoreboard.every((item) => item.runId === run.id && item.targetSlug === run.targetSlug)) invalid('day');
+  return { run, blocks, scoreboard };
+}
+
+export function parsePlannerScoreboard(value: unknown): PlannerScoreboard {
+  const record = isRecord(value) ? value : invalid('scoreboard');
+  const items = record.items;
+  if (!Array.isArray(items)) invalid('scoreboard');
+  return { items: (items as unknown[]).map(parsePlannerCandidate) };
+}
+
+const jsonHeaders = { 'Content-Type': 'application/json' };
+
+export async function fetchPlannerTargets(signal?: AbortSignal): Promise<PlannerTargetList> {
+  return parsePlannerTargetList(await requestJson('/api/v1/planner/targets', { signal }));
+}
+
+export async function seedPlannerTargets(targetSlugs: string[]): Promise<{
+  targetsSeeded: number;
+  topicsSeeded: number;
+  targetSlugs: string[];
+}> {
+  const value = await requestJson('/api/v1/planner/targets/seed', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ targetSlugs }),
+  });
+  if (!isRecord(value)
+    || !isNonNegativeInteger(value.targetsSeeded)
+    || !isNonNegativeInteger(value.topicsSeeded)
+    || !Array.isArray(value.targetSlugs)
+    || !value.targetSlugs.every(isNonEmptyString)) invalid('seed');
+  return value as { targetsSeeded: number; topicsSeeded: number; targetSlugs: string[] };
+}
+
+export async function updatePlannerTarget(input: PlannerTargetUpdate): Promise<PlannerTarget> {
+  return parsePlannerTarget(await requestJson('/api/v1/planner/targets', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify(input),
+  }));
+}
+
+export async function fetchTargetTopics(targetSlug: string, signal?: AbortSignal): Promise<TargetTopicList> {
+  const query = new URLSearchParams({ targetSlug });
+  return parseTargetTopicList(await requestJson(`/api/v1/planner/topics?${query}`, { signal }));
+}
+
+export async function updateTargetTopics(targetSlug: string, items: TargetTopicUpdate[]): Promise<TargetTopicList> {
+  const query = new URLSearchParams({ targetSlug });
+  return parseTargetTopicList(await requestJson(`/api/v1/planner/topics?${query}`, {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ items }),
+  }));
+}
+
+export async function generatePlannerDay(input: GeneratePlannerDayInput, idempotencyKey: string): Promise<PlannerDay> {
+  return parsePlannerDay(await requestJson('/api/v1/planner/generate-day', {
+    method: 'POST',
+    headers: { ...jsonHeaders, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(input),
+  }));
+}
+
+export async function refreshPlannerDay(input: RefreshPlannerDayInput, idempotencyKey: string): Promise<PlannerDay> {
+  return parsePlannerDay(await requestJson('/api/v1/planner/refresh-day', {
+    method: 'POST',
+    headers: { ...jsonHeaders, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(input),
+  }));
+}
+
+export async function fetchPlannerDay(targetSlug: string, dateValue: string, signal?: AbortSignal): Promise<PlannerDay> {
+  const query = new URLSearchParams({ targetSlug, date: dateValue });
+  return parsePlannerDay(await requestJson(`/api/v1/planner/day?${query}`, { signal }));
+}
+
+export async function fetchPlannerScoreboard(runId: number, signal?: AbortSignal): Promise<PlannerScoreboard> {
+  const query = new URLSearchParams({ runId: String(runId) });
+  return parsePlannerScoreboard(await requestJson(`/api/v1/planner/scoreboard?${query}`, { signal }));
+}
+
+export async function submitPlannerBlockResult(blockId: number, input: PlannerBlockResultInput): Promise<PlannerBlock> {
+  return parsePlannerBlock(await requestJson(`/api/v1/planner/blocks/${blockId}/result`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify(input),
+  }));
+}

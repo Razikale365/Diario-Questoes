@@ -82,6 +82,7 @@ export interface StartStudySessionInput {
   targetSlug: string;
   lessonId: number;
   materialId: number;
+  plannerBlockId?: number;
 }
 
 export interface CheckpointStudySessionInput {

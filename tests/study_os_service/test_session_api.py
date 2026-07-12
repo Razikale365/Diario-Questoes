@@ -62,6 +62,26 @@ def start_session(client, lesson_id, material_id, key="session-start"):
     )
 
 
+def test_session_start_rejects_invalid_planner_block_id(tmp_path: Path):
+    app, choice = make_session_app(tmp_path)
+    with TestClient(app) as client:
+        lesson_id, material_id = prepare_session_inventory(client, choice)
+        response = client.post(
+            "/api/v1/sessions",
+            headers={"Idempotency-Key": "invalid-planner-block"},
+            json={
+                "targetSlug": "rfb_auditor",
+                "lessonId": lesson_id,
+                "materialId": material_id,
+                "plannerBlockId": 999999,
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "session_not_found"
+    assert "planner block" in response.json()["message"]
+
+
 def test_material_inspection_is_lazy_target_scoped_and_cached(tmp_path: Path):
     app, choice = make_session_app(tmp_path)
 

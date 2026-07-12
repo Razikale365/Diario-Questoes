@@ -180,6 +180,7 @@ test('start sends exact body and idempotency header', async (context) => {
     targetSlug: 'rfb_auditor',
     lessonId: 21,
     materialId: 41,
+    plannerBlockId: 71,
   }, 'start-61');
 
   assert.deepEqual(result, sessionStart);
@@ -190,6 +191,7 @@ test('start sends exact body and idempotency header', async (context) => {
     targetSlug: 'rfb_auditor',
     lessonId: 21,
     materialId: 41,
+    plannerBlockId: 71,
   });
 });
 

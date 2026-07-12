@@ -17,6 +17,10 @@ class PlannerBlockVersionConflictError(RuntimeError):
     pass
 
 
+class PlannerBlockExecutionConflictError(RuntimeError):
+    pass
+
+
 def _datetime(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
@@ -264,6 +268,76 @@ class PlannerRunRepository:
             "SELECT * FROM planner_blocks WHERE id=?", (block_id,)
         ).fetchone()
         return _block(row) if row else None
+
+    def get_block_with_candidate(
+        self, block_id: int
+    ) -> tuple[PlannerBlock, PlannerCandidate] | None:
+        block = self.get_block(block_id)
+        if block is None:
+            return None
+        candidate = self.get_candidate(block.candidate_id)
+        if candidate is None:
+            raise RuntimeError("planner block candidate disappeared")
+        return block, candidate
+
+    def get_block_by_execution_session(
+        self, session_id: int
+    ) -> PlannerBlock | None:
+        row = self.connection.execute(
+            "SELECT * FROM planner_blocks WHERE execution_session_id=?",
+            (session_id,),
+        ).fetchone()
+        return _block(row) if row else None
+
+    def claim_theory_block(
+        self,
+        block_id: int,
+        *,
+        session_id: int,
+        expected_version: int,
+    ) -> PlannerBlock:
+        cursor = self.connection.execute(
+            """
+            UPDATE planner_blocks SET
+              execution_session_id=?, state='active', version=version+1,
+              updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND version=? AND block_kind='theory'
+              AND state IN ('pending','active')
+            """,
+            (session_id, block_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise PlannerBlockExecutionConflictError(
+                f"planner block {block_id} changed before session claim"
+            )
+        saved = self.get_block(block_id)
+        if saved is None:
+            raise RuntimeError("claimed planner block disappeared")
+        return saved
+
+    def transition_block_for_session(
+        self,
+        session_id: int,
+        *,
+        state: str,
+    ) -> PlannerBlock | None:
+        current = self.get_block_by_execution_session(session_id)
+        if current is None:
+            return None
+        cursor = self.connection.execute(
+            """
+            UPDATE planner_blocks SET state=?, version=version+1,
+              updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND execution_session_id=? AND state='active'
+              AND version=?
+            """,
+            (state, current.id, session_id, current.version),
+        )
+        if cursor.rowcount != 1:
+            raise PlannerBlockExecutionConflictError(
+                f"planner block {current.id} changed before session result"
+            )
+        return self.get_block(current.id)
 
     def list_blocks(self, run_id: int) -> tuple[PlannerBlock, ...]:
         rows = self.connection.execute(
