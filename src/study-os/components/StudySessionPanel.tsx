@@ -40,6 +40,8 @@ interface StudySessionPanelProps {
   lessonId: number;
   material: MaterialSummary;
   materialLabel: string;
+  plannerBlockId?: number;
+  onPlannerStateChange?: () => void;
 }
 
 type SessionAction = 'start' | 'checkpoint' | 'partial' | 'complete' | 'failed' | 'skip';
@@ -78,6 +80,8 @@ export const StudySessionPanel: React.FC<StudySessionPanelProps> = ({
   lessonId,
   material,
   materialLabel,
+  plannerBlockId,
+  onPlannerStateChange,
 }) => {
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [session, setSession] = useState<StudySession | null>(null);
@@ -190,6 +194,7 @@ export const StudySessionPanel: React.FC<StudySessionPanelProps> = ({
         targetSlug,
         lessonId,
         materialId: material.id,
+        ...(plannerBlockId ? { plannerBlockId } : {}),
       }, startKeyRef.current);
       setProgress(started.progress);
       setSession(started.session);
@@ -199,6 +204,7 @@ export const StudySessionPanel: React.FC<StudySessionPanelProps> = ({
       if (confirmedUrl !== absoluteViewerUrl) {
         window.open(confirmedUrl, 'study-os-material');
       }
+      onPlannerStateChange?.();
     } catch (error: unknown) {
       viewer.close();
       await refreshAfterConflict(error);
@@ -259,6 +265,7 @@ export const StudySessionPanel: React.FC<StudySessionPanelProps> = ({
         : outcome === 'failed'
           ? 'Dificuldade registrada para o próximo planejamento.'
           : `Sessão parcial salva na página ${result.progress.cursorPage}.`);
+      onPlannerStateChange?.();
     } catch (error: unknown) {
       await refreshAfterConflict(error);
     } finally {
@@ -281,6 +288,7 @@ export const StudySessionPanel: React.FC<StudySessionPanelProps> = ({
       setConfirmedPage(result.progress.cursorPage);
       startKeyRef.current = null;
       setNotice('Pulo registrado sem perder o ponto de retomada.');
+      onPlannerStateChange?.();
     } catch (error: unknown) {
       await refreshAfterConflict(error);
     } finally {

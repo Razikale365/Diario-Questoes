@@ -69,6 +69,7 @@ import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import { ServiceStatus } from '../study-os/components/ServiceStatus';
 import { CourseInventory } from '../study-os/components/CourseInventory';
+import { AutonomousDay } from '../study-os/components/AutonomousDay';
 import {
   buildStudyBaselineComparison,
   buildTargetDecisionRows,
@@ -1583,7 +1584,26 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       </section>
 
       {activeSection === 'today' && (
-        <section className="space-y-4">
+        <>
+          <AutonomousDay
+            targetSlug={studyOsTarget}
+            onTargetChange={selectStudyOsTarget}
+            legacyTasks={todayCommandCenter.tasks.map((task) => ({
+              id: task.id,
+              discipline: task.discipline,
+              description: task.description,
+              source: task.source,
+              targetSlug: task.targetSlug,
+              status: task.status,
+            }))}
+            onOpenLegacyTask={setSelectedTaskId}
+            showToast={showToast}
+          />
+          <details className="rounded-lg border border-[#404040] bg-[#202020]">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-400">
+              Agenda LS e calendário local
+            </summary>
+            <section className="space-y-4 border-t border-white/10 p-4">
           <div className="rounded-lg border border-[#404040] bg-[#262626] p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -1732,7 +1752,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               </div>
             ) : null}
           </section>
-        </section>
+            </section>
+          </details>
+        </>
       )}
 
       {activeSection === 'meta' && (
