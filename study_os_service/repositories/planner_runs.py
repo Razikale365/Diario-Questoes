@@ -75,11 +75,13 @@ def _candidate(row: sqlite3.Row) -> PlannerCandidate:
             balance_penalty=row["balance_penalty"],
             low_trust_penalty=row["low_trust_penalty"],
             final_score=row["final_score"],
+            weekly_alignment=row["weekly_alignment"],
         ),
         chosen_position=row["chosen_position"],
         displaced_by_candidate_key=row["displaced_by_candidate_key"],
         stop_reason=row["stop_reason"],
         evidence=json.loads(row["evidence_json"]),
+        adaptation_reason=row["adaptation_reason"],
     )
 
 
@@ -190,7 +192,7 @@ class PlannerRunRepository:
               overlap_value, deadline_pressure, banca_fit, edital_weight,
               balance_penalty, low_trust_penalty, final_score,
               chosen_position, displaced_by_candidate_key, stop_reason,
-              evidence_json
+              evidence_json, weekly_alignment, adaptation_reason
             ) VALUES (
               :run_id, :candidate_key, :target_slug, :discipline, :topic,
               :block_kind, :source_kind, :target_topic_id, :lesson_id, :material_id,
@@ -199,7 +201,7 @@ class PlannerRunRepository:
               :overlap_value, :deadline_pressure, :banca_fit, :edital_weight,
               :balance_penalty, :low_trust_penalty, :final_score,
               :chosen_position, :displaced_by_candidate_key, :stop_reason,
-              :evidence_json
+              :evidence_json, :weekly_alignment, :adaptation_reason
             )
             """,
             dict(values),

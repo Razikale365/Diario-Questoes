@@ -11,7 +11,7 @@ from study_os_service.domain.planner import ExamTarget, ScoreBreakdown
 from study_os_service.services.planner_candidates import CandidateDraft
 
 
-ALGORITHM_VERSION = "m4-v1"
+ALGORITHM_VERSION = "m5-v1"
 
 PRE_EDITAL_WEIGHTS = MappingProxyType(
     {
@@ -26,6 +26,7 @@ PRE_EDITAL_WEIGHTS = MappingProxyType(
         "deadline_pressure": 500,
         "banca_fit": 1000,
         "edital_weight": 1500,
+        "weekly_alignment": 500,
     }
 )
 POS_EDITAL_WEIGHTS = MappingProxyType(
@@ -41,6 +42,7 @@ POS_EDITAL_WEIGHTS = MappingProxyType(
         "deadline_pressure": 2000,
         "banca_fit": 1000,
         "edital_weight": 1500,
+        "weekly_alignment": 500,
     }
 )
 PENALTY_WEIGHTS = MappingProxyType(
@@ -176,6 +178,7 @@ def _score(
     deadline_pressure = _deadline_pressure(context)
     banca_fit = _percent_bp(evidence["bancaFit"])
     edital_weight = _edital_weight_bp(evidence["editalWeight"])
+    weekly_alignment = _percent_bp(evidence.get("weeklyAlignment", 0))
     balance_penalty = _balance_penalty(candidate, context)
     low_trust_penalty = _low_trust_penalty(candidate)
     values = {
@@ -190,6 +193,7 @@ def _score(
         "deadline_pressure": deadline_pressure,
         "banca_fit": banca_fit,
         "edital_weight": edital_weight,
+        "weekly_alignment": weekly_alignment,
         "balance_penalty": balance_penalty,
         "low_trust_penalty": low_trust_penalty,
     }
@@ -224,6 +228,7 @@ def _score(
             "deadlinePressure": deadline_pressure,
             "bancaFit": banca_fit,
             "editalWeight": edital_weight,
+            "weeklyAlignment": weekly_alignment,
             "balancePenalty": balance_penalty,
             "lowTrustPenalty": low_trust_penalty,
             "finalScore": final_score,
@@ -240,6 +245,9 @@ def _score(
 
 
 def _weakness(evidence: Mapping[str, Any], status: str) -> int:
+    projected_mastery = evidence.get("projectedMasteryBp")
+    if projected_mastery is not None:
+        return max(_WEAKNESS[status], 10000 - int(projected_mastery))
     error_signal = min(
         2500,
         int(evidence["wrongCount"]) * 250
@@ -253,6 +261,9 @@ def _weakness(evidence: Mapping[str, Any], status: str) -> int:
 
 
 def _review_debt(evidence: Mapping[str, Any]) -> int:
+    projected = evidence.get("projectedReviewDebtBp")
+    if projected is not None:
+        return max(0, min(10000, int(projected)))
     explicit = _percent_bp(evidence["reviewDebt"])
     observed = min(
         10000,

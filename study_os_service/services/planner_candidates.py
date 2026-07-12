@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 import hashlib
 import json
 import math
@@ -38,6 +39,7 @@ CandidateStopReason = Literal[
     "material_target_mismatch",
     "tec_source_missing",
     "review_evidence_missing",
+    "adaptive_cooldown",
 ]
 
 
@@ -52,6 +54,7 @@ STOP_REASONS: tuple[CandidateStopReason, ...] = (
     "material_target_mismatch",
     "tec_source_missing",
     "review_evidence_missing",
+    "adaptive_cooldown",
 )
 
 _MATERIAL_KINDS = {
@@ -129,7 +132,6 @@ class ReviewEvidence:
     queue_item_id: int | None = None
     proof_questions: int = 0
     trigger_event_ids: tuple[int, ...] = ()
-    projected_debt_bp: int = 0
     queue_reason: str | None = None
     deferred_until: str | None = None
 
@@ -154,7 +156,6 @@ class ReviewEvidence:
             _non_negative(self.proof_questions, "proof questions")
         for event_id in self.trigger_event_ids:
             _positive(event_id, "trigger event id")
-        _non_negative(self.projected_debt_bp, "projected debt")
         if self.queue_reason is not None and not self.queue_reason.strip():
             raise ValueError("queue reason cannot be blank")
         if self.deferred_until is not None and not self.deferred_until.strip():
@@ -175,11 +176,50 @@ class ReviewEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectedLearningEvidence:
+    coverage_status: str
+    mastery_bp: int
+    confidence_bp: int
+    review_debt_bp: int
+    last_activity_at: datetime | None
+    next_review_date: date | None
+    stale_at: date | None
+    event_cursor: int
+
+    def __post_init__(self) -> None:
+        if self.coverage_status not in _PROGRESS_STATUSES:
+            raise ValueError("invalid projected coverage status")
+        for value, label in (
+            (self.mastery_bp, "projected mastery"),
+            (self.confidence_bp, "projected confidence"),
+            (self.review_debt_bp, "projected review debt"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10000:
+                raise ValueError(f"{label} must be basis points")
+        if self.last_activity_at is not None and (
+            not isinstance(self.last_activity_at, datetime)
+            or self.last_activity_at.tzinfo is None
+        ):
+            raise ValueError("last activity must be timezone-aware")
+        for value, label in (
+            (self.next_review_date, "next review date"),
+            (self.stale_at, "stale at"),
+        ):
+            if value is not None and (
+                isinstance(value, datetime) or not isinstance(value, date)
+            ):
+                raise ValueError(f"{label} must be a date")
+        _non_negative(self.event_cursor, "event cursor")
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateTopicEvidence:
     topic: TargetTopic
     material_mapping_present: bool
     materials: tuple[MaterialEvidence, ...]
     review: ReviewEvidence
+    projected: ProjectedLearningEvidence | None = None
+    as_of: date | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.material_mapping_present, bool):
@@ -188,6 +228,14 @@ class CandidateTopicEvidence:
             raise ValueError("materials must be a tuple")
         if not isinstance(self.review, ReviewEvidence):
             raise ValueError("review evidence is required")
+        if self.projected is not None and not isinstance(
+            self.projected, ProjectedLearningEvidence
+        ):
+            raise ValueError("projected learning evidence is invalid")
+        if self.as_of is not None and (
+            isinstance(self.as_of, datetime) or not isinstance(self.as_of, date)
+        ):
+            raise ValueError("candidate as-of must be a date")
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +254,7 @@ class CandidateDraft:
     planned_questions: int
     stop_reason: CandidateStopReason | None
     evidence: Mapping[str, Any]
+    adaptation_reason: str
 
     @property
     def executable(self) -> bool:
@@ -261,7 +310,30 @@ def _candidate(
 ) -> CandidateDraft:
     material: MaterialEvidence | None = None
     stop_reason = target_stop
+    projected = row.projected
+    stale_due = bool(
+        projected is not None
+        and row.as_of is not None
+        and projected.stale_at is not None
+        and row.as_of >= projected.stale_at
+    )
+    effective_status = (
+        "stale"
+        if stale_due
+        else projected.coverage_status
+        if projected is not None
+        else row.topic.coverage_status
+    )
+    adaptation_reason = _adaptation_reason(row, stale_due)
     source_kind: PlannerSourceKind = "tec" if block_kind != "theory" else "manual"
+    if (
+        stop_reason is None
+        and projected is not None
+        and not stale_due
+        and effective_status in {"covered", "strong"}
+        and block_kind in {"theory", "questions"}
+    ):
+        stop_reason = "adaptive_cooldown"
     if stop_reason is None and block_kind == "theory":
         material, stop_reason = _theory_material(row)
         if material is not None:
@@ -271,6 +343,8 @@ def _candidate(
             stop_reason = "tec_source_missing"
     elif stop_reason is None and block_kind == "review":
         if row.review.deferred_until is not None:
+            stop_reason = "review_evidence_missing"
+        elif projected is not None and row.review.queue_item_id is None:
             stop_reason = "review_evidence_missing"
         elif not (
             row.review.has_error_evidence
@@ -297,6 +371,7 @@ def _candidate(
         transfer_confidence,
         material,
         stop_reason,
+        effective_status,
     )
     return CandidateDraft(
         candidate_key=_candidate_key(selected_target, row.topic.id, block_kind),
@@ -313,6 +388,7 @@ def _candidate(
         planned_questions=planned_questions,
         stop_reason=stop_reason,
         evidence=MappingProxyType(evidence),
+        adaptation_reason=adaptation_reason,
     )
 
 
@@ -359,6 +435,7 @@ def _evidence(
     transfer_confidence: int,
     material: MaterialEvidence | None,
     stop_reason: CandidateStopReason | None,
+    effective_status: str,
 ) -> dict[str, Any]:
     topic = row.topic
     return {
@@ -367,7 +444,8 @@ def _evidence(
         "sourceTargetSlug": topic.target_slug,
         "transferKind": topic.transfer_kind,
         "transferConfidence": transfer_confidence,
-        "coverageStatus": topic.coverage_status,
+        "coverageStatus": effective_status,
+        "profileCoverageStatus": topic.coverage_status,
         "incidence": topic.incidence,
         "tier": topic.tier,
         "bancaFit": topic.banca_fit,
@@ -394,11 +472,59 @@ def _evidence(
         "reviewQueueItemId": row.review.queue_item_id,
         "reviewProofQuestions": row.review.proof_questions,
         "reviewTriggerEventIds": list(row.review.trigger_event_ids),
-        "projectedReviewDebtBp": row.review.projected_debt_bp,
         "reviewQueueReason": row.review.queue_reason,
         "reviewDeferredUntil": row.review.deferred_until,
+        "projectedCoverageStatus": (
+            row.projected.coverage_status if row.projected else None
+        ),
+        "projectedMasteryBp": row.projected.mastery_bp if row.projected else None,
+        "projectedConfidenceBp": (
+            row.projected.confidence_bp if row.projected else None
+        ),
+        "projectedReviewDebtBp": (
+            row.projected.review_debt_bp if row.projected else None
+        ),
+        "nextReviewDate": (
+            row.projected.next_review_date.isoformat()
+            if row.projected and row.projected.next_review_date
+            else None
+        ),
+        "staleAt": (
+            row.projected.stale_at.isoformat()
+            if row.projected and row.projected.stale_at
+            else None
+        ),
+        "learningEventCursor": row.projected.event_cursor if row.projected else None,
+        "weeklyAlignment": 0,
+        "adaptationReason": _adaptation_reason(
+            row,
+            bool(
+                row.projected
+                and row.as_of
+                and row.projected.stale_at
+                and row.as_of >= row.projected.stale_at
+            ),
+        ),
         "stopReason": stop_reason,
     }
+
+
+def _adaptation_reason(
+    row: CandidateTopicEvidence, stale_due: bool
+) -> str:
+    if row.projected is None:
+        return "profile_fallback"
+    if stale_due:
+        return "stale_return"
+    if row.review.queue_item_id is not None and row.review.deferred_until is None:
+        return "bounded_review_due"
+    if row.projected.coverage_status == "in_progress":
+        return "resume_partial"
+    if row.projected.coverage_status in {"covered", "strong"}:
+        return "cooldown_after_success"
+    if row.projected.coverage_status == "weak":
+        return "projected_weakness"
+    return "projected_state"
 
 
 def _candidate_key(
@@ -411,6 +537,7 @@ def _candidate_key(
 def collect_candidate_evidence(
     connection: sqlite3.Connection,
     selected_target_slug: str,
+    as_of: date | None = None,
 ) -> tuple[CandidateTopicEvidence, ...]:
     target_slug = selected_target_slug.strip()
     repository = PlannerProfileRepository(connection)
@@ -431,7 +558,7 @@ def collect_candidate_evidence(
             }:
                 topics.append(topic)
     return tuple(
-        _collect_topic_evidence(connection, topic, target_slug)
+        _collect_topic_evidence(connection, topic, target_slug, as_of)
         for topic in sorted(topics, key=lambda item: item.id)
     )
 
@@ -440,15 +567,51 @@ def _collect_topic_evidence(
     connection: sqlite3.Connection,
     topic: TargetTopic,
     selected_target_slug: str,
+    as_of: date | None,
 ) -> CandidateTopicEvidence:
     material_mapping_present = topic.lesson_id is not None or topic.material_id is not None
     materials = _collect_materials(connection, topic)
     review = _collect_review(connection, topic, materials, selected_target_slug)
+    state = connection.execute(
+        """
+        SELECT * FROM topic_learning_states
+        WHERE target_slug=? AND target_topic_id=?
+        """,
+        (selected_target_slug, topic.id),
+    ).fetchone()
+    projected = (
+        ProjectedLearningEvidence(
+            coverage_status=state["coverage_status"],
+            mastery_bp=state["mastery_bp"],
+            confidence_bp=state["confidence_bp"],
+            review_debt_bp=state["review_debt_bp"],
+            last_activity_at=(
+                datetime.fromisoformat(state["last_activity_at"].replace("Z", "+00:00"))
+                if state["last_activity_at"]
+                else None
+            ),
+            next_review_date=(
+                date.fromisoformat(state["next_review_date"])
+                if state["next_review_date"]
+                else None
+            ),
+            stale_at=(
+                date.fromisoformat(state["stale_at"])
+                if state["stale_at"]
+                else None
+            ),
+            event_cursor=state["event_cursor"],
+        )
+        if state
+        else None
+    )
     return CandidateTopicEvidence(
         topic=topic,
         material_mapping_present=material_mapping_present,
         materials=materials,
         review=review,
+        projected=projected,
+        as_of=as_of,
     )
 
 
@@ -558,13 +721,6 @@ def _collect_review(
         """,
         (selected_target_slug, topic.id),
     ).fetchone()
-    state_row = connection.execute(
-        """
-        SELECT review_debt_bp FROM topic_learning_states
-        WHERE target_slug=? AND target_topic_id=?
-        """,
-        (selected_target_slug, topic.id),
-    ).fetchone()
     return ReviewEvidence(
         wrong_count=session_counts["wrong_count"] + block_row["wrong_count"],
         doubt_count=session_counts["doubt_count"] + block_row["doubt_count"],
@@ -586,7 +742,6 @@ def _collect_review(
             if queue_row
             else ()
         ),
-        projected_debt_bp=(state_row["review_debt_bp"] if state_row else 0),
         queue_reason=queue_row["reason"] if queue_row else None,
         deferred_until=(
             queue_row["due_date"]

@@ -249,4 +249,4 @@ def test_same_inputs_produce_identical_hash_rank_and_score_evidence_bytes():
     assert [item.evidence_json.encode("utf-8") for item in first] == [
         item.evidence_json.encode("utf-8") for item in second
     ]
-    assert all(json.loads(item.evidence_json)["algorithmVersion"] == "m4-v1" for item in first)
+    assert all(json.loads(item.evidence_json)["algorithmVersion"] == "m5-v1" for item in first)

@@ -274,6 +274,7 @@ class ScoreBreakdown:
     balance_penalty: int
     low_trust_penalty: int
     final_score: int
+    weekly_alignment: int = 0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -290,6 +291,7 @@ class ScoreBreakdown:
             "edital_weight",
             "balance_penalty",
             "low_trust_penalty",
+            "weekly_alignment",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10000:
@@ -320,6 +322,7 @@ class PlannerCandidate:
     displaced_by_candidate_key: str | None
     stop_reason: str | None
     evidence: Mapping[str, object]
+    adaptation_reason: str | None = None
 
     def __post_init__(self) -> None:
         _positive(self.id, "id")
@@ -371,6 +374,12 @@ class PlannerCandidate:
         if not isinstance(self.evidence, Mapping):
             raise ValueError("evidence must be a mapping")
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+        if self.adaptation_reason is not None:
+            object.__setattr__(
+                self,
+                "adaptation_reason",
+                _text(self.adaptation_reason, "adaptation reason"),
+            )
 
 
 @dataclass(frozen=True, slots=True)

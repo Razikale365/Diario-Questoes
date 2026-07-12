@@ -444,6 +444,8 @@ CREATE TABLE planner_blocks (
     (
         7,
         (
+            "ALTER TABLE planner_candidates ADD COLUMN weekly_alignment INTEGER NOT NULL DEFAULT 0 CHECK (weekly_alignment BETWEEN 0 AND 10000);",
+            "ALTER TABLE planner_candidates ADD COLUMN adaptation_reason TEXT;",
             "CREATE UNIQUE INDEX ux_target_topics_target_id ON target_topics(target_slug, id);",
             """
             CREATE TABLE learning_events (

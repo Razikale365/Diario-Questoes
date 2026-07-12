@@ -165,7 +165,9 @@ class PlannerGenerationService:
                 max(1, budget // 60),
             )
             self.review_queue.rebuild_in_transaction(target_name, resolved_date)
-            evidence = collect_candidate_evidence(self.connection, target_name)
+            evidence = collect_candidate_evidence(
+                self.connection, target_name, resolved_date
+            )
             pool = build_candidates(target_name, evidence)
             base_context = ScoringContext(
                 target=target,
@@ -409,11 +411,13 @@ class PlannerGenerationService:
                         "edital_weight": score.edital_weight,
                         "balance_penalty": score.balance_penalty,
                         "low_trust_penalty": score.low_trust_penalty,
+                        "weekly_alignment": score.weekly_alignment,
                         "final_score": score.final_score,
                         "chosen_position": chosen_position,
                         "displaced_by_candidate_key": displaced_by,
                         "stop_reason": candidate.stop_reason,
                         "evidence_json": evidence_json,
+                        "adaptation_reason": candidate.adaptation_reason,
                     }
                 )
             )

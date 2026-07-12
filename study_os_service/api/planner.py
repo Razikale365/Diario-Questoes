@@ -99,6 +99,7 @@ def _score_payload(candidate: PlannerCandidate) -> dict[str, int]:
         "editalWeight": score.edital_weight,
         "balancePenalty": score.balance_penalty,
         "lowTrustPenalty": score.low_trust_penalty,
+        "weeklyAlignment": score.weekly_alignment,
         "finalScore": score.final_score,
     }
 
@@ -123,6 +124,7 @@ def _candidate_payload(candidate: PlannerCandidate) -> dict[str, Any]:
         "displacedBy": candidate.displaced_by_candidate_key,
         "stopReason": candidate.stop_reason,
         "evidence": dict(candidate.evidence),
+        "adaptationReason": candidate.adaptation_reason,
     }
 
 
