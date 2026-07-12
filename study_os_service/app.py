@@ -11,6 +11,7 @@ from study_os_service.api.inventory import (
     inventory_api_error_handler,
     router as inventory_router,
 )
+from study_os_service.api.sessions import router as sessions_router
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
 from study_os_service.db.migrations import MigrationRunner
@@ -43,4 +44,5 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.add_exception_handler(InventoryApiError, inventory_api_error_handler)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(inventory_router, prefix="/api/v1")
+    app.include_router(sessions_router, prefix="/api/v1")
     return app

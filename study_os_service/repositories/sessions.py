@@ -26,6 +26,7 @@ class MaterialExecutionContext:
     lesson_id: int | None
     target_slug: str
     absolute_path: Path
+    root_path: Path
     available: bool
     page_count: int | None
     page_offset: int
@@ -97,7 +98,7 @@ class SessionRepository:
             """
             SELECT materials.id, materials.lesson_id, materials.absolute_path,
                    materials.available, materials.page_count, materials.page_offset,
-                   roots.target_slug
+                   roots.target_slug, roots.root_path
             FROM materials
             JOIN courses ON courses.id=materials.course_id
             JOIN course_roots AS roots ON roots.id=courses.root_id
@@ -112,6 +113,7 @@ class SessionRepository:
             lesson_id=row["lesson_id"],
             target_slug=row["target_slug"],
             absolute_path=Path(row["absolute_path"]),
+            root_path=Path(row["root_path"]),
             available=bool(row["available"]),
             page_count=row["page_count"],
             page_offset=row["page_offset"],
@@ -235,6 +237,17 @@ class SessionRepository:
             ORDER BY started_at, id
             """,
             (material_id,),
+        ).fetchall()
+        return [_session(row) for row in rows]
+
+    def list_finished_for_target(self, target_slug: str) -> list[StudySession]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM study_sessions
+            WHERE target_slug=? AND state='finished'
+            ORDER BY material_id, started_at, id
+            """,
+            (target_slug,),
         ).fetchall()
         return [_session(row) for row in rows]
 
