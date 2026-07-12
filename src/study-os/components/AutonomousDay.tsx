@@ -205,30 +205,35 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
     return response.items;
   }, [onTargetChange, targetSlug]);
 
-  const loadTargetData = useCallback(async (resolvedTarget = targetSlug, resolvedDate = date) => {
-    if (!resolvedTarget) return;
+  const loadTargetData = useCallback(async (
+    resolvedTarget: string,
+    resolvedDate: string,
+    signal: AbortSignal,
+  ) => {
     setLoading(true);
     setError(null);
     try {
-      const topicResponse = await fetchTargetTopics(resolvedTarget);
-      setTopics(topicResponse.items);
+      const topicResponse = await fetchTargetTopics(resolvedTarget, signal);
+      let nextDay: PlannerDay | null = null;
       try {
-        setDay(await fetchPlannerDay(resolvedTarget, resolvedDate));
+        nextDay = await fetchPlannerDay(resolvedTarget, resolvedDate, signal);
       } catch (dayError: unknown) {
-        if (dayError instanceof StudyOsApiError && dayError.status === 404) {
-          setDay(null);
-        } else {
+        if (!(dayError instanceof StudyOsApiError && dayError.status === 404)) {
           throw dayError;
         }
       }
+      if (signal.aborted) return;
+      setTopics(topicResponse.items);
+      setDay(nextDay);
     } catch (loadError: unknown) {
+      if (signal.aborted) return;
       setDay(null);
       setTopics([]);
       setError(errorText(loadError));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [date, targetSlug]);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -251,9 +256,11 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
   }, [loadTargets]);
 
   useEffect(() => {
+    const controller = new AbortController();
     if (targets.some((target) => target.targetSlug === targetSlug)) {
-      void loadTargetData(targetSlug, date);
+      void loadTargetData(targetSlug, date, controller.signal);
     }
+    return () => controller.abort();
   }, [date, loadTargetData, targetSlug, targets]);
 
   const reloadDay = useCallback(async () => {

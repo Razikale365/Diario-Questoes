@@ -472,6 +472,12 @@ def _collect_review(
     topic: TargetTopic,
     materials: tuple[MaterialEvidence, ...],
 ) -> ReviewEvidence:
+    session_counts = {
+        "wrong_count": 0,
+        "doubt_count": 0,
+        "favorite_count": 0,
+        "failed_sessions": 0,
+    }
     if topic.material_id is not None:
         clause = "material_id=?"
         parameter = topic.material_id
@@ -479,18 +485,21 @@ def _collect_review(
         clause = "lesson_id=?"
         parameter = topic.lesson_id
     else:
-        return ReviewEvidence(weak_progress=topic.coverage_status == "weak")
-    session_row = connection.execute(
-        f"""
-        SELECT COALESCE(SUM(wrong_count), 0) AS wrong_count,
-               COALESCE(SUM(doubt_count), 0) AS doubt_count,
-               COALESCE(SUM(favorite_count), 0) AS favorite_count,
-               COALESCE(SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END), 0)
-                 AS failed_sessions
-        FROM study_sessions WHERE {clause}
-        """,
-        (parameter,),
-    ).fetchone()
+        clause = None
+        parameter = None
+    if clause is not None:
+        session_row = connection.execute(
+            f"""
+            SELECT COALESCE(SUM(wrong_count), 0) AS wrong_count,
+                   COALESCE(SUM(doubt_count), 0) AS doubt_count,
+                   COALESCE(SUM(favorite_count), 0) AS favorite_count,
+                   COALESCE(SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END), 0)
+                     AS failed_sessions
+            FROM study_sessions WHERE {clause}
+            """,
+            (parameter,),
+        ).fetchone()
+        session_counts = dict(session_row)
     block_row = connection.execute(
         """
         SELECT COALESCE(SUM(blocks.wrong_count), 0) AS wrong_count,
@@ -508,11 +517,13 @@ def _collect_review(
         (topic.id,),
     ).fetchone()
     return ReviewEvidence(
-        wrong_count=session_row["wrong_count"] + block_row["wrong_count"],
-        doubt_count=session_row["doubt_count"] + block_row["doubt_count"],
-        favorite_count=session_row["favorite_count"] + block_row["favorite_count"],
+        wrong_count=session_counts["wrong_count"] + block_row["wrong_count"],
+        doubt_count=session_counts["doubt_count"] + block_row["doubt_count"],
+        favorite_count=(
+            session_counts["favorite_count"] + block_row["favorite_count"]
+        ),
         failed_sessions=(
-            session_row["failed_sessions"] + block_row["failed_blocks"]
+            session_counts["failed_sessions"] + block_row["failed_blocks"]
         ),
         skipped_blocks=block_row["skipped_blocks"],
         weak_progress=(

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   AlertTriangle,
@@ -972,20 +972,20 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     showToast(`${generated.length} sugestões viraram a meta gerada.`);
   };
 
-  const selectStudyOsTarget = (targetSlug: string) => {
+  const selectStudyOsTarget = useCallback((targetSlug: string) => {
     const target = studyOsTargetProfiles.find((item) => item.slug === targetSlug);
     setStudyOsTarget(targetSlug);
     setStudyOsPhase(target?.phase || 'pre_edital');
-    setStudyOsCoverageDraft(formatStudyCoverageTable(
-      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(studyOsCoverageDraft), targetSlug),
+    setStudyOsCoverageDraft((current) => formatStudyCoverageTable(
+      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(current), targetSlug),
     ));
-    setStudyOsSourceDraft(formatStudySourceTable(
-      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(studyOsSourceDraft), targetSlug),
+    setStudyOsSourceDraft((current) => formatStudySourceTable(
+      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(current), targetSlug),
     ));
     setStudyOsPlan(null);
     setStudyOsWeekPlan(null);
     setStudyOsRefreshPlan(null);
-  };
+  }, [studyOsTargetProfiles]);
 
   const saveStudyOsTargetProfiles = () => {
     const parsed = parseStudyTargetProfileTable(studyOsTargetProfileDraft);
