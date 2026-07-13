@@ -92,11 +92,20 @@ Plan: `docs/superpowers/plans/2026-07-12-study-os-m5-adaptive-review-tec.md`
 
 | Task | Status | Base | Head | Verification | Review |
 | --- | --- | --- | --- | --- | --- |
-| 1. Learning/review/weekly schema v7 | pending | pending | pending | pending | pending |
-| 2. Outcome event projection | pending | pending | pending | pending | pending |
-| 3. Bounded review queue and stale detector | pending | pending | pending | pending | pending |
-| 4. Adaptive day feedback | pending | pending | pending | pending | pending |
-| 5. Immutable weekly forecast | pending | pending | pending | pending | pending |
-| 6. Strict clients and aggregate migration | pending | pending | pending | pending | pending |
-| 7. Weekly/review Home surfaces | pending | pending | pending | pending | pending |
-| 8. M5 durability gate and M6 plan | pending | pending | pending | pending | pending |
+| 1. Learning/review/weekly schema v7 | complete | `f13f423` | `744b00b` | migration/domain regression; v4-v6 preservation | immutable validated records approved |
+| 2. Outcome event projection | complete | `744b00b` | `9538018` | finalized/partial/skipped/failed transaction and replay tests | atomic event/state projection approved |
+| 3. Bounded review queue and stale detector | complete | `9538018` | `dd4b439` | 5-10 question, isolation, deferral, stale/deadline tests | broad LS-style review prohibited |
+| 4. Adaptive day feedback | complete | `dd4b439` | `975428b` | cooldown, weak review, partial resume, stale return tests | persisted adaptation reasons approved |
+| 5. Immutable weekly forecast | complete | `975428b` | `a0ed73c` | target isolation, balance, exhaustion, supersession, divergence tests | prior week immutability approved |
+| 6. Strict clients and aggregate migration | complete | `a0ed73c` | `026deab` | strict parser/API, proprietary rejection, idempotency tests | aggregate-only boundary approved |
+| 7. Weekly/review Home surfaces | complete | `026deab` | `29a00cd` | 163 frontend tests, tsc, build, desktop/390px offline smoke | today-first week/review UI approved |
+| 8. M5 durability gate and M6 plan | complete | `29a00cd` | `07a2706` | 326 pytest, 1 skipped; 163 frontend; compile/build/restart/backup/offline gates | seven-day adaptation and M6 scope approved |
+
+### M5 Acceptance Evidence
+
+- A schema-v7 service restart preserved byte-identical day (`8badb923e7d63081`), week (`c5913febf3ff7fa9`), and review queue (`eef46741adfc3a9f`) hash prefixes. Learning events, projected topic state, queue, week, day, candidate, and block table hashes also matched before and after restart.
+- Backup `data/study-os/backups/study-os-20260713T004553Z.sqlite3` passed `PRAGMA integrity_check`; a temporary restore matched all target/topic/day/week/event/state/queue table counts. Deleting a projected state and rebuilding it from its immutable event returned an equal domain record with the same event cursor and version.
+- `test_seven_day_outcome_sequence_stays_bounded_and_explicit` executes seven consecutive plans with low accuracy, success, skip, and failure outcomes. Every missing block remains a named shortfall, every review remains topic-owned and 5-10 questions, and exactly one learning event is emitted per finalized day.
+- The Home gate rendered a persisted BACEN shortfall day plus a 15-slot weekly shell at 1440px and 390px. The document had no horizontal overflow, external request, console error, or proprietary fixture content; the mobile week used contained horizontal scrolling.
+- Full current regression: 326 Python tests passed with 1 intentional skip, 163 frontend tests passed, Python compileall and TypeScript passed, and the production build completed. The remaining Vite large-chunk warning is pre-existing and non-fatal.
+- M2 fresh-package Tasks 1, 8, and 9 remain open. M5 fixture, seed, and browser evidence does not validate package `249654` or any old fiscal directory.
