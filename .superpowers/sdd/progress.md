@@ -160,3 +160,16 @@ Plan: `docs/superpowers/plans/2026-07-13-study-os-m7-migration-cutover.md`
 - The default `start-app.bat` gate exposed Windows PowerShell lacking `Get-FileHash`; startup now uses .NET SHA-256, starts with Docker stopped, and renders at 390x844 and 1280x720 while every HTTPS request is blocked. No external request, failed response, overflow, or console error occurred.
 - Missing day/week reads now use explicit `allowMissing=true` success responses, so an empty target renders setup guidance without noisy expected 404s.
 - Final closure now requires only the fresh authenticated package manifest followed by real scan, mapping, regular-PDF/TEC/review/refresh execution, and count reconciliation.
+
+## In-Task PDF Question Import
+
+Plan: `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Pure task import planner | paused for SEFAZ CE sprint | `7b44d38` | pending | baseline 194 frontend tests | pending |
+| 2. Atomic task and bank persistence | pending | pending | pending | pending | pending |
+| 3. Pure preview composition | pending | pending | pending | pending | pending |
+| 4. Shared import modal | pending | pending | pending | pending | pending |
+| 5. Existing-task entry points | pending | pending | pending | pending | pending |
+| 6. Browser acceptance and final gate | pending | pending | pending | pending | pending |
