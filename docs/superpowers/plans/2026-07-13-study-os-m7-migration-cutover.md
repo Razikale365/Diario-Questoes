@@ -94,12 +94,12 @@
 - Produces: `restore_portable_archive(archive_path, database_path, backup_dir)`.
 - CLI: `study-os export --output PATH` and `study-os restore --from PATH`.
 
-- [ ] Write failing archive tests for canonical manifest, SHA-256, SQLite integrity, exact allowed members, and no PDF/question content.
-- [ ] Write failing restore tests for round-trip equality, bad checksum, traversal members, unsupported schema, corrupt SQLite, and automatic pre-restore backup.
-- [ ] Implement ZIP creation with a SQLite online backup and a minimal canonical manifest.
-- [ ] Implement restore validation before replacement; close all handles and use same-volume atomic replacement with rollback on failure.
-- [ ] Extend the CLI parser and structured diagnostics; document that restore runs with the local service stopped.
-- [ ] Run archive/CLI/durability tests, compileall, and commit `feat: export and restore Study OS portably`.
+- [x] Write failing archive tests for canonical manifest, SHA-256, SQLite integrity, exact allowed members, and no PDF/question content.
+- [x] Write failing restore tests for round-trip equality, bad checksum, traversal members, unsupported schema, corrupt SQLite, and automatic pre-restore backup.
+- [x] Implement ZIP creation with a SQLite online backup and a minimal canonical manifest.
+- [x] Implement restore validation before replacement; close all handles and use same-volume atomic replacement with rollback on failure.
+- [x] Extend the CLI parser and structured diagnostics; document that restore runs with the local service stopped.
+- [x] Run archive/CLI/durability tests, compileall, and commit `feat: export and restore Study OS portably`.
 
 ### Task 5: One-Time Browser Bridge and Active Target Cutover
 
