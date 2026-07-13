@@ -863,6 +863,75 @@ CREATE TABLE planner_blocks (
             "CREATE INDEX idx_source_choice_topic ON source_choice_runs(target_slug, target_topic_id, block_kind, id);",
         ),
     ),
+    (
+        9,
+        (
+            """
+            ALTER TABLE app_settings ADD COLUMN version INTEGER NOT NULL
+              DEFAULT 1 CHECK (version >= 1);
+            """,
+            """
+            CREATE TABLE legacy_migration_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              migration_key TEXT NOT NULL UNIQUE
+                CHECK (length(trim(migration_key)) > 0),
+              schema_name TEXT NOT NULL
+                CHECK (length(trim(schema_name)) > 0),
+              payload_hash TEXT NOT NULL CHECK (
+                length(payload_hash) = 64
+                AND payload_hash = lower(payload_hash)
+                AND payload_hash NOT GLOB '*[^0-9a-f]*'
+              ),
+              state TEXT NOT NULL CHECK (
+                state IN ('running','completed','failed')
+              ),
+              stage TEXT NOT NULL CHECK (length(trim(stage)) > 0),
+              report_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(report_json)
+                  AND json_type(report_json) = 'object'),
+              error_code TEXT,
+              error_message TEXT,
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              completed_at TEXT,
+              CHECK (
+                (state = 'running' AND error_code IS NULL
+                  AND error_message IS NULL AND completed_at IS NULL)
+                OR (state = 'completed' AND error_code IS NULL
+                  AND error_message IS NULL AND completed_at IS NOT NULL)
+                OR (state = 'failed' AND length(trim(error_code)) > 0
+                  AND length(trim(error_message)) > 0
+                  AND completed_at IS NULL)
+              )
+            );
+            """,
+            """
+            CREATE TABLE legacy_id_mappings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              migration_run_id INTEGER NOT NULL
+                REFERENCES legacy_migration_runs(id) ON DELETE RESTRICT,
+              record_kind TEXT NOT NULL CHECK (record_kind IN (
+                'target_profile','coverage_row','ls_task','source_signal',
+                'learning_item','question_metadata'
+              )),
+              legacy_id TEXT NOT NULL CHECK (length(trim(legacy_id)) > 0),
+              target_type TEXT NOT NULL CHECK (length(trim(target_type)) > 0),
+              target_ref TEXT NOT NULL CHECK (length(trim(target_ref)) > 0),
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(metadata_json)
+                  AND json_type(metadata_json) = 'object'),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (record_kind, legacy_id)
+            );
+            """,
+            "CREATE INDEX idx_legacy_migration_state ON legacy_migration_runs(state, updated_at, id);",
+            "CREATE INDEX idx_legacy_id_run ON legacy_id_mappings(migration_run_id, record_kind, id);",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

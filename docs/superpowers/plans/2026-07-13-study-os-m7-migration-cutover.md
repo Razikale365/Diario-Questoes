@@ -32,12 +32,12 @@
 - Produces: `CutoverRepository`, `MigrationRunRecord`, `LegacyIdRecord`.
 - Produces: `PreferenceService.get_active_target()` and `set_active_target(target_slug)`.
 
-- [ ] Add failing migration tests proving v1-v8 preservation, v9 rollback, JSON constraints, unique migration keys, and unique `(record_kind, legacy_id)` mappings.
-- [ ] Add migration 9 with `legacy_migration_runs` and `legacy_id_mappings`; keep `app_settings` as the preference store.
-- [ ] Add repository tests for begin/resume/complete/fail and deterministic legacy ID lookup.
-- [ ] Add preference tests proving the stored target must exist and be active, and the default is the highest-priority active target with a stable slug tie-break.
-- [ ] Implement the repository and preference service with canonical JSON and optimistic setting updates in one transaction.
-- [ ] Run focused tests, previous-version migration regressions, compileall, and commit `feat: persist Study OS cutover state`.
+- [x] Add failing migration tests proving v1-v8 preservation, v9 rollback, JSON constraints, unique migration keys, and unique `(record_kind, legacy_id)` mappings.
+- [x] Add migration 9 with `legacy_migration_runs` and `legacy_id_mappings`; keep `app_settings` as the preference store.
+- [x] Add repository tests for begin/resume/complete/fail and deterministic legacy ID lookup.
+- [x] Add preference tests proving the stored target must exist and be active, and the default is the highest-priority active target with a stable slug tie-break.
+- [x] Implement the repository and preference service with canonical JSON and optimistic setting updates in one transaction.
+- [x] Run focused tests, previous-version migration regressions, compileall, and commit `feat: persist Study OS cutover state`.
 
 ### Task 2: Resumable Sanitized Browser Migration Service
 

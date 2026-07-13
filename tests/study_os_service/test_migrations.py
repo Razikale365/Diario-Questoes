@@ -149,6 +149,7 @@ def test_migrate_creates_required_columns_defaults_and_severity_check(tmp_path: 
             "key": ("TEXT", 0, None),
             "value_json": ("TEXT", 1, None),
             "updated_at": ("TEXT", 1, "CURRENT_TIMESTAMP"),
+            "version": ("INTEGER", 1, "1"),
         }
         assert table_info("app_events") == {
             "id": ("INTEGER", 0, None),
