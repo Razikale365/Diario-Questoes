@@ -67,6 +67,8 @@ import {
 } from '../utils/questionBank';
 import { Question, QuestionBankItem, QuestionSourceKind, StudyTask } from '../types';
 import type { QuestionBankAttemptStatus } from '../utils/questionBank';
+import { fetchCutoverStatus } from '../study-os/api/cutover';
+import { fetchPlannerTargets } from '../study-os/api/planner';
 
 interface QuestionPdfImportProps {
   onImport: (task: StudyTask) => void;
@@ -89,22 +91,16 @@ const ATTEMPT_STATUS_OPTIONS: Array<{ value: QuestionBankAttemptStatus; label: s
   { value: 'unanswered', label: 'Sem resposta' },
 ];
 
-const QUESTION_TARGET_OPTIONS = [
+const DEFAULT_QUESTION_TARGET_OPTIONS = [
   { value: '', label: 'Legado / sem target' },
   { value: 'shared', label: 'Compartilhado' },
   ...DEFAULT_STUDY_TARGET_PROFILES.map((target) => ({ value: target.slug, label: target.name })),
 ];
 
-const loadActiveStudyTarget = () => {
-  try {
-    return localStorage.getItem('study_os_target_v1') || '';
-  } catch {
-    return '';
-  }
-};
-
-const questionTargetLabel = (targetSlug?: string) =>
-  QUESTION_TARGET_OPTIONS.find((option) => option.value === (targetSlug || ''))?.label || targetSlug || 'Legado';
+const questionTargetLabel = (
+  options: Array<{ value: string; label: string }>,
+  targetSlug?: string,
+) => options.find((option) => option.value === (targetSlug || ''))?.label || targetSlug || 'Legado';
 
 const QUICK_MULTIPLE_CHOICE_ANSWERS = ['A', 'B', 'C', 'D', 'E'];
 const QUICK_BINARY_ANSWERS = ['Certo', 'Errado'];
@@ -128,7 +124,8 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const initialExternalAnswerDraft = useMemo(() => loadStoredExternalAnswerDraft() || EMPTY_EXTERNAL_ANSWER_DRAFT, []);
   const [file, setFile] = useState<File | null>(null);
   const [sourceKind, setSourceKind] = useState<QuestionSourceKind>('estrategia');
-  const [targetSlug, setTargetSlug] = useState(loadActiveStudyTarget);
+  const [targetSlug, setTargetSlug] = useState('');
+  const [questionTargetOptions, setQuestionTargetOptions] = useState(DEFAULT_QUESTION_TARGET_OPTIONS);
   const [sourceName, setSourceName] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [lesson, setLesson] = useState('');
@@ -141,7 +138,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const [bankDiscipline, setBankDiscipline] = useState('');
   const [bankSourceKind, setBankSourceKind] = useState<QuestionSourceKind | ''>('');
   const [bankTargetSlug, setBankTargetSlug] = useState('');
-  const [bulkTargetSlug, setBulkTargetSlug] = useState(loadActiveStudyTarget);
+  const [bulkTargetSlug, setBulkTargetSlug] = useState('');
   const [bankAttemptStatus, setBankAttemptStatus] = useState<QuestionBankAttemptStatus>('');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [onlyDoubts, setOnlyDoubts] = useState(false);
@@ -161,6 +158,33 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     };
   });
   const backupInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.all([
+      fetchCutoverStatus(controller.signal),
+      fetchPlannerTargets(controller.signal),
+    ])
+      .then(([status, targets]) => {
+        setQuestionTargetOptions([
+          { value: '', label: 'Legado / sem target' },
+          { value: 'shared', label: 'Compartilhado' },
+          ...targets.items.map((target) => ({
+            value: target.targetSlug,
+            label: target.displayName,
+          })),
+        ]);
+        const activeTarget = status.activeTarget?.targetSlug || '';
+        setTargetSlug(activeTarget);
+        setBulkTargetSlug(activeTarget);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          setQuestionTargetOptions(DEFAULT_QUESTION_TARGET_OPTIONS);
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   const externalAnswerBatches = externalAnswerBatchState.batches;
   const selectedExternalAnswerBatch = useMemo(
@@ -487,13 +511,13 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
       bulkTargetSlug || undefined,
     );
     if (result.updated === 0) {
-      showToast(`As questões filtradas já estão em ${questionTargetLabel(bulkTargetSlug)}.`);
+      showToast(`As questões filtradas já estão em ${questionTargetLabel(questionTargetOptions, bulkTargetSlug)}.`);
       return;
     }
 
     setQuestionBank(result.items);
     persistQuestionBank(result.items);
-    showToast(`${result.updated} questão(ões) movidas para ${questionTargetLabel(bulkTargetSlug)}.`);
+    showToast(`${result.updated} questão(ões) movidas para ${questionTargetLabel(questionTargetOptions, bulkTargetSlug)}.`);
   };
 
   const createTaskFromExternalBatch = (mode: ExternalAnswerReviewMode) => {
@@ -799,7 +823,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
             onChange={(event) => setTargetSlug(event.target.value)}
             className="w-full bg-[#404040] border border-[#525252] rounded px-4 py-2 text-white focus:outline-none focus:border-[#84cc16] focus:ring-1 focus:ring-[#84cc16]"
           >
-            {QUESTION_TARGET_OPTIONS.map((option) => (
+            {questionTargetOptions.map((option) => (
               <option key={option.value || 'legacy'} value={option.value}>{option.label}</option>
             ))}
           </select>
@@ -1015,7 +1039,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
               className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-[#84cc16]"
             >
               <option value="">Todos</option>
-              {QUESTION_TARGET_OPTIONS.map((option) => option.value && (
+              {questionTargetOptions.map((option) => option.value && (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
               <option value="legacy">Legado / sem target</option>
@@ -1105,7 +1129,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
                 onChange={(event) => setBulkTargetSlug(event.target.value)}
                 className="min-h-[44px] rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none focus:border-cyan-400"
               >
-                {QUESTION_TARGET_OPTIONS.map((option) => (
+                {questionTargetOptions.map((option) => (
                   <option key={option.value || 'legacy'} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -1424,7 +1448,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
                       {item.sourceName}
                     </span>
                     <span className="rounded bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-cyan-100">
-                      {questionTargetLabel(item.targetSlug)}
+                      {questionTargetLabel(questionTargetOptions, item.targetSlug)}
                     </span>
                     {item.sourceQuestionNumber && (
                       <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">

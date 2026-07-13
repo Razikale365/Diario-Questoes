@@ -116,12 +116,12 @@
 - `CutoverStatus` imports once, clears only the five duplicated `study_os_*` keys after a confirmed completed run, and exposes retry plus export guidance.
 - Active target reads/writes through the cutover API; no Study OS target/profile/coverage/source key is written to localStorage.
 
-- [ ] Write failing bundle tests proving stable migration IDs, LS task/source conversion, aggregate-only question evidence, and recursive absence of proprietary fields.
-- [ ] Prove successful cleanup removes only `study_os_target_v1`, `study_os_phase_v1`, `study_os_coverage_table_v1`, `study_os_target_profiles_v1`, and `study_os_source_signals_v1`; LS/Diario keys remain untouched.
-- [ ] Implement the pure bundle builder and strict localStorage adapter.
-- [ ] Add the cutover status surface and preference-backed active target flow with loading, retry, completed, and service-unavailable states.
-- [ ] Make Course Inventory fetch target names from the service and make Question PDF import fetch the active target preference instead of reading `study_os_target_v1`.
-- [ ] Run focused tests, full TypeScript, build, and desktop/390 px smoke; commit `feat: cut over Study OS browser ownership`.
+- [x] Write failing bundle tests proving stable migration IDs, LS task/source conversion, aggregate-only question evidence, and recursive absence of proprietary fields.
+- [x] Prove successful cleanup removes only `study_os_target_v1`, `study_os_phase_v1`, `study_os_coverage_table_v1`, `study_os_target_profiles_v1`, and `study_os_source_signals_v1`; LS/Diario keys remain untouched.
+- [x] Implement the pure bundle builder and strict localStorage adapter.
+- [x] Add the cutover status surface and preference-backed active target flow with loading, retry, completed, and service-unavailable states.
+- [x] Make Course Inventory fetch target names from the service and make Question PDF import fetch the active target preference instead of reading `study_os_target_v1`.
+- [x] Run focused tests, full TypeScript, build, and desktop/390 px smoke; commit `feat: cut over Study OS browser ownership`.
 
 ### Task 6: Retire the Duplicate Local Planner Command Layer
 

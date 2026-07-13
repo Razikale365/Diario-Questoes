@@ -16,6 +16,7 @@ import {
 
 import { StudyOsApiError } from '../api/client';
 import { fetchStudyOsHealth, isStudyOsHealthOperational } from '../api/health';
+import { fetchPlannerTargets, type PlannerTarget } from '../api/planner';
 import {
   fetchCourseRoots,
   fetchCourses,
@@ -38,7 +39,6 @@ import { StudySessionPanel } from './StudySessionPanel';
 
 interface CourseInventoryProps {
   targetSlug: string;
-  targets: Array<{ slug: string; name: string }>;
   onTargetChange: (targetSlug: string) => void;
 }
 
@@ -46,6 +46,7 @@ type ReadyInventory = {
   setup: SetupStatus;
   roots: CourseRoot[];
   courses: CourseSummary[];
+  targets: PlannerTarget[];
 };
 
 type InventoryState =
@@ -84,7 +85,6 @@ const isAbort = (error: unknown): boolean =>
 
 export const CourseInventory: React.FC<CourseInventoryProps> = ({
   targetSlug,
-  targets,
   onTargetChange,
 }) => {
   const [state, setState] = useState<InventoryState>({ kind: 'loading' });
@@ -100,12 +100,18 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
   const [message, setMessage] = useState<string | null>(null);
 
   const loadInventory = useCallback(async (signal?: AbortSignal): Promise<ReadyInventory> => {
-    const [setup, roots, courses] = await Promise.all([
+    const [setup, roots, courses, targets] = await Promise.all([
       fetchSetupStatus(signal),
       fetchCourseRoots(targetSlug, signal),
       fetchCourses(targetSlug, signal),
+      fetchPlannerTargets(signal),
     ]);
-    return { setup, roots: roots.items, courses: courses.items };
+    return {
+      setup,
+      roots: roots.items,
+      courses: courses.items,
+      targets: targets.items,
+    };
   }, [targetSlug]);
 
   const refreshInventory = useCallback(async (signal?: AbortSignal) => {
@@ -350,7 +356,11 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
               disabled={action !== null || Boolean(activeRun && ['queued', 'running'].includes(activeRun.state))}
               className="h-9 max-w-64 rounded border border-white/10 bg-[#1a1a1a] px-3 text-xs font-bold text-white outline-none focus:border-[#84cc16]"
             >
-              {targets.map((target) => <option key={target.slug} value={target.slug}>{target.name}</option>)}
+              {state.targets.map((target) => (
+                <option key={target.targetSlug} value={target.targetSlug}>
+                  {target.displayName}
+                </option>
+              ))}
             </select>
           </label>
           <button

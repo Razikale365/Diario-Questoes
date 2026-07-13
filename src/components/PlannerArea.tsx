@@ -68,6 +68,10 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import { ServiceStatus } from '../study-os/components/ServiceStatus';
+import {
+  CutoverStatus,
+  useStudyOsCutover,
+} from '../study-os/components/CutoverStatus';
 import { CourseInventory } from '../study-os/components/CourseInventory';
 import { AutonomousDay } from '../study-os/components/AutonomousDay';
 import {
@@ -458,6 +462,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
   const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
   const [studyOsRefreshPlan, setStudyOsRefreshPlan] = useState<StudyRefreshPlan | null>(null);
+  const cutover = useStudyOsCutover();
 
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(plannerTasks));
@@ -476,30 +481,16 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   }, [metaHistory]);
 
   useEffect(() => {
-    localStorage.setItem(STUDY_OS_TARGET_KEY, studyOsTarget);
-  }, [studyOsTarget]);
-
-  useEffect(() => {
-    localStorage.setItem(STUDY_OS_PHASE_KEY, studyOsPhase);
-  }, [studyOsPhase]);
-
-  useEffect(() => {
-    localStorage.setItem(STUDY_OS_COVERAGE_KEY, studyOsCoverageDraft);
-  }, [studyOsCoverageDraft]);
-
-  useEffect(() => {
-    localStorage.setItem(STUDY_OS_SOURCE_SIGNALS_KEY, studyOsSourceDraft);
-  }, [studyOsSourceDraft]);
-
-  useEffect(() => {
-    localStorage.setItem(STUDY_OS_TARGET_PROFILES_KEY, formatStudyTargetProfileTable(studyOsTargetProfiles));
-  }, [studyOsTargetProfiles]);
-
-  useEffect(() => {
     if (metaSummary && plannerTasks.length > 0 && metaHistory.length === 0) {
       setMetaHistory([buildHistoryEntry(metaSummary, plannerTasks)]);
     }
   }, [metaSummary, plannerTasks, metaHistory.length]);
+
+  useEffect(() => {
+    if (cutover.activeTargetSlug && cutover.activeTargetSlug !== studyOsTarget) {
+      setStudyOsTarget(cutover.activeTargetSlug);
+    }
+  }, [cutover.activeTargetSlug, studyOsTarget]);
 
   useEffect(() => {
     if (activeSection === 'maps') {
@@ -1560,6 +1551,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         </div>
       </header>
 
+      <CutoverStatus controller={cutover} />
+
       <section className="rounded-lg border border-[#404040] bg-[#262626] p-2">
         <div className="flex gap-2 overflow-x-auto">
           {SECTION_NAV.map((item) => {
@@ -2012,8 +2005,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       {activeSection === 'courses' && (
         <CourseInventory
           targetSlug={studyOsTarget}
-          targets={studyOsTargetProfiles.map((target) => ({ slug: target.slug, name: target.name }))}
-          onTargetChange={setStudyOsTarget}
+          onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
         />
       )}
 
@@ -2043,7 +2035,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             weekPlan={studyOsWeekPlan}
             refreshPlan={studyOsRefreshPlan}
             weekStartDate={studyOsWeekStartDate}
-            onTargetChange={selectStudyOsTarget}
+            onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
             onPhaseChange={(phase) => {
               setStudyOsPhase(phase);
               setStudyOsPlan(null);
