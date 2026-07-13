@@ -135,3 +135,25 @@ Plan: `docs/superpowers/plans/2026-07-13-study-os-m6-strategy-ingestion.md`
 - Desktop at 1280x720 and mobile at 390x844 had no page-level horizontal overflow or console errors. Dense tables retain their own horizontal scrolling; the mobile command center still starts with today's target and blocks.
 - BACEN with no package/source rows displays a BACEN-specific acquisition gap. Cross-target API tests reject labeling an RFB source as BACEN-specific.
 - Package `249654` is still `selected`, not `downloaded` or `validated`. Run3 produced zero PDFs/no manifest after login timeout; run4 is the active clean retry. No fixture or empty production table is being presented as real-package acceptance.
+
+## M7: Migration and Production Cutover
+
+Plan: `docs/superpowers/plans/2026-07-13-study-os-m7-migration-cutover.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Schema v9 and active target preference | complete | `f474d25` | `c119de1` | focused migration/repository tests; compileall | resumable migrations and preference ownership approved |
+| 2. Sanitized resumable browser import | complete | `c119de1` | `e1c5361` | 39 focused tests; compileall | deterministic stages and recursive proprietary rejection approved |
+| 3. Cutover API and strict frontend client | complete | `e1c5361` | `c17358c` | 34 Python and 4 frontend tests; compileall; TypeScript | exact command and stale preference contracts approved |
+| 4. Portable export and restore | complete | `c17358c` | `68fefb5` | 18 tests; compileall | checksums, integrity, traversal rejection, backup and rollback approved |
+| 5. One-time browser bridge | complete | `68fefb5` | `54448fa` | 15 focused frontend tests; TypeScript; build; desktop/390px smoke | five duplicated keys removed only after confirmed import |
+| 6. Local planner command retirement | complete | `54448fa` | current task commit | 181 frontend tests; TypeScript; build; desktop/390px smoke | local Study OS generator removed; LS execution bridge preserved |
+| 7. Final durability, offline, and real-package gate | pending | pending | pending | pending | package `249654` remains the external acceptance blocker |
+
+### M7 Current Evidence
+
+- The live browser completed one sanitized migration with 17 legacy-ID mappings, and the active target now persists through the local service rather than Study OS localStorage keys.
+- PlannerArea has a source-level regression forbidding the five retired `study_os_*` keys and the duplicate `StudyOSPlannerPanel` command surface.
+- The service-owned Home rendered at 1280x720 and 390x844 with SQLite active, the SEFAZ target selected, no duplicate planner, no page-level horizontal overflow, and no console errors.
+- LS import, history, local calendar, task execution, question cards, TEC metadata, and the LS next-meta utility remain available as optional comparison/execution surfaces.
+- Final closure still requires the fresh authenticated Estratégia package manifest, real scan/mapping/execution evidence, restore equality, and HTTPS-blocked startup gate.

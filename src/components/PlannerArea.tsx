@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   AlertTriangle,
@@ -41,8 +41,6 @@ import {
   getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
-  replacePendingGeneratedStudyOsTasks,
-  shouldReplacePlannerMetaWithStudyOs,
   type PlannerTaskResultInput,
   toIsoDate,
 } from '../utils/planner';
@@ -67,55 +65,12 @@ import {
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
-import { ServiceStatus } from '../study-os/components/ServiceStatus';
 import {
   CutoverStatus,
   useStudyOsCutover,
 } from '../study-os/components/CutoverStatus';
 import { CourseInventory } from '../study-os/components/CourseInventory';
 import { AutonomousDay } from '../study-os/components/AutonomousDay';
-import {
-  buildStudyBaselineComparison,
-  buildTargetDecisionRows,
-  buildStudyDayPlan,
-  buildStudyRefreshPlan,
-  buildStudyWeekPlan,
-  DEFAULT_STUDY_TARGET_PROFILES,
-  formatStudyCoverageTable,
-  formatStudySourceTable,
-  formatStudyTargetProfileTable,
-  inferStudySourceSignalsFromFiles,
-  inferStudySourceSignalsFromText,
-  isQuestionBankItemRelevantToStudyTarget,
-  isPlannerTaskRelevantToStudyTarget,
-  materializeStudyBlocksAsPlannerTasks,
-  materializeStudyWeekAsPlannerTasks,
-  mergeStudyCoverageWithTargetSeed,
-  mergeStudySourceItems,
-  mergeStudySourceItemsWithTargetSeed,
-  parseStudyCoverageTable,
-  parseStudySourceTable,
-  parseStudyTargetProfileTable,
-  seedCoverageForTarget,
-  seedSourceSignalsForTarget,
-  studySourceItemsFromPlannerTasks,
-  updateStudyCoverageFromPlannerTask,
-  updateStudyCoverageStatus,
-  CoverageStatus,
-  StudyCoverageIdentity,
-  DailyStudyBlock,
-  ExamTargetProfile,
-  StudyDayPlan,
-  StudyPlanPhase,
-  StudyRefreshPlan,
-  StudyScoreboardRow,
-  StudyBaselineComparison,
-  StudySourceKind,
-  StudySourceItem,
-  StudyWeekPlan,
-  TargetDecisionRow,
-  TopicFeedback,
-} from '../utils/studyPlannerCore';
 
 type PlannerView = 'month' | 'week';
 type PlannerSection = 'today' | 'meta' | 'calendar' | 'courses' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
@@ -132,11 +87,6 @@ interface PlannerAreaProps {
 const TASKS_KEY = 'ls_planner_tasks_v1';
 const META_KEY = 'ls_planner_meta_v1';
 const HISTORY_KEY = 'ls_planner_meta_history_v1';
-const STUDY_OS_TARGET_KEY = 'study_os_target_v1';
-const STUDY_OS_PHASE_KEY = 'study_os_phase_v1';
-const STUDY_OS_COVERAGE_KEY = 'study_os_coverage_table_v1';
-const STUDY_OS_TARGET_PROFILES_KEY = 'study_os_target_profiles_v1';
-const STUDY_OS_SOURCE_SIGNALS_KEY = 'study_os_source_signals_v1';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
@@ -147,7 +97,7 @@ const SECTION_NAV: Array<{ id: PlannerSection; label: string; icon: React.Elemen
   { id: 'calendar', label: 'Calendário', icon: CalendarDays },
   { id: 'courses', label: 'Cursos', icon: DatabaseIcon },
   { id: 'insights', label: 'Insights', icon: Lightbulb },
-  { id: 'generator', label: 'Gerador', icon: Sparkles },
+  { id: 'generator', label: 'Gerador LS', icon: Sparkles },
   { id: 'history', label: 'Histórico', icon: History },
   { id: 'maps', label: 'Mapas', icon: MapIcon },
   { id: 'list', label: 'Lista', icon: Table2 },
@@ -184,55 +134,6 @@ const loadStoredHistory = () => {
   }
 };
 
-const defaultStudyOsTarget = (profiles = DEFAULT_STUDY_TARGET_PROFILES) =>
-  profiles.find((target) => target.active)?.slug || profiles[0]?.slug || 'bacen_economia_financas';
-
-const loadStoredStudyOsTargetProfiles = () => {
-  try {
-    const stored = localStorage.getItem(STUDY_OS_TARGET_PROFILES_KEY);
-    const parsed = stored ? parseStudyTargetProfileTable(stored) : [];
-    return parsed.length > 0 ? parsed : DEFAULT_STUDY_TARGET_PROFILES;
-  } catch {
-    return DEFAULT_STUDY_TARGET_PROFILES;
-  }
-};
-
-const loadStoredStudyOsTarget = () => {
-  try {
-    const profiles = loadStoredStudyOsTargetProfiles();
-    const stored = localStorage.getItem(STUDY_OS_TARGET_KEY);
-    return profiles.some((target) => target.slug === stored) ? stored! : defaultStudyOsTarget(profiles);
-  } catch {
-    return defaultStudyOsTarget();
-  }
-};
-
-const loadStoredStudyOsPhase = (): StudyPlanPhase => {
-  try {
-    const stored = localStorage.getItem(STUDY_OS_PHASE_KEY);
-    return stored === 'pos_edital' ? 'pos_edital' : 'pre_edital';
-  } catch {
-    return 'pre_edital';
-  }
-};
-
-const loadStoredStudyOsCoverage = () => {
-  try {
-    const stored = localStorage.getItem(STUDY_OS_COVERAGE_KEY);
-    return stored || formatStudyCoverageTable(seedCoverageForTarget(loadStoredStudyOsTarget()));
-  } catch {
-    return formatStudyCoverageTable(seedCoverageForTarget(defaultStudyOsTarget()));
-  }
-};
-
-const loadStoredStudyOsSourceSignals = () => {
-  try {
-    const stored = localStorage.getItem(STUDY_OS_SOURCE_SIGNALS_KEY);
-    return stored || formatStudySourceTable(seedSourceSignalsForTarget(loadStoredStudyOsTarget()));
-  } catch {
-    return formatStudySourceTable(seedSourceSignalsForTarget(defaultStudyOsTarget()));
-  }
-};
 
 const statusLabel: Record<PlannerTask['status'], string> = {
   pending: 'Pendente',
@@ -379,46 +280,6 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
   };
 };
 
-const buildStudyOsFeedbackRows = (items: QuestionBankItem[], targetSlug: string): TopicFeedback[] => {
-  const byTopic = new Map<string, TopicFeedback>();
-
-  items.forEach((item) => {
-    if (!isQuestionBankItemRelevantToStudyTarget(item, targetSlug)) return;
-    const topic = item.lesson || item.taskTitle || item.tags[0] || item.sourceName;
-    if (!item.discipline || !topic) return;
-    const wrong = item.attempts.filter((attempt) => attempt.isCorrect === false).length;
-    const doubts = item.hasDoubt ? 1 : 0;
-    const favorites = item.favorite ? 1 : 0;
-    if (wrong === 0 && doubts === 0 && favorites === 0) return;
-
-    const key = `${item.discipline}::${topic}`;
-    const current = byTopic.get(key) || {
-      discipline: item.discipline,
-      topic,
-      weaknessScore: 0,
-      attempts: 0,
-      wrong: 0,
-      doubts: 0,
-      favorites: 0,
-    };
-
-    const nextWrong = (current.wrong || 0) + wrong;
-    const nextDoubts = (current.doubts || 0) + doubts;
-    const nextFavorites = (current.favorites || 0) + favorites;
-    byTopic.set(key, {
-      ...current,
-      attempts: (current.attempts || 0) + item.attempts.length,
-      wrong: nextWrong,
-      doubts: nextDoubts,
-      favorites: nextFavorites,
-      weaknessScore: Math.min(10, nextWrong * 2 + nextDoubts * 2 + nextFavorites),
-      lastSeenAt: item.updatedAt,
-    });
-  });
-
-  return Array.from(byTopic.values());
-};
-
 export const PlannerArea: React.FC<PlannerAreaProps> = ({
   studyTasks,
   onOpenStudyTask,
@@ -446,23 +307,12 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [studyOsTargetProfiles, setStudyOsTargetProfiles] = useState<ExamTargetProfile[]>(loadStoredStudyOsTargetProfiles);
-  const [studyOsTargetProfileDraft, setStudyOsTargetProfileDraft] = useState(() =>
-    formatStudyTargetProfileTable(loadStoredStudyOsTargetProfiles()),
-  );
-  const [studyOsTarget, setStudyOsTarget] = useState(loadStoredStudyOsTarget);
-  const [studyOsPhase, setStudyOsPhase] = useState<StudyPlanPhase>(loadStoredStudyOsPhase);
-  const [studyOsCoverageDraft, setStudyOsCoverageDraft] = useState(loadStoredStudyOsCoverage);
-  const [studyOsSourceDraft, setStudyOsSourceDraft] = useState(loadStoredStudyOsSourceSignals);
-  const [studyOsRawSourceText, setStudyOsRawSourceText] = useState('');
-  const [studyOsRawSourceKind, setStudyOsRawSourceKind] = useState<StudySourceKind | 'auto'>('auto');
-  const [studyOsRawSourceDiscipline, setStudyOsRawSourceDiscipline] = useState('');
-  const [isReadingStudyOsSourceFiles, setIsReadingStudyOsSourceFiles] = useState(false);
-  const [studyOsSourceFileProgress, setStudyOsSourceFileProgress] = useState({ processed: 0, total: 0 });
-  const [studyOsPlan, setStudyOsPlan] = useState<StudyDayPlan | null>(null);
-  const [studyOsWeekPlan, setStudyOsWeekPlan] = useState<StudyWeekPlan | null>(null);
-  const [studyOsRefreshPlan, setStudyOsRefreshPlan] = useState<StudyRefreshPlan | null>(null);
   const cutover = useStudyOsCutover();
+  const studyOsTarget = cutover.activeTargetSlug;
+  const studyOsActiveTarget = useMemo(
+    () => cutover.targets.find((target) => target.targetSlug === studyOsTarget),
+    [cutover.targets, studyOsTarget],
+  );
 
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(plannerTasks));
@@ -485,12 +335,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       setMetaHistory([buildHistoryEntry(metaSummary, plannerTasks)]);
     }
   }, [metaSummary, plannerTasks, metaHistory.length]);
-
-  useEffect(() => {
-    if (cutover.activeTargetSlug && cutover.activeTargetSlug !== studyOsTarget) {
-      setStudyOsTarget(cutover.activeTargetSlug);
-    }
-  }, [cutover.activeTargetSlug, studyOsTarget]);
 
   useEffect(() => {
     if (activeSection === 'maps') {
@@ -521,20 +365,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     () => getPlannerTodayCommandCenter(activePlannerTasks),
     [activePlannerTasks],
   );
-  const todayStudyOsRefreshContext = useMemo(() => {
-    const relevantTasks = activePlannerTasks.filter((task) =>
-      task.scheduledDate === todayCommandCenter.date && isPlannerTaskRelevantToStudyTarget(task, studyOsTarget),
-    );
-    const resultTasks = relevantTasks.filter((task) => task.status === 'completed' || task.status === 'ignored');
-    const reviewDebtTasks = resultTasks.filter((task) =>
-      task.status === 'ignored' || (task.performance !== null && task.performance < 60),
-    );
-
-    return {
-      resultCount: resultTasks.length,
-      reviewDebtCount: reviewDebtTasks.length,
-    };
-  }, [activePlannerTasks, studyOsTarget, todayCommandCenter.date]);
   const selectedTask = useMemo(
     () => plannerTasks.find((task) => task.id === selectedTaskId) || null,
     [plannerTasks, selectedTaskId]
@@ -656,35 +486,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   );
 
   const hasDraftCustomizations = Object.keys(draftTaskEdits).length > 0 || removedDraftKeys.length > 0;
-  const studyOsActiveTarget = useMemo(
-    () => studyOsTargetProfiles.find((target) => target.slug === studyOsTarget),
-    [studyOsTarget, studyOsTargetProfiles]
-  );
-  const studyOsWeekStartDate = weekDays[1]?.date || toIsoDate(new Date());
-  const studyOsManualSourceItems = useMemo(
-    () => parseStudySourceTable(studyOsSourceDraft),
-    [studyOsSourceDraft],
-  );
-  const studyOsCombinedSourceItems = useMemo(
-    () => [...studySourceItemsFromPlannerTasks(activePlannerTasks, studyOsTarget), ...studyOsManualSourceItems],
-    [activePlannerTasks, studyOsManualSourceItems, studyOsTarget],
-  );
-  const studyOsBaselineComparison = useMemo(
-    () => buildStudyBaselineComparison(studyOsCombinedSourceItems, studyOsTarget),
-    [studyOsCombinedSourceItems, studyOsTarget],
-  );
-  const studyOsTargetDecisionRows = useMemo(
-    () =>
-      buildTargetDecisionRows({
-        targetProfiles: studyOsTargetProfiles,
-        coverageRows: parseStudyCoverageTable(studyOsCoverageDraft),
-        feedbackRows: buildStudyOsFeedbackRows(questionBankItems, studyOsTarget),
-        sourceItems: studyOsCombinedSourceItems,
-        activeTargetSlug: studyOsTarget,
-      }),
-    [questionBankItems, studyOsCombinedSourceItems, studyOsCoverageDraft, studyOsTarget, studyOsTargetProfiles],
-  );
-
   const importMetaText = (text: string, source: 'ls-meta-text' | 'ls-meta-pdf') => {
     const weekSchedule = parseWeekScheduleImport(text);
     if (weekSchedule) {
@@ -798,35 +599,21 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       skipped: 'Tarefa ignorada.',
     };
     const now = new Date().toISOString();
-    const task = plannerTasks.find((item) => item.id === taskId);
-    const updatedTask = task ? applyPlannerTaskResult(task, result, now) : null;
     setPlannerTasks((current) =>
       current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
     );
-    const coverageUpdate = updatedTask
-      ? updateStudyCoverageFromPlannerTask(parseStudyCoverageTable(studyOsCoverageDraft), updatedTask)
-      : { rows: [], updatedCount: 0 };
-    if (coverageUpdate.updatedCount > 0) {
-      setStudyOsCoverageDraft(formatStudyCoverageTable(coverageUpdate.rows));
-      setStudyOsPlan(null);
-      setStudyOsWeekPlan(null);
-      setStudyOsRefreshPlan(null);
-    }
-    const coverageMessage = coverageUpdate.updatedCount > 0 && coverageUpdate.status
-      ? ` Cobertura marcada como ${coverageUpdate.status}.`
-      : '';
-    showToast(`${resultLabel[result.outcome]}${coverageMessage}`);
+    showToast(resultLabel[result.outcome]);
   };
 
   const copyPlannerTaskChatPrompt = async (task: PlannerTask) => {
     const targetSlug = task.targetSlug || task.details?.match(/^\s*Target\s*:\s*(.+)$/im)?.[1]?.trim();
     const targetProfile = targetSlug
-      ? studyOsTargetProfiles.find((profile) => profile.slug === targetSlug)
+      ? cutover.targets.find((profile) => profile.targetSlug === targetSlug)
       : studyOsActiveTarget;
     const prompt = buildPlannerTaskChatPrompt(task, {
-      targetName: targetProfile?.name,
-      organizer: targetProfile?.organizer,
-      phase: targetProfile?.phase || studyOsPhase,
+      targetName: targetProfile?.displayName,
+      organizer: targetProfile?.banca,
+      phase: targetProfile?.phase || 'pre_edital',
     });
 
     try {
@@ -963,386 +750,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     showToast(`${generated.length} sugestões viraram a meta gerada.`);
   };
 
-  const selectStudyOsTarget = useCallback((targetSlug: string) => {
-    const target = studyOsTargetProfiles.find((item) => item.slug === targetSlug);
-    setStudyOsTarget(targetSlug);
-    setStudyOsPhase(target?.phase || 'pre_edital');
-    setStudyOsCoverageDraft((current) => formatStudyCoverageTable(
-      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(current), targetSlug),
-    ));
-    setStudyOsSourceDraft((current) => formatStudySourceTable(
-      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(current), targetSlug),
-    ));
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-  }, [studyOsTargetProfiles]);
-
-  const saveStudyOsTargetProfiles = () => {
-    const parsed = parseStudyTargetProfileTable(studyOsTargetProfileDraft);
-    if (parsed.length === 0) {
-      showToast('Nenhum perfil de target válido.');
-      return;
-    }
-
-    const nextTarget = parsed.find((target) => target.slug === studyOsTarget) || parsed.find((target) => target.active) || parsed[0];
-    setStudyOsTargetProfiles(parsed);
-    setStudyOsTargetProfileDraft(formatStudyTargetProfileTable(parsed));
-    setStudyOsTarget(nextTarget.slug);
-    setStudyOsPhase(nextTarget.phase);
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast(`${parsed.length} perfil(is) Study OS salvo(s).`);
-  };
-
-  const resetStudyOsTargetProfiles = () => {
-    const formatted = formatStudyTargetProfileTable(DEFAULT_STUDY_TARGET_PROFILES);
-    const nextTarget = defaultStudyOsTarget(DEFAULT_STUDY_TARGET_PROFILES);
-    setStudyOsTargetProfiles(DEFAULT_STUDY_TARGET_PROFILES);
-    setStudyOsTargetProfileDraft(formatted);
-    setStudyOsTarget(nextTarget);
-    setStudyOsPhase(DEFAULT_STUDY_TARGET_PROFILES.find((target) => target.slug === nextTarget)?.phase || 'pre_edital');
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast('Perfis base restaurados.');
-  };
-
-  const seedStudyOsCoverage = (targetSlug = studyOsTarget) => {
-    setStudyOsCoverageDraft(formatStudyCoverageTable(
-      mergeStudyCoverageWithTargetSeed(parseStudyCoverageTable(studyOsCoverageDraft), targetSlug),
-    ));
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast('Cobertura base conferida sem apagar auditorias.');
-  };
-
-  const seedStudyOsSources = (targetSlug = studyOsTarget) => {
-    setStudyOsSourceDraft(formatStudySourceTable(
-      mergeStudySourceItemsWithTargetSeed(parseStudySourceTable(studyOsSourceDraft), targetSlug),
-    ));
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast('Fontes base conferidas sem apagar importações.');
-  };
-
-  const updateStudyOsCoverageStatus = (identity: StudyCoverageIdentity, status: CoverageStatus) => {
-    const update = updateStudyCoverageStatus(parseStudyCoverageTable(studyOsCoverageDraft), identity, status);
-    if (update.updatedCount === 0) return;
-    setStudyOsCoverageDraft(formatStudyCoverageTable(update.rows));
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast(`${identity.topic}: cobertura marcada como ${coverageStatusLabel[status]}.`);
-  };
-
-  const appendInferredStudyOsSources = () => {
-    const inferred = inferStudySourceSignalsFromText(studyOsRawSourceText, {
-      targetSlug: studyOsTarget,
-      sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
-      disciplineHint: studyOsRawSourceDiscipline.trim() || undefined,
-    });
-    if (inferred.length === 0) {
-      showToast('Não encontrei linhas de fonte reconhecíveis.');
-      return;
-    }
-
-    const current = parseStudySourceTable(studyOsSourceDraft);
-    setStudyOsSourceDraft(formatStudySourceTable([...current, ...inferred]));
-    setStudyOsRawSourceText('');
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast(`${inferred.length} fonte(s) normalizada(s).`);
-  };
-
-  const importStudyOsSourceFiles = async (files: File[]) => {
-    if (files.length === 0) return;
-
-    const supportedFiles = files.filter((file) =>
-      file.type === 'application/pdf' || /\.(?:pdf|txt|md|html?)$/i.test(file.name),
-    );
-    if (supportedFiles.length === 0) {
-      showToast('A pasta não contém PDF, TXT, Markdown ou HTML legível.');
-      return;
-    }
-
-    setIsReadingStudyOsSourceFiles(true);
-    setStudyOsSourceFileProgress({ processed: 0, total: supportedFiles.length });
-    try {
-      const readableFiles: Array<{ name: string; relativePath?: string; text: string }> = [];
-      let failedFiles = 0;
-
-      for (const [index, file] of supportedFiles.entries()) {
-        try {
-          const rawText = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
-            ? (await extractPdfText(file)).text
-            : await file.text();
-          const text = /\.html?$/i.test(file.name)
-            ? new DOMParser().parseFromString(rawText, 'text/html').body.textContent || ''
-            : rawText;
-          readableFiles.push({
-            name: file.name,
-            relativePath: file.webkitRelativePath || file.name,
-            text,
-          });
-        } catch (error) {
-          console.error('[Diário LS] Study source import failed', file.name, error);
-          failedFiles += 1;
-        }
-        setStudyOsSourceFileProgress({ processed: index + 1, total: supportedFiles.length });
-      }
-
-      if (readableFiles.length === 0 && failedFiles > 0) {
-        showToast(`Não consegui ler ${failedFiles} arquivo(s). Verifique se os PDFs estão íntegros.`);
-        return;
-      }
-
-      const inferred = inferStudySourceSignalsFromFiles(readableFiles, {
-        targetSlug: studyOsTarget,
-        sourceKind: studyOsRawSourceKind === 'auto' ? undefined : studyOsRawSourceKind,
-        disciplineHint: studyOsRawSourceDiscipline.trim() || undefined,
-      });
-      if (inferred.items.length === 0 && inferred.unresolvedLines.length === 0) {
-        showToast([
-          'Nenhum cabeçalho estrutural foi encontrado nos arquivos',
-          failedFiles > 0 ? `${failedFiles} arquivo(s) com falha` : '',
-        ].filter(Boolean).join(' · '));
-        return;
-      }
-
-      setStudyOsSourceDraft((currentDraft) => {
-        const merged = mergeStudySourceItems(parseStudySourceTable(currentDraft), inferred.items);
-        return merged.added > 0 ? formatStudySourceTable(merged.items) : currentDraft;
-      });
-      if (inferred.unresolvedLines.length > 0) {
-        setStudyOsRawSourceText((current) => Array.from(new Set([
-          ...current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-          ...inferred.unresolvedLines,
-        ])).join('\n'));
-      }
-      setStudyOsPlan(null);
-      setStudyOsWeekPlan(null);
-      setStudyOsRefreshPlan(null);
-      showToast([
-        `${inferred.items.length} fonte(s) processada(s)`,
-        inferred.unresolvedLines.length > 0 ? `${inferred.unresolvedLines.length} aguardando disciplina` : '',
-        failedFiles > 0 ? `${failedFiles} arquivo(s) com falha` : '',
-      ].filter(Boolean).join(' · '));
-    } finally {
-      setIsReadingStudyOsSourceFiles(false);
-    }
-  };
-
-  const generateStudyOsPlan = () => {
-    const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
-    if (coverageRows.length === 0) {
-      showToast('Nenhuma cobertura válida para o Study OS.');
-      return;
-    }
-
-    const plan = buildStudyDayPlan({
-      targetSlug: studyOsTarget,
-      phase: studyOsPhase,
-      coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
-      sourceItems: studyOsCombinedSourceItems,
-      targetProfiles: studyOsTargetProfiles,
-    });
-    setStudyOsPlan(plan);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(null);
-    showToast(`${plan.blocks.length} bloco(s) gerado(s) para hoje.`);
-  };
-
-  const generateStudyOsWeekPlan = () => {
-    const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
-    if (coverageRows.length === 0) {
-      showToast('Nenhuma cobertura válida para o Study OS.');
-      return;
-    }
-
-    const plan = buildStudyWeekPlan({
-      targetSlug: studyOsTarget,
-      phase: studyOsPhase,
-      startDate: studyOsWeekStartDate,
-      days: 5,
-      coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
-      sourceItems: studyOsCombinedSourceItems,
-      targetProfiles: studyOsTargetProfiles,
-    });
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(plan);
-    setStudyOsRefreshPlan(null);
-    showToast(`${plan.days.reduce((total, day) => total + day.blocks.length, 0)} bloco(s) gerado(s) para a semana.`);
-  };
-
-  const generateStudyOsRefreshPlan = () => {
-    const coverageRows = parseStudyCoverageTable(studyOsCoverageDraft);
-    const refreshDate = toIsoDate(shiftDate(new Date(), 1));
-    const plan = buildStudyRefreshPlan({
-      targetSlug: studyOsTarget,
-      phase: studyOsPhase,
-      refreshDate,
-      coverageRows,
-      feedbackRows: buildStudyOsFeedbackRows(loadStoredQuestionBank(), studyOsTarget),
-      sourceItems: studyOsCombinedSourceItems,
-      targetProfiles: studyOsTargetProfiles,
-      previousTasks: activePlannerTasks,
-    });
-    setStudyOsPlan(null);
-    setStudyOsWeekPlan(null);
-    setStudyOsRefreshPlan(plan);
-    showToast(`${plan.blocks.length} bloco(s) recalculado(s) para amanhã.`);
-  };
-
-  const applyStudyOsPlan = () => {
-    if (!studyOsPlan || studyOsPlan.blocks.length === 0) {
-      showToast('Gere os blocos do Study OS antes de aplicar.');
-      return;
-    }
-
-    const today = toIsoDate(new Date());
-    const generated = materializeStudyBlocksAsPlannerTasks(studyOsPlan.blocks, {
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-      scheduledDate: today,
-    });
-    const now = new Date().toISOString();
-    const generatedMeta: PlannerMetaSummary = {
-      id: `study_os_meta_${Date.now()}`,
-      title: `Hoje - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-      totalTasks: generated.length,
-      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
-      completedPercent: 0,
-      completedTasks: 0,
-      pendingTasks: generated.length,
-      ignoredTasks: 0,
-      startedTasks: 0,
-      importedAt: now,
-    };
-
-    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
-      targetSlug: studyOsTarget,
-      scheduledDates: [today],
-    }));
-    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
-    setMetaHistory((current) => {
-      const withCurrentMeta = metaSummary && plannerTasks.length > 0
-        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
-        : current;
-      return upsertHistoryEntry(
-        withCurrentMeta,
-        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
-      );
-    });
-    setMonthDate(new Date());
-    setWeekDate(new Date());
-    setView('week');
-    setActiveSection('calendar');
-    showToast(`${generated.length} bloco(s) Study OS viraram tarefas de hoje.`);
-  };
-
-  const applyStudyOsRefreshPlan = () => {
-    if (!studyOsRefreshPlan || studyOsRefreshPlan.blocks.length === 0) {
-      showToast('Gere o refresh do Study OS antes de aplicar.');
-      return;
-    }
-
-    const generated = materializeStudyBlocksAsPlannerTasks(studyOsRefreshPlan.blocks, {
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-      scheduledDate: studyOsRefreshPlan.date,
-    });
-    const now = new Date().toISOString();
-    const generatedMeta: PlannerMetaSummary = {
-      id: `study_os_refresh_${Date.now()}`,
-      title: `Refresh - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-      totalTasks: generated.length,
-      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
-      completedPercent: 0,
-      completedTasks: 0,
-      pendingTasks: generated.length,
-      ignoredTasks: 0,
-      startedTasks: 0,
-      importedAt: now,
-    };
-
-    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
-      targetSlug: studyOsTarget,
-      scheduledDates: [studyOsRefreshPlan.date],
-    }));
-    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
-    setMetaHistory((current) => {
-      const withCurrentMeta = metaSummary && plannerTasks.length > 0
-        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
-        : current;
-      return upsertHistoryEntry(
-        withCurrentMeta,
-        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
-      );
-    });
-    setMonthDate(new Date(`${studyOsRefreshPlan.date}T00:00:00`));
-    setWeekDate(new Date(`${studyOsRefreshPlan.date}T00:00:00`));
-    setView('week');
-    setActiveSection('calendar');
-    showToast(`${generated.length} bloco(s) Study OS viraram o refresh de amanhã.`);
-  };
-
-  const applyStudyOsWeekPlan = () => {
-    if (!studyOsWeekPlan || studyOsWeekPlan.days.length === 0) {
-      showToast('Gere a semana do Study OS antes de aplicar.');
-      return;
-    }
-
-    const generated = materializeStudyWeekAsPlannerTasks(studyOsWeekPlan, {
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-    });
-    const now = new Date().toISOString();
-    const generatedMeta: PlannerMetaSummary = {
-      id: `study_os_week_${Date.now()}`,
-      title: `Semana - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      planejamento: `Study OS - ${studyOsActiveTarget?.name || studyOsTarget}`,
-      metaNumber: metaSummary?.metaNumber ? metaSummary.metaNumber + 1 : undefined,
-      totalTasks: generated.length,
-      totalDisciplines: new Set(generated.map((task) => task.discipline)).size,
-      completedPercent: 0,
-      completedTasks: 0,
-      pendingTasks: generated.length,
-      ignoredTasks: 0,
-      startedTasks: 0,
-      importedAt: now,
-    };
-
-    setPlannerTasks((current) => replacePendingGeneratedStudyOsTasks(current, generated, {
-      targetSlug: studyOsTarget,
-      scheduledDates: studyOsWeekPlan.days.map((day) => day.date),
-    }));
-    if (shouldReplacePlannerMetaWithStudyOs(metaSummary)) setMetaSummary(generatedMeta);
-    setMetaHistory((current) => {
-      const withCurrentMeta = metaSummary && plannerTasks.length > 0
-        ? upsertHistoryEntry(current, buildHistoryEntry(metaSummary, plannerTasks))
-        : current;
-      return upsertHistoryEntry(
-        withCurrentMeta,
-        buildHistoryEntry(generatedMeta, generated, { origin: 'generated', relatedMetaId: metaSummary?.id }),
-      );
-    });
-    setMonthDate(new Date(`${studyOsWeekPlan.startDate}T00:00:00`));
-    setWeekDate(new Date(`${studyOsWeekPlan.startDate}T00:00:00`));
-    setView('week');
-    setActiveSection('calendar');
-    showToast(`${generated.length} bloco(s) Study OS viraram a semana atual.`);
-  };
 
   const onDropTask = (date: string, time?: string) => {
     if (!draggingTaskId) return;
@@ -1578,21 +985,23 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
       {activeSection === 'today' && (
         <>
-          <AutonomousDay
-            targetSlug={studyOsTarget}
-            onTargetChange={selectStudyOsTarget}
-            legacyTasks={todayCommandCenter.tasks.map((task) => ({
-              id: task.id,
-              discipline: task.discipline,
-              description: task.description,
-              source: task.source,
-              targetSlug: task.targetSlug,
-              status: task.status,
-            }))}
-            questionBankItems={questionBankItems}
-            onOpenLegacyTask={setSelectedTaskId}
-            showToast={showToast}
-          />
+          {studyOsTarget && (
+            <AutonomousDay
+              targetSlug={studyOsTarget}
+              onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
+              legacyTasks={todayCommandCenter.tasks.map((task) => ({
+                id: task.id,
+                discipline: task.discipline,
+                description: task.description,
+                source: task.source,
+                targetSlug: task.targetSlug,
+                status: task.status,
+              }))}
+              questionBankItems={questionBankItems}
+              onOpenLegacyTask={setSelectedTaskId}
+              showToast={showToast}
+            />
+          )}
           <details className="rounded-lg border border-[#404040] bg-[#202020]">
             <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-400">
               Agenda LS e calendário local
@@ -1604,7 +1013,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                 <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#84cc16]">Painel de Hoje</p>
                 <h2 className="mt-1 text-2xl font-black text-white">{formatPlannerDate(todayCommandCenter.date)}</h2>
                 <p className="mt-1 text-sm font-bold text-gray-400">
-                  {studyOsActiveTarget?.name || studyOsTarget} · {studyOsPhase === 'pos_edital' ? 'Pós-edital' : 'Pré-edital'}
+                  {studyOsActiveTarget?.displayName || 'Alvo do serviço'} · {studyOsActiveTarget?.phase === 'pos_edital' ? 'Pós-edital' : 'Pré-edital'}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1613,7 +1022,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                   onClick={() => setActiveSection('generator')}
                   className="flex items-center gap-2 rounded border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-xs font-black uppercase text-purple-100 transition hover:bg-purple-500/20"
                 >
-                  <Sparkles className="h-4 w-4" /> Study OS
+                  <Sparkles className="h-4 w-4" /> Gerador LS
                 </button>
                 <button
                   type="button"
@@ -1673,7 +1082,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                   onClick={() => setActiveSection('generator')}
                   className="rounded bg-purple-600 px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-purple-500"
                 >
-                  Gerar Study OS
+                  Gerador LS
                 </button>
                 <button
                   type="button"
@@ -1686,66 +1095,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             </div>
           )}
 
-          <section className="border-y border-yellow-400/20 bg-[#1d1a10] px-5 py-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-widest text-yellow-200">Amanhã adaptativo</p>
-                <h3 className="mt-1 text-lg font-black text-white">{formatPlannerDate(toIsoDate(shiftDate(new Date(), 1)))}</h3>
-                <p className="mt-1 max-w-2xl text-sm font-semibold leading-relaxed text-gray-400">
-                  {todayStudyOsRefreshContext.resultCount > 0
-                    ? `${todayStudyOsRefreshContext.resultCount} resultado(s) deste target serão considerados; ${todayStudyOsRefreshContext.reviewDebtCount} viram prioridade de revisão.`
-                    : 'Registre o resultado de um bloco para tornar o próximo dia adaptativo. Você também pode gerar uma prévia base agora.'}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={generateStudyOsRefreshPlan}
-                  className="flex items-center gap-2 rounded border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-100 transition hover:bg-yellow-400/20"
-                >
-                  <RotateCcw className="h-4 w-4" /> {studyOsRefreshPlan ? 'Recalcular amanhã' : 'Gerar amanhã'}
-                </button>
-                <button
-                  type="button"
-                  onClick={applyStudyOsRefreshPlan}
-                  disabled={!studyOsRefreshPlan || studyOsRefreshPlan.blocks.length === 0}
-                  className="flex items-center gap-2 rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <CalendarDays className="h-4 w-4" /> Aplicar amanhã
-                </button>
-              </div>
-            </div>
-
-            {studyOsRefreshPlan ? (
-              <div className="mt-4 border-t border-yellow-400/15 pt-4">
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  {studyOsRefreshPlan.blocks.map((block) => (
-                    <div key={block.id} className={`border p-3 ${studyBlockKindClass[block.kind]}`}>
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-75">{plannedBlockKindLabel[block.kind]}</p>
-                      <p className="mt-2 text-sm font-black leading-snug text-white">{block.discipline}</p>
-                      <p className="mt-1 line-clamp-2 text-xs font-semibold leading-relaxed text-white/75">{block.topic}</p>
-                      <p className="mt-3 text-[10px] font-black uppercase tracking-widest opacity-80">
-                        {formatMinutes(block.durationMinutes)}{block.plannedQuestions ? ` · ${block.plannedQuestions} questões` : ''}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-yellow-100">
-                  <p>LS/trilha, outro target e blocos já executados permanecem intactos.</p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSection('generator')}
-                    className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-yellow-200 transition hover:text-white"
-                  >
-                    Ver score <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
-                {studyOsRefreshPlan.warnings.length > 0 && (
-                  <p className="mt-2 text-xs font-semibold text-yellow-200/80">{studyOsRefreshPlan.warnings.slice(0, 2).join(' · ')}</p>
-                )}
-              </div>
-            ) : null}
-          </section>
             </section>
           </details>
         </>
@@ -2002,7 +1351,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         />
       )}
 
-      {activeSection === 'courses' && (
+      {activeSection === 'courses' && studyOsTarget && (
         <CourseInventory
           targetSlug={studyOsTarget}
           onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
@@ -2015,63 +1364,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
       {activeSection === 'generator' && (
         <div className="space-y-5">
-          <StudyOSPlannerPanel
-            targetProfiles={studyOsTargetProfiles}
-            activeTarget={studyOsActiveTarget}
-            targetSlug={studyOsTarget}
-            phase={studyOsPhase}
-            coverageDraft={studyOsCoverageDraft}
-            targetProfileDraft={studyOsTargetProfileDraft}
-            sourceDraft={studyOsSourceDraft}
-            rawSourceText={studyOsRawSourceText}
-            rawSourceKind={studyOsRawSourceKind}
-            rawSourceDiscipline={studyOsRawSourceDiscipline}
-            isReadingSourceFiles={isReadingStudyOsSourceFiles}
-            sourceItemCount={studyOsManualSourceItems.length}
-            sourceFileProgress={studyOsSourceFileProgress}
-            baselineComparison={studyOsBaselineComparison}
-            targetDecisionRows={studyOsTargetDecisionRows}
-            plan={studyOsPlan}
-            weekPlan={studyOsWeekPlan}
-            refreshPlan={studyOsRefreshPlan}
-            weekStartDate={studyOsWeekStartDate}
-            onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
-            onPhaseChange={(phase) => {
-              setStudyOsPhase(phase);
-              setStudyOsPlan(null);
-              setStudyOsWeekPlan(null);
-              setStudyOsRefreshPlan(null);
-            }}
-            onCoverageDraftChange={(value) => {
-              setStudyOsCoverageDraft(value);
-              setStudyOsPlan(null);
-              setStudyOsWeekPlan(null);
-              setStudyOsRefreshPlan(null);
-            }}
-            onCoverageStatusChange={updateStudyOsCoverageStatus}
-            onTargetProfileDraftChange={setStudyOsTargetProfileDraft}
-            onSourceDraftChange={(value) => {
-              setStudyOsSourceDraft(value);
-              setStudyOsPlan(null);
-              setStudyOsWeekPlan(null);
-              setStudyOsRefreshPlan(null);
-            }}
-            onRawSourceTextChange={setStudyOsRawSourceText}
-            onRawSourceKindChange={setStudyOsRawSourceKind}
-            onRawSourceDisciplineChange={setStudyOsRawSourceDiscipline}
-            onImportSourceFiles={importStudyOsSourceFiles}
-            onAppendInferredSources={appendInferredStudyOsSources}
-            onSaveTargetProfiles={saveStudyOsTargetProfiles}
-            onResetTargetProfiles={resetStudyOsTargetProfiles}
-            onSeedCoverage={seedStudyOsCoverage}
-            onSeedSources={seedStudyOsSources}
-            onGenerate={generateStudyOsPlan}
-            onApply={applyStudyOsPlan}
-            onGenerateWeek={generateStudyOsWeekPlan}
-            onApplyWeek={applyStudyOsWeekPlan}
-            onGenerateRefresh={generateStudyOsRefreshPlan}
-            onApplyRefresh={applyStudyOsRefreshPlan}
-          />
           <PlannerGeneratorPanel
             draft={nextMetaDraft}
             draftItems={draftItems}
@@ -3066,662 +2358,6 @@ const draftReasonClass: Record<PlannerDraftTask['reason'], string> = {
   retake: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
   maintenance: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
 };
-
-const studyBlockKindLabel: Record<DailyStudyBlock['kind'], string> = {
-  theory: 'Teoria',
-  questions: 'Questões',
-  review: 'Revisão',
-};
-
-const studyBlockKindClass: Record<DailyStudyBlock['kind'], string> = {
-  theory: 'border-blue-400/20 bg-blue-400/10 text-blue-200',
-  questions: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
-  review: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-200',
-};
-
-const coverageStatusLabel: Record<CoverageStatus, string> = {
-  strong: 'forte',
-  stale: 'a rever',
-  weak: 'fraca',
-  unread: 'nao lida',
-};
-
-const coverageStatusClass: Record<CoverageStatus, string> = {
-  strong: 'border-[#84cc16]/35 bg-[#84cc16]/15 text-[#d9f99d]',
-  stale: 'border-yellow-400/35 bg-yellow-400/10 text-yellow-100',
-  weak: 'border-orange-400/35 bg-orange-400/10 text-orange-100',
-  unread: 'border-blue-400/35 bg-blue-400/10 text-blue-100',
-};
-
-const StudyOSPlannerPanel: React.FC<{
-  targetProfiles: ExamTargetProfile[];
-  activeTarget?: ExamTargetProfile;
-  targetSlug: string;
-  phase: StudyPlanPhase;
-  coverageDraft: string;
-  onCoverageStatusChange: (identity: StudyCoverageIdentity, status: CoverageStatus) => void;
-  targetProfileDraft: string;
-  sourceDraft: string;
-  rawSourceText: string;
-  rawSourceKind: StudySourceKind | 'auto';
-  rawSourceDiscipline: string;
-  isReadingSourceFiles: boolean;
-  sourceItemCount: number;
-  sourceFileProgress: { processed: number; total: number };
-  baselineComparison: StudyBaselineComparison;
-  targetDecisionRows: TargetDecisionRow[];
-  plan: StudyDayPlan | null;
-  weekPlan: StudyWeekPlan | null;
-  refreshPlan: StudyRefreshPlan | null;
-  weekStartDate: string;
-  onTargetChange: (targetSlug: string) => void;
-  onPhaseChange: (phase: StudyPlanPhase) => void;
-  onCoverageDraftChange: (value: string) => void;
-  onTargetProfileDraftChange: (value: string) => void;
-  onSourceDraftChange: (value: string) => void;
-  onRawSourceTextChange: (value: string) => void;
-  onRawSourceKindChange: (value: StudySourceKind | 'auto') => void;
-  onRawSourceDisciplineChange: (value: string) => void;
-  onImportSourceFiles: (files: File[]) => void;
-  onAppendInferredSources: () => void;
-  onSaveTargetProfiles: () => void;
-  onResetTargetProfiles: () => void;
-  onSeedCoverage: (targetSlug?: string) => void;
-  onSeedSources: (targetSlug?: string) => void;
-  onGenerate: () => void;
-  onApply: () => void;
-  onGenerateWeek: () => void;
-  onApplyWeek: () => void;
-  onGenerateRefresh: () => void;
-  onApplyRefresh: () => void;
-}> = ({
-  targetProfiles,
-  activeTarget,
-  targetSlug,
-  phase,
-  coverageDraft,
-  onCoverageStatusChange,
-  targetProfileDraft,
-  sourceDraft,
-  rawSourceText,
-  rawSourceKind,
-  rawSourceDiscipline,
-  isReadingSourceFiles,
-  sourceItemCount,
-  sourceFileProgress,
-  baselineComparison,
-  targetDecisionRows,
-  plan,
-  weekPlan,
-  refreshPlan,
-  weekStartDate,
-  onTargetChange,
-  onPhaseChange,
-  onCoverageDraftChange,
-  onTargetProfileDraftChange,
-  onSourceDraftChange,
-  onRawSourceTextChange,
-  onRawSourceKindChange,
-  onRawSourceDisciplineChange,
-  onImportSourceFiles,
-  onAppendInferredSources,
-  onSaveTargetProfiles,
-  onResetTargetProfiles,
-  onSeedCoverage,
-  onSeedSources,
-  onGenerate,
-  onApply,
-  onGenerateWeek,
-  onApplyWeek,
-  onGenerateRefresh,
-  onApplyRefresh,
-}) => {
-  const activeDayBlocks = refreshPlan?.blocks || plan?.blocks || [];
-  const activeWarnings = refreshPlan?.warnings || plan?.warnings || [];
-  const visibleScoreboard = (refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).slice(0, 12);
-  const coverageRows = useMemo(() => parseStudyCoverageTable(coverageDraft), [coverageDraft]);
-  const auditableCoverageRows = coverageRows.filter((row) => row.targetSlug === targetSlug || row.targetSlug === 'shared');
-  const weekBlockCount = weekPlan?.days.reduce((total, day) => total + day.blocks.length, 0) || 0;
-  const weekEndDate = weekPlan?.days[weekPlan.days.length - 1]?.date;
-  const mismatchTargetNames = baselineComparison.mismatchTargetSlugs
-    .map((slug) => targetProfiles.find((target) => target.slug === slug)?.name || slug)
-    .join(', ');
-
-  return (
-    <section className="rounded-lg border border-[#84cc16]/20 bg-[#18210f] p-4 shadow-lg shadow-black/20">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Target className="h-5 w-5 text-[#84cc16]" />
-            <h2 className="text-lg font-black text-white">Study OS Planner</h2>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
-            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-gray-300">{activeTarget?.organizer || 'Banca'}</span>
-            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-gray-300">{activeTarget?.vagasNotes || 'Sem vagas fixas'}</span>
-            <span className="rounded border border-white/10 bg-black/20 px-2 py-1 text-[#84cc16]">CB {activeTarget?.costBenefit || '-'}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ServiceStatus />
-          <button
-            type="button"
-            onClick={onGenerate}
-            className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d]"
-          >
-            Gerar 4 blocos
-          </button>
-          <button
-            type="button"
-            onClick={onApply}
-            disabled={!plan || plan.blocks.length === 0}
-            className="rounded border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Aplicar hoje
-          </button>
-          <button
-            type="button"
-            onClick={onGenerateWeek}
-            className="rounded border border-[#84cc16]/30 bg-[#84cc16]/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-[#bef264] transition hover:bg-[#84cc16]/20"
-          >
-            Gerar semana
-          </button>
-          <button
-            type="button"
-            onClick={onApplyWeek}
-            disabled={!weekPlan || weekBlockCount === 0}
-            className="rounded border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Aplicar semana
-          </button>
-          <button
-            type="button"
-            onClick={onGenerateRefresh}
-            className="rounded border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-yellow-100 transition hover:bg-yellow-400/20"
-          >
-            Refresh amanhã
-          </button>
-          <button
-            type="button"
-            onClick={onApplyRefresh}
-            disabled={!refreshPlan || refreshPlan.blocks.length === 0}
-            className="rounded border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Aplicar refresh
-          </button>
-        </div>
-      </div>
-
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-3 rounded-lg border border-white/10 bg-black/15 p-3">
-          <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
-            Target
-            <select
-              value={targetSlug}
-              onChange={(event) => onTargetChange(event.target.value)}
-              className="w-full min-w-0 max-w-full rounded border border-[#525252] bg-[#262626] px-3 py-2 text-sm font-bold text-white outline-none focus:border-[#84cc16]"
-            >
-              {targetProfiles.map((target) => (
-                <option key={target.slug} value={target.slug}>
-                  {target.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => onPhaseChange('pre_edital')}
-              className={`rounded px-3 py-2 text-xs font-black uppercase tracking-widest transition ${
-                phase === 'pre_edital' ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
-              }`}
-            >
-              Pré
-            </button>
-            <button
-              type="button"
-              onClick={() => onPhaseChange('pos_edital')}
-              className={`rounded px-3 py-2 text-xs font-black uppercase tracking-widest transition ${
-                phase === 'pos_edital' ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
-              }`}
-            >
-              Pós
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Metric icon={ClipboardList} label="Cobertura" value={`${auditableCoverageRows.length}`} />
-            <Metric icon={DatabaseIcon} label="Fontes" value={`${sourceItemCount}`} />
-            <Metric icon={ListChecks} label="Score" value={`${(refreshPlan?.scoreboard || plan?.scoreboard || weekPlan?.scoreboard || []).length}`} />
-            <Metric icon={Target} label="Targets" value={`${targetProfiles.length}`} />
-          </div>
-
-          <div className={`border p-3 text-xs font-bold leading-relaxed ${
-            baselineComparison.mismatchedCount > 0
-              ? 'border-yellow-400/25 bg-yellow-400/5 text-yellow-100'
-              : baselineComparison.alignedCount > 0
-                ? 'border-[#84cc16]/25 bg-[#84cc16]/5 text-[#d9f99d]'
-                : 'border-white/10 bg-black/20 text-gray-400'
-          }`}>
-            <p className="text-[10px] font-black uppercase tracking-widest opacity-75">LS e Trilha</p>
-            {baselineComparison.alignedCount > 0 && (
-              <p className="mt-1">{baselineComparison.alignedCount} sinal(is) alinhado(s) a este target entram no score.</p>
-            )}
-            {baselineComparison.transferableCount > 0 && (
-              <p className="mt-1">{baselineComparison.transferableCount} sinal(is) compartilhado(s) entram com peso parcial.</p>
-            )}
-            {baselineComparison.mismatchedCount > 0 && (
-              <p className="mt-1">{baselineComparison.mismatchedCount} sinal(is) de {mismatchTargetNames || 'outro target'} ficam só como referência e não somam alinhamento.</p>
-            )}
-            {baselineComparison.alignedCount === 0 && baselineComparison.transferableCount === 0 && baselineComparison.mismatchedCount === 0 && (
-              <p className="mt-1">Nenhuma LS/trilha associada a este target.</p>
-            )}
-          </div>
-
-          <div className="border border-white/10 bg-black/20">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Auditoria rapida</p>
-              <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">F forte · R rever · Fr fraca · N nao lida</span>
-            </div>
-            {auditableCoverageRows.length > 0 ? (
-              <div className="max-h-72 overflow-y-auto">
-                {auditableCoverageRows.map((row) => (
-                  <div key={`${row.targetSlug}-${row.discipline}-${row.topic}`} className="border-b border-white/5 px-3 py-2 last:border-b-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-black text-white">{row.topic}</p>
-                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                          {row.discipline}{row.targetSlug === 'shared' ? ' · compartilhado' : ''}
-                        </p>
-                      </div>
-                      <div className="grid shrink-0 grid-cols-4 gap-1">
-                        {(Object.keys(coverageStatusLabel) as CoverageStatus[]).map((status) => (
-                          <button
-                            key={status}
-                            type="button"
-                            title={coverageStatusLabel[status]}
-                            aria-label={`Marcar ${row.topic} como ${coverageStatusLabel[status]}`}
-                            aria-pressed={row.status === status}
-                            onClick={() => onCoverageStatusChange({
-                              targetSlug: row.targetSlug,
-                              discipline: row.discipline,
-                              topic: row.topic,
-                            }, status)}
-                            className={`h-7 w-7 border text-[9px] font-black uppercase transition ${
-                              row.status === status ? coverageStatusClass[status] : 'border-white/10 bg-white/[0.03] text-gray-600 hover:border-white/25 hover:text-white'
-                            }`}
-                          >
-                            {status === 'strong' ? 'F' : status === 'stale' ? 'R' : status === 'weak' ? 'Fr' : 'N'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="px-3 py-4 text-xs font-bold text-gray-500">Sem cobertura auditavel para este target.</p>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Semana alvo</p>
-            <p className="mt-1 text-sm font-black text-white">{formatShortDate(weekStartDate)} a {weekEndDate ? formatShortDate(weekEndDate) : 'sex.'}</p>
-            <p className="mt-2 text-xs font-bold text-gray-400">{weekBlockCount || 20} blocos planejáveis quando houver cobertura suficiente.</p>
-          </div>
-
-          <div className="grid gap-2">
-            {targetProfiles.map((target) => (
-              <button
-                key={target.slug}
-                type="button"
-                onClick={() => {
-                  onTargetChange(target.slug);
-                  onSeedCoverage(target.slug);
-                }}
-                className="rounded border border-white/10 bg-white/5 px-3 py-2 text-left text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:border-[#84cc16]/40 hover:bg-[#84cc16]/10 hover:text-white"
-              >
-                Seed {target.name}
-              </button>
-            ))}
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Perfis</p>
-              <div className="flex gap-1">
-                <button
-                  type="button"
-                  onClick={onSaveTargetProfiles}
-                  className="rounded bg-[#84cc16] px-2 py-1 text-[10px] font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d]"
-                >
-                  Salvar
-                </button>
-                <button
-                  type="button"
-                  onClick={onResetTargetProfiles}
-                  className="rounded border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10"
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-            <textarea
-              value={targetProfileDraft}
-              onChange={(event) => onTargetProfileDraftChange(event.target.value)}
-              className="min-h-[150px] w-full resize-y rounded border border-white/10 bg-[#111] p-2 font-mono text-[10px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
-              spellCheck={false}
-            />
-          </div>
-        </aside>
-
-        <main className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,0.95fr)_minmax(560px,1.05fr)]">
-          <div className="min-w-0 space-y-4">
-            <TargetDecisionTable rows={targetDecisionRows} activeSlug={targetSlug} onSelect={onTargetChange} />
-
-            <textarea
-              value={coverageDraft}
-              onChange={(event) => onCoverageDraftChange(event.target.value)}
-              className="min-h-[220px] w-full min-w-0 max-w-full resize-y rounded-lg border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
-              spellCheck={false}
-            />
-
-            <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 p-3">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-widest text-[#84cc16]">Fontes concorrentes</p>
-                  <p className="mt-1 text-[11px] font-bold text-gray-500">Trilha, aulas, TEC, Andréty ou manual entram como sinais do score.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onSeedSources(targetSlug)}
-                  className="rounded border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10"
-                >
-                  Seed fontes
-                </button>
-              </div>
-
-              <div className="mb-3 grid min-w-0 gap-2 rounded border border-white/10 bg-[#151515] p-2">
-                <div className="flex min-w-0 flex-wrap gap-2">
-                  <select
-                    value={rawSourceKind}
-                    onChange={(event) => onRawSourceKindChange(event.target.value as StudySourceKind | 'auto')}
-                    className="rounded border border-[#525252] bg-[#262626] px-2 py-1.5 text-[11px] font-bold text-white outline-none focus:border-[#84cc16]"
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="tec_incidence">TEC</option>
-                    <option value="estrategia_aulas">Aulas</option>
-                    <option value="trilha_estrategica">Trilha</option>
-                    <option value="guia_andrety">Andrety</option>
-                    <option value="manual">Manual</option>
-                  </select>
-                  <input
-                    value={rawSourceDiscipline}
-                    onChange={(event) => onRawSourceDisciplineChange(event.target.value)}
-                    aria-label="Disciplina da fonte"
-                    placeholder="Disciplina da pasta"
-                    className="min-w-[150px] flex-1 rounded border border-[#525252] bg-[#262626] px-2 py-1.5 text-[11px] font-bold text-white outline-none placeholder:text-gray-600 focus:border-[#84cc16]"
-                  />
-                  <label className={`flex items-center gap-2 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition ${
-                    isReadingSourceFiles
-                      ? 'cursor-wait border-white/10 bg-white/5 text-gray-500'
-                      : 'cursor-pointer border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
-                  }`}>
-                    {isReadingSourceFiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-                    {isReadingSourceFiles ? `Lendo ${sourceFileProgress.processed}/${sourceFileProgress.total}` : 'Arquivos'}
-                    <input
-                      type="file"
-                      accept="application/pdf,.pdf,text/plain,.txt,.md,text/html,.html,.htm"
-                      multiple
-                      disabled={isReadingSourceFiles}
-                      onChange={(event) => {
-                        const files = Array.from(event.target.files || []);
-                        onImportSourceFiles(files);
-                        event.target.value = '';
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                  <label className={`flex items-center gap-2 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition ${
-                    isReadingSourceFiles
-                      ? 'cursor-wait border-white/10 bg-white/5 text-gray-500'
-                      : 'cursor-pointer border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
-                  }`}>
-                    <Layers className="h-3.5 w-3.5" /> Pasta
-                    <input
-                      type="file"
-                      multiple
-                      disabled={isReadingSourceFiles}
-                      onChange={(event) => {
-                        const files = Array.from(event.target.files || []);
-                        onImportSourceFiles(files);
-                        event.target.value = '';
-                      }}
-                      {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                      className="hidden"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={onAppendInferredSources}
-                    disabled={!rawSourceText.trim()}
-                    className="rounded bg-[#84cc16] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-black transition hover:bg-[#65a30d] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Normalizar texto
-                  </button>
-                </div>
-                <textarea
-                  value={rawSourceText}
-                  onChange={(event) => onRawSourceTextChange(event.target.value)}
-                  className="min-h-[96px] w-full min-w-0 max-w-full resize-y rounded border border-white/10 bg-[#0f0f0f] p-2 font-mono text-[11px] leading-4 text-gray-100 outline-none focus:border-[#84cc16]"
-                  spellCheck={false}
-                  placeholder="TEC: Economia - Macroeconomia - incidencia 9 - peso 2"
-                />
-              </div>
-              <textarea
-                value={sourceDraft}
-                onChange={(event) => onSourceDraftChange(event.target.value)}
-                className="min-h-[170px] w-full min-w-0 max-w-full resize-y rounded border border-white/10 bg-[#111] p-3 font-mono text-xs leading-5 text-gray-100 outline-none focus:border-[#84cc16]"
-                spellCheck={false}
-              />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              {activeDayBlocks.length ? (
-                activeDayBlocks.map((block, index) => (
-                  <div key={block.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${studyBlockKindClass[block.kind]}`}>
-                        {index + 1} · {studyBlockKindLabel[block.kind]}
-                      </span>
-                      <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black text-gray-300">{block.finalScore}</span>
-                    </div>
-                    <p className="text-sm font-black text-white">{block.discipline}</p>
-                    <p className="mt-1 text-sm font-bold text-gray-300">{block.topic}</p>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
-                      <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{formatMinutes(block.durationMinutes)}</span>
-                      {block.plannedQuestions && <span className="rounded bg-white/5 px-2 py-1 text-gray-300">{block.plannedQuestions} questões</span>}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <EmptyPanel icon={Target} title="Sem blocos gerados" />
-              )}
-            </div>
-
-            {refreshPlan ? (
-              <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
-                Refresh para {formatShortDate(refreshPlan.date)} baseado em {refreshPlan.refreshedFromTaskIds.length} dívida(s) de execução.
-              </div>
-            ) : null}
-
-            {weekPlan ? (
-              <div className="grid gap-2 rounded-lg border border-white/10 bg-black/15 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-black uppercase tracking-widest text-[#84cc16]">Shell semanal Study OS</p>
-                  <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black text-gray-300">{weekBlockCount} blocos</span>
-                </div>
-                <div className="grid gap-2 lg:grid-cols-5">
-                  {weekPlan.days.map((day) => (
-                    <div key={day.date} className="rounded border border-white/10 bg-[#111] p-2">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-purple-300">{formatShortDate(day.date)}</p>
-                      <div className="mt-2 space-y-1.5">
-                        {day.blocks.map((block, index) => (
-                          <div key={block.id} className="rounded bg-white/5 px-2 py-1.5">
-                            <p className="truncate text-[10px] font-black uppercase tracking-widest text-gray-500">{index + 1} · {studyBlockKindLabel[block.kind]}</p>
-                            <p className="truncate text-xs font-bold text-white">{block.discipline}</p>
-                            <p className="truncate text-[11px] font-bold text-gray-400">{block.topic}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {activeWarnings.length ? (
-              <div className="space-y-2">
-                {activeWarnings.map((warning) => (
-                  <div key={warning} className="rounded border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
-                    {warning}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {weekPlan?.warnings.length ? (
-              <div className="space-y-2">
-                {weekPlan.warnings.map((warning) => (
-                  <div key={warning} className="rounded border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100">
-                    {warning}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/15">
-            {visibleScoreboard.length > 0 ? (
-              <table className="w-full min-w-[1160px] border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
-                    <th className="px-3 py-3">Bloco</th>
-                    <th className="px-3 py-3">Disciplina</th>
-                    <th className="px-3 py-3">Tema</th>
-                    <th className="px-3 py-3">W</th>
-                    <th className="px-3 py-3">Inc</th>
-                    <th className="px-3 py-3">Tier</th>
-                    <th className="px-3 py-3">Cob</th>
-                    <th className="px-3 py-3">Rev</th>
-                    <th className="px-3 py-3">LS</th>
-                    <th className="px-3 py-3">Fit</th>
-                    <th className="px-3 py-3">Pen</th>
-                    <th className="px-3 py-3">Escolha</th>
-                    <th className="px-3 py-3">Substituído por</th>
-                    <th className="px-3 py-3">Final</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleScoreboard.map((row) => (
-                    <StudyScoreRow key={row.candidateKey} row={row} />
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <EmptyPanel icon={BarChart3} title="Sem score calculado" />
-            )}
-          </div>
-        </main>
-      </div>
-    </section>
-  );
-};
-
-const TargetDecisionTable: React.FC<{
-  rows: TargetDecisionRow[];
-  activeSlug: string;
-  onSelect: (targetSlug: string) => void;
-}> = ({ rows, activeSlug, onSelect }) => (
-  <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/15">
-    {rows.length > 0 ? (
-      <table className="w-full min-w-[760px] border-collapse text-left">
-        <thead>
-          <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
-            <th className="px-3 py-3">Target</th>
-            <th className="px-3 py-3">Score</th>
-            <th className="px-3 py-3">Vagas</th>
-            <th className="px-3 py-3">Cob.</th>
-            <th className="px-3 py-3">LS</th>
-            <th className="px-3 py-3">Curso</th>
-            <th className="px-3 py-3">Banca</th>
-            <th className="px-3 py-3">Sinal</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.targetSlug}
-              className={`border-b border-white/5 text-xs transition ${
-                row.targetSlug === activeSlug ? 'bg-[#84cc16]/10 text-white' : 'text-gray-300 hover:bg-white/[0.03]'
-              }`}
-            >
-              <td className="px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => onSelect(row.targetSlug)}
-                  className="text-left font-black text-white transition hover:text-[#bef264]"
-                >
-                  {row.name}
-                </button>
-                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">{row.organizer} · {row.phase === 'pos_edital' ? 'Pós' : 'Pré'}</p>
-              </td>
-              <td className="px-3 py-2">
-                <span className="rounded bg-[#84cc16]/10 px-2 py-1 font-black text-[#84cc16]">{row.recommendationScore}</span>
-              </td>
-              <td className="max-w-[160px] truncate px-3 py-2">{row.vagasNotes || '-'}</td>
-              <td className="px-3 py-2 font-black text-white">{row.coverageRows}</td>
-              <td className="px-3 py-2">{row.lsAvailability}</td>
-              <td className="px-3 py-2">{row.courseAvailability}</td>
-              <td className="px-3 py-2">{row.bancaFit}</td>
-              <td className="max-w-[220px] truncate px-3 py-2">{row.reasons[0] || row.recommendationLabel}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ) : (
-      <EmptyPanel icon={Target} title="Sem targets válidos" />
-    )}
-  </div>
-);
-
-const StudyScoreRow: React.FC<{ row: StudyScoreboardRow }> = ({ row }) => (
-  <tr className={`border-b border-white/5 text-xs transition ${row.chosen ? 'bg-[#84cc16]/10 text-white' : 'text-gray-300 hover:bg-white/[0.03]'}`}>
-    <td className="px-3 py-2">
-      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${studyBlockKindClass[row.kind]}`}>
-        {studyBlockKindLabel[row.kind]}
-      </span>
-    </td>
-    <td className="px-3 py-2 font-bold text-white">{row.discipline}</td>
-    <td className="max-w-[220px] truncate px-3 py-2">{row.topic}</td>
-    <td className="px-3 py-2">{row.weakness}</td>
-    <td className="px-3 py-2">{row.incidence}</td>
-    <td className="px-3 py-2">{row.tier}</td>
-    <td className="px-3 py-2">{row.coverageNeed}</td>
-    <td className="px-3 py-2">{row.reviewDebt}</td>
-    <td className="px-3 py-2">{row.lsAlignment}</td>
-    <td className="px-3 py-2">{row.targetFit}</td>
-    <td className="px-3 py-2">{row.lowTrustPenalty + row.balancePenalty}</td>
-    <td className="px-3 py-2">
-      <span className={`rounded px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
-        row.chosen ? 'bg-[#84cc16]/15 text-[#bef264]' : 'bg-white/5 text-gray-500'
-      }`}>
-        {row.chosen ? 'Sim' : 'Não'}
-      </span>
-    </td>
-    <td className="max-w-[180px] truncate px-3 py-2" title={row.displacedBy || undefined}>{row.displacedBy || '-'}</td>
-    <td className="px-3 py-2 font-black text-[#84cc16]">{row.finalScore}</td>
-  </tr>
-);
 
 const PlannerGeneratorPanel: React.FC<{
   draft: PlannerDraft;

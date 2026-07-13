@@ -136,11 +136,11 @@
 - The collapsed LS agenda/calendar remains an optional baseline and execution bridge.
 - Target/profile/coverage/source configuration is available only through service-backed Home panels and Strategy Workbench.
 
-- [ ] Add a source-level regression proving PlannerArea no longer references duplicated Study OS storage keys or renders `StudyOSPlannerPanel`.
-- [ ] Remove the old local Study OS generator, generated-day/week/refresh apply paths, local profile/coverage/source drafts, and their persistence effects.
-- [ ] Preserve LS import/history/calendar/task execution and pass it to Home only as comparison metadata.
-- [ ] Remove now-dead imports/helpers while keeping established Diario question-card flows unchanged.
-- [ ] Run all frontend tests, TypeScript, build, browser desktop/mobile smoke, and commit `refactor: make local service the Study OS command layer`.
+- [x] Add a source-level regression proving PlannerArea no longer references duplicated Study OS storage keys or renders `StudyOSPlannerPanel`.
+- [x] Remove the old local Study OS generator, generated-day/week/refresh apply paths, local profile/coverage/source drafts, and their persistence effects.
+- [x] Preserve LS import/history/calendar/task execution and pass it to Home only as comparison metadata.
+- [x] Remove now-dead imports/helpers while keeping established Diario question-card flows unchanged.
+- [x] Run all frontend tests, TypeScript, build, browser desktop/mobile smoke, and commit `refactor: make local service the Study OS command layer`.
 
 ### Task 7: M7 Durability, Offline, and Production Cutover Gate
 
