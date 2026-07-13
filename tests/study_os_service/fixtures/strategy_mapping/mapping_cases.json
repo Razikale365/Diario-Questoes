@@ -1,0 +1,127 @@
+{
+  "topics": [
+    {
+      "id": 101,
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "topic": "Credito tributario",
+      "transferKind": "shared",
+      "aliases": ["Lancamento e credito tributario"]
+    },
+    {
+      "id": 102,
+      "targetSlug": "rfb_auditor",
+      "discipline": "Legislacao Tributaria",
+      "topic": "Reforma tributaria: CBS e IBS",
+      "transferKind": "target_specific",
+      "aliases": ["Reforma tributaria CBS e IBS"]
+    },
+    {
+      "id": 103,
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "topic": "Imunidade tributaria reciproca",
+      "transferKind": "shared",
+      "aliases": []
+    },
+    {
+      "id": 104,
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "topic": "Imunidade tributaria religiosa",
+      "transferKind": "shared",
+      "aliases": []
+    },
+    {
+      "id": 105,
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Constitucional",
+      "topic": "Imunidade tributaria reciproca",
+      "transferKind": "shared",
+      "aliases": []
+    },
+    {
+      "id": 201,
+      "targetSlug": "bacen_economia_financas",
+      "discipline": "Legislacao Tributaria",
+      "topic": "Reforma tributaria: CBS e IBS",
+      "transferKind": "target_specific",
+      "aliases": ["Reforma tributaria CBS e IBS"]
+    },
+    {
+      "id": 202,
+      "targetSlug": "bacen_economia_financas",
+      "discipline": "Economia",
+      "topic": "Politica fiscal",
+      "transferKind": "shared",
+      "aliases": []
+    }
+  ],
+  "cases": [
+    {
+      "name": "accented_aula_alias",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "courseName": "Direito Tributario Regular",
+      "lessonNumber": 2,
+      "title": "Aula 002 - Lan\u00e7amento e Cr\u00e9dito Tribut\u00e1rio (atualizada 2026)",
+      "headingTokens": [],
+      "expectedTopicIds": [101],
+      "expectedStage": "alias",
+      "expectedStatus": "approved"
+    },
+    {
+      "name": "reform_edition_alias",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "rfb_auditor",
+      "discipline": "Legislacao Tributaria",
+      "courseName": "Legislacao Tributaria Regular",
+      "lessonNumber": 1,
+      "title": "Aula 01 - Atualizacao da EC 132/2023",
+      "headingTokens": ["Reforma tribut\u00e1ria: CBS e IBS - edi\u00e7\u00e3o 2026"],
+      "expectedTopicIds": [102],
+      "expectedStage": "exact",
+      "expectedStatus": "approved"
+    },
+    {
+      "name": "duplicate_title_is_ambiguous",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "courseName": "Direito Tributario Regular",
+      "lessonNumber": 3,
+      "title": "Aula 03 - Imunidade tributaria",
+      "headingTokens": [],
+      "expectedTopicIds": [103, 104],
+      "expectedStage": "token",
+      "expectedStatus": "proposed"
+    },
+    {
+      "name": "target_specific_law_does_not_transfer",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "bacen_economia_financas",
+      "discipline": "Legislacao Tributaria",
+      "courseName": "Legislacao Tributaria Regular",
+      "lessonNumber": 4,
+      "title": "Aula 04 - Reforma tributaria CBS e IBS",
+      "headingTokens": [],
+      "expectedTopicIds": [],
+      "expectedStage": null,
+      "expectedStatus": null
+    },
+    {
+      "name": "shared_topic_transfers_as_proposal",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "bacen_economia_financas",
+      "discipline": "Economia",
+      "courseName": "Economia e Financas Publicas Regular",
+      "lessonNumber": 5,
+      "title": "Aula 05 - Politica fiscal",
+      "headingTokens": [],
+      "expectedTopicIds": [202],
+      "expectedStage": "exact",
+      "expectedStatus": "proposed"
+    }
+  ]
+}

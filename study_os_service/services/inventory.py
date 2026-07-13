@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Mapping, Sequence
 
 from study_os_service.ingest.course_scanner import CourseScanSnapshot, scan_course_root
 from study_os_service.repositories.inventory import ImportRunSummary, InventoryRepository
@@ -51,3 +52,20 @@ class InventoryService:
         if summary is None:
             raise RuntimeError(f"import run {run_id} disappeared")
         return summary
+
+    def map_course_topics(
+        self,
+        root_id: int,
+        *,
+        target_slug: str | None = None,
+        topic_aliases: Mapping[int, Sequence[str]] | None = None,
+        heading_hints: Mapping[int, Sequence[str]] | None = None,
+    ):
+        from study_os_service.services.course_mapping import CourseMappingService
+
+        return CourseMappingService(self.repository.connection).map_root(
+            root_id,
+            target_slug=target_slug,
+            topic_aliases=topic_aliases,
+            heading_hints=heading_hints,
+        )

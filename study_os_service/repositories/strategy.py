@@ -8,6 +8,7 @@ from typing import Mapping
 from study_os_service.domain.strategy import (
     SourceChoiceRow,
     SourceChoiceRun,
+    StrategyIngestionRun,
     StrategySource,
     StrategySourceItem,
     TopicSourceMapping,
@@ -98,6 +99,23 @@ def _choice_run(row: sqlite3.Row) -> SourceChoiceRun:
     )
 
 
+def _ingestion_run(row: sqlite3.Row) -> StrategyIngestionRun:
+    return StrategyIngestionRun(
+        id=row["id"],
+        idempotency_key=row["idempotency_key"],
+        source_id=row["source_id"],
+        target_slug=row["target_slug"],
+        input_hash=row["input_hash"],
+        algorithm_version=row["algorithm_version"],
+        status=row["status"],
+        discovered_count=row["discovered_count"],
+        mapped_count=row["mapped_count"],
+        unresolved_count=row["unresolved_count"],
+        unresolved_report=tuple(json.loads(row["unresolved_report_json"])),
+        created_at=_timestamp(row["created_at"]),
+    )
+
+
 def _choice_row(row: sqlite3.Row) -> SourceChoiceRow:
     return SourceChoiceRow(
         id=row["id"],
@@ -172,6 +190,18 @@ class StrategyRepository:
         ).fetchone()
         return _source(row) if row is not None else None
 
+    def get_source_by_key(
+        self, target_slug: str, source_key: str
+    ) -> StrategySource | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM strategy_sources
+            WHERE target_slug=? AND source_key=?
+            """,
+            (target_slug, source_key),
+        ).fetchone()
+        return _source(row) if row is not None else None
+
     def list_sources(self, target_slug: str) -> tuple[StrategySource, ...]:
         return tuple(
             _source(row)
@@ -235,6 +265,89 @@ class StrategyRepository:
             raise RuntimeError("strategy source item insert was not visible")
         return _item(row)
 
+    def get_source_item_by_fingerprint(
+        self, source_id: int, source_fingerprint: str
+    ) -> StrategySourceItem | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM strategy_source_items
+            WHERE source_id=? AND source_fingerprint=?
+            """,
+            (source_id, source_fingerprint),
+        ).fetchone()
+        return _item(row) if row is not None else None
+
+    def upsert_source_item(
+        self,
+        *,
+        source_id: int,
+        target_slug: str,
+        discipline: str,
+        topic_hint: str,
+        source_order: int,
+        content_role: str,
+        lesson_id: int | None,
+        material_id: int | None,
+        external_url: str | None,
+        external_id: str | None,
+        incidence_bp: int,
+        banca: str,
+        provenance: Mapping[str, object],
+        source_fingerprint: str,
+    ) -> StrategySourceItem:
+        existing = self.get_source_item_by_fingerprint(
+            source_id, source_fingerprint
+        )
+        if existing is None:
+            return self.insert_source_item(
+                source_id=source_id,
+                target_slug=target_slug,
+                discipline=discipline,
+                topic_hint=topic_hint,
+                source_order=source_order,
+                content_role=content_role,
+                lesson_id=lesson_id,
+                material_id=material_id,
+                external_url=external_url,
+                external_id=external_id,
+                incidence_bp=incidence_bp,
+                banca=banca,
+                provenance=provenance,
+                source_fingerprint=source_fingerprint,
+            )
+        safe_provenance = dict(validate_strategy_metadata(provenance, "provenance"))
+        self.connection.execute(
+            """
+            UPDATE strategy_source_items
+            SET discipline=?, topic_hint=?, source_order=?, content_role=?,
+                lesson_id=?, material_id=?, external_url=?, external_id=?,
+                incidence_bp=?, banca=?, provenance_json=?, active=1,
+                version=version+1,
+                updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            WHERE id=?
+            """,
+            (
+                discipline,
+                topic_hint,
+                source_order,
+                content_role,
+                lesson_id,
+                material_id,
+                external_url,
+                external_id,
+                incidence_bp,
+                banca,
+                json.dumps(safe_provenance, sort_keys=True, separators=(",", ":")),
+                existing.id,
+            ),
+        )
+        refreshed = self.get_source_item_by_fingerprint(
+            source_id, source_fingerprint
+        )
+        if refreshed is None:
+            raise RuntimeError("strategy source item update was not visible")
+        return refreshed
+
     def list_source_items(self, source_id: int) -> tuple[StrategySourceItem, ...]:
         return tuple(
             _item(row)
@@ -289,6 +402,94 @@ class StrategyRepository:
             raise RuntimeError("topic source mapping insert was not visible")
         return _mapping(row)
 
+    def upsert_mapping(
+        self,
+        *,
+        target_slug: str,
+        target_topic_id: int,
+        source_item_id: int,
+        source_target_slug: str,
+        transfer_kind: str,
+        mapping_status: str,
+        confidence_bp: int,
+        primary_eligible: bool,
+        notes: str,
+    ) -> TopicSourceMapping:
+        row = self.connection.execute(
+            """
+            SELECT * FROM topic_source_mappings
+            WHERE target_slug=? AND target_topic_id=? AND source_item_id=?
+            """,
+            (target_slug, target_topic_id, source_item_id),
+        ).fetchone()
+        if row is None:
+            return self.insert_mapping(
+                target_slug=target_slug,
+                target_topic_id=target_topic_id,
+                source_item_id=source_item_id,
+                source_target_slug=source_target_slug,
+                transfer_kind=transfer_kind,
+                mapping_status=mapping_status,
+                confidence_bp=confidence_bp,
+                primary_eligible=primary_eligible,
+                manual_override=False,
+                notes=notes,
+            )
+        existing = _mapping(row)
+        if existing.manual_override:
+            return existing
+        self.connection.execute(
+            """
+            UPDATE topic_source_mappings
+            SET source_target_slug=?, transfer_kind=?, mapping_status=?,
+                confidence_bp=?, primary_eligible=?, notes=?,
+                version=version+1,
+                updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            WHERE id=?
+            """,
+            (
+                source_target_slug,
+                transfer_kind,
+                mapping_status,
+                confidence_bp,
+                int(primary_eligible),
+                notes,
+                existing.id,
+            ),
+        )
+        refreshed = self.connection.execute(
+            "SELECT * FROM topic_source_mappings WHERE id=?", (existing.id,)
+        ).fetchone()
+        if refreshed is None:
+            raise RuntimeError("topic source mapping update was not visible")
+        return _mapping(refreshed)
+
+    def reject_automatic_mappings_except(
+        self,
+        *,
+        source_item_id: int,
+        target_slug: str,
+        keep_topic_ids: tuple[int, ...],
+    ) -> None:
+        parameters: list[object] = [source_item_id, target_slug]
+        keep_clause = ""
+        if keep_topic_ids:
+            placeholders = ",".join("?" for _ in keep_topic_ids)
+            keep_clause = f" AND target_topic_id NOT IN ({placeholders})"
+            parameters.extend(keep_topic_ids)
+        self.connection.execute(
+            f"""
+            UPDATE topic_source_mappings
+            SET mapping_status='rejected', primary_eligible=0,
+                notes='Superseded by a newer deterministic mapping run',
+                version=version+1,
+                updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            WHERE source_item_id=? AND target_slug=?
+              AND manual_override=0{keep_clause}
+            """,
+            parameters,
+        )
+
     def list_mappings(
         self, target_slug: str, mapping_status: str | None = None
     ) -> tuple[TopicSourceMapping, ...]:
@@ -304,6 +505,64 @@ class StrategyRepository:
                 values,
             )
         )
+
+    def insert_ingestion_run(
+        self,
+        *,
+        idempotency_key: str,
+        source_id: int,
+        target_slug: str,
+        input_hash: str,
+        algorithm_version: str,
+        status: str,
+        discovered_count: int,
+        mapped_count: int,
+        unresolved_report: tuple[Mapping[str, object], ...],
+    ) -> StrategyIngestionRun:
+        safe_report = [
+            dict(validate_strategy_metadata(item, "unresolved report item"))
+            for item in unresolved_report
+        ]
+        cursor = self.connection.execute(
+            """
+            INSERT INTO strategy_ingestion_runs (
+              idempotency_key, source_id, target_slug, input_hash,
+              algorithm_version, status, discovered_count, mapped_count,
+              unresolved_count, unresolved_report_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                idempotency_key,
+                source_id,
+                target_slug,
+                input_hash,
+                algorithm_version,
+                status,
+                discovered_count,
+                mapped_count,
+                len(safe_report),
+                json.dumps(safe_report, sort_keys=True, separators=(",", ":")),
+            ),
+        )
+        run = self.get_ingestion_run(cursor.lastrowid)
+        if run is None:
+            raise RuntimeError("strategy ingestion run insert was not visible")
+        return run
+
+    def get_ingestion_run(self, run_id: int) -> StrategyIngestionRun | None:
+        row = self.connection.execute(
+            "SELECT * FROM strategy_ingestion_runs WHERE id=?", (run_id,)
+        ).fetchone()
+        return _ingestion_run(row) if row is not None else None
+
+    def get_ingestion_run_by_key(
+        self, idempotency_key: str
+    ) -> StrategyIngestionRun | None:
+        row = self.connection.execute(
+            "SELECT * FROM strategy_ingestion_runs WHERE idempotency_key=?",
+            (idempotency_key,),
+        ).fetchone()
+        return _ingestion_run(row) if row is not None else None
 
     def insert_choice_run(
         self,

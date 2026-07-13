@@ -72,13 +72,13 @@ No table accepts question text, alternative text, answer keys, comments, or obse
 
 Build a deterministic local mapper using inventory discipline, course, lesson number/title, material kind, heading tokens, and target topic aliases. Matching stages are exact normalized topic, configured alias, discipline-constrained token score, then unresolved. Do not use body-text similarity as silent truth.
 
-- [ ] RED tests for accents, aula numbering, reform editions, duplicate titles, Passo vs regular, and ambiguous topics.
-- [ ] Map regular PDFs as primary-theory eligible when trust and target match.
-- [ ] Map Passo PDFs as review/support unless manually promoted with a recorded reason.
-- [ ] Preserve one lesson mapping to multiple edital topics only as explicit scored rows.
-- [ ] Reject another target's specific law even when filenames are similar.
-- [ ] Re-running the same inventory snapshot must be idempotent and preserve manual decisions.
-- [ ] Commit `feat: map Estrategia lessons to edital topics`.
+- [x] RED tests for accents, aula numbering, reform editions, duplicate titles, Passo vs regular, and ambiguous topics.
+- [x] Map regular PDFs as primary-theory eligible when trust and target match.
+- [x] Map Passo PDFs as review/support unless manually promoted with a recorded reason.
+- [x] Preserve one lesson mapping to multiple edital topics only as explicit scored rows.
+- [x] Reject another target's specific law even when filenames are similar.
+- [x] Re-running the same inventory snapshot must be idempotent and preserve manual decisions.
+- [x] Commit `feat: map Estrategia lessons to edital topics`.
 
 ## Task 4: Ingest Trilha, LS, Andréty, and TEC Metadata
 
