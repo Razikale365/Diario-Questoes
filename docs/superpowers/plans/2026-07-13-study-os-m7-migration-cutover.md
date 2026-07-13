@@ -73,11 +73,11 @@
 - `PUT /api/v1/preferences/active-target` accepts `{targetSlug, version}`.
 - `POST /api/v1/cutover/browser-migration` requires `Idempotency-Key` and returns the persisted migration report.
 
-- [ ] Write failing API tests for empty state, preference update/conflict, first import, byte-equivalent replay, changed-payload conflict, and structured validation errors.
-- [ ] Implement routes and a `CutoverApiError` handler without returning raw payloads or proprietary fields.
-- [ ] Write failing TypeScript parser/request tests for every DTO and error response.
-- [ ] Implement the strict client with abort support and explicit idempotency headers.
-- [ ] Run focused backend/frontend tests, TypeScript, compileall, and commit `feat: expose Study OS cutover API`.
+- [x] Write failing API tests for empty state, preference update/conflict, first import, byte-equivalent replay, changed-payload conflict, and structured validation errors.
+- [x] Implement routes and a `CutoverApiError` handler without returning raw payloads or proprietary fields.
+- [x] Write failing TypeScript parser/request tests for every DTO and error response.
+- [x] Implement the strict client with abort support and explicit idempotency headers.
+- [x] Run focused backend/frontend tests, TypeScript, compileall, and commit `feat: expose Study OS cutover API`.
 
 ### Task 4: Portable Export and Offline Restore
 

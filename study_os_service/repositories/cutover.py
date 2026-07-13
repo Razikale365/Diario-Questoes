@@ -115,6 +115,19 @@ class CutoverRepository:
         ).fetchone()
         return _run(row) if row else None
 
+    def list_migrations(self, *, limit: int = 100) -> tuple[MigrationRunRecord, ...]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("migration history limit must be a positive integer")
+        rows = self.connection.execute(
+            """
+            SELECT * FROM legacy_migration_runs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return tuple(_run(row) for row in rows)
+
     def begin_migration(
         self,
         *,
@@ -369,4 +382,9 @@ class CutoverRepository:
             WHERE migration_run_id=?
             """,
             (migration_run_id,),
+        ).fetchone()[0]
+
+    def count_all_legacy_ids(self) -> int:
+        return self.connection.execute(
+            "SELECT COUNT(*) FROM legacy_id_mappings"
         ).fetchone()[0]
