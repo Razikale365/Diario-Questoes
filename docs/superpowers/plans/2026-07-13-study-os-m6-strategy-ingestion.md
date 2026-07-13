@@ -57,10 +57,10 @@ Add immutable ingestion runs and editable mapping records:
 
 No table accepts question text, alternative text, answer keys, comments, or observations.
 
-- [ ] RED migration/domain tests from schema v7, rollback, enums, bounds, target isolation, and forbidden fields.
-- [ ] Preserve every v1-v7 fixture and current planner/event row.
-- [ ] Add indexes for target/topic, source/order, unresolved mappings, and chosen source lookup.
-- [ ] Commit `feat: add Study OS strategy source schema`.
+- [x] RED migration/domain tests from schema v7, rollback, enums, bounds, target isolation, and forbidden fields.
+- [x] Preserve every v1-v7 fixture and current planner/event row.
+- [x] Add indexes for target/topic, source/order, unresolved mappings, and chosen source lookup.
+- [x] Commit `feat: add Study OS strategy source schema`.
 
 ## Task 3: Map Fresh Course Lessons to Edital Topics
 

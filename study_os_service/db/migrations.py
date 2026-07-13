@@ -661,6 +661,208 @@ CREATE TABLE planner_blocks (
             "CREATE INDEX idx_planner_week_slots_date ON planner_week_slots(target_slug, scheduled_date, position);",
         ),
     ),
+    (
+        8,
+        (
+            """
+            CREATE TABLE strategy_sources (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              source_key TEXT NOT NULL CHECK (length(trim(source_key)) > 0),
+              source_kind TEXT NOT NULL CHECK (source_kind IN (
+                'course','passo','trilha','ls','andrety','tec','manual'
+              )),
+              display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+              trust_tier INTEGER NOT NULL CHECK (trust_tier BETWEEN 0 AND 10),
+              root_id INTEGER REFERENCES course_roots(id),
+              material_id INTEGER REFERENCES materials(id),
+              external_url TEXT CHECK (
+                external_url IS NULL OR external_url GLOB 'http*://*'
+              ),
+              external_id TEXT,
+              edition TEXT NOT NULL DEFAULT '',
+              active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+              notes TEXT NOT NULL DEFAULT '',
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (target_slug, source_key)
+            );
+            """,
+            "CREATE UNIQUE INDEX ux_strategy_sources_id_target ON strategy_sources(id, target_slug);",
+            """
+            CREATE TABLE strategy_source_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              discipline TEXT NOT NULL CHECK (length(trim(discipline)) > 0),
+              topic_hint TEXT NOT NULL CHECK (length(trim(topic_hint)) > 0),
+              source_order INTEGER NOT NULL DEFAULT 0 CHECK (source_order >= 0),
+              content_role TEXT NOT NULL CHECK (content_role IN (
+                'primary_theory','review_support','question_practice',
+                'schedule_advice','incidence_signal'
+              )),
+              lesson_id INTEGER REFERENCES lessons(id),
+              material_id INTEGER REFERENCES materials(id),
+              external_url TEXT CHECK (
+                external_url IS NULL OR external_url GLOB 'http*://*'
+              ),
+              external_id TEXT,
+              incidence_bp INTEGER NOT NULL DEFAULT 0
+                CHECK (incidence_bp BETWEEN 0 AND 10000),
+              banca TEXT NOT NULL DEFAULT '',
+              provenance_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(provenance_json)
+                  AND json_type(provenance_json)='object'),
+              source_fingerprint TEXT NOT NULL
+                CHECK (length(trim(source_fingerprint)) > 0),
+              active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (source_id, source_fingerprint),
+              FOREIGN KEY (source_id, target_slug)
+                REFERENCES strategy_sources(id, target_slug),
+              CHECK (material_id IS NULL OR lesson_id IS NOT NULL),
+              CHECK (content_role!='primary_theory' OR material_id IS NOT NULL)
+            );
+            """,
+            "CREATE UNIQUE INDEX ux_strategy_source_items_id_target ON strategy_source_items(id, target_slug);",
+            """
+            CREATE TABLE topic_source_mappings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              source_item_id INTEGER NOT NULL,
+              source_target_slug TEXT NOT NULL,
+              transfer_kind TEXT NOT NULL CHECK (
+                transfer_kind IN ('target_specific','shared','partial')
+              ),
+              mapping_status TEXT NOT NULL DEFAULT 'proposed'
+                CHECK (mapping_status IN ('proposed','approved','rejected')),
+              confidence_bp INTEGER NOT NULL DEFAULT 0
+                CHECK (confidence_bp BETWEEN 0 AND 10000),
+              primary_eligible INTEGER NOT NULL DEFAULT 0
+                CHECK (primary_eligible IN (0,1)),
+              manual_override INTEGER NOT NULL DEFAULT 0
+                CHECK (manual_override IN (0,1)),
+              notes TEXT NOT NULL DEFAULT '',
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (target_slug, target_topic_id, source_item_id),
+              FOREIGN KEY (target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              FOREIGN KEY (source_item_id, source_target_slug)
+                REFERENCES strategy_source_items(id, target_slug),
+              CHECK (
+                transfer_kind!='target_specific' OR source_target_slug=target_slug
+              ),
+              CHECK (
+                primary_eligible=0 OR mapping_status='approved'
+              )
+            );
+            """,
+            """
+            CREATE TABLE strategy_ingestion_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE
+                CHECK (length(trim(idempotency_key)) > 0),
+              source_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
+              algorithm_version TEXT NOT NULL
+                CHECK (length(trim(algorithm_version)) > 0),
+              status TEXT NOT NULL CHECK (status IN ('completed','failed')),
+              discovered_count INTEGER NOT NULL DEFAULT 0
+                CHECK (discovered_count >= 0),
+              mapped_count INTEGER NOT NULL DEFAULT 0 CHECK (mapped_count >= 0),
+              unresolved_count INTEGER NOT NULL DEFAULT 0
+                CHECK (unresolved_count >= 0),
+              unresolved_report_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(unresolved_report_json)
+                  AND json_type(unresolved_report_json)='array'),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              FOREIGN KEY (source_id, target_slug)
+                REFERENCES strategy_sources(id, target_slug),
+              CHECK (mapped_count + unresolved_count <= discovered_count),
+              CHECK (json_array_length(unresolved_report_json)=unresolved_count)
+            );
+            """,
+            """
+            CREATE TABLE source_choice_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE
+                CHECK (length(trim(idempotency_key)) > 0),
+              target_slug TEXT NOT NULL,
+              target_topic_id INTEGER NOT NULL,
+              block_kind TEXT NOT NULL CHECK (
+                block_kind IN ('theory','questions','review')
+              ),
+              algorithm_version TEXT NOT NULL
+                CHECK (length(trim(algorithm_version)) > 0),
+              input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
+              status TEXT NOT NULL DEFAULT 'chosen'
+                CHECK (status IN ('chosen','shortfall')),
+              shortfall_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              FOREIGN KEY (target_slug, target_topic_id)
+                REFERENCES target_topics(target_slug, id),
+              CHECK (
+                (status='chosen' AND shortfall_reason IS NULL)
+                OR (status='shortfall' AND length(trim(shortfall_reason)) > 0)
+              )
+            );
+            """,
+            "CREATE UNIQUE INDEX ux_source_choice_runs_id_target ON source_choice_runs(id, target_slug);",
+            """
+            CREATE TABLE source_choice_rows (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              source_item_id INTEGER NOT NULL REFERENCES strategy_source_items(id),
+              target_fit_bp INTEGER NOT NULL CHECK (target_fit_bp BETWEEN 0 AND 10000),
+              transfer_confidence_bp INTEGER NOT NULL
+                CHECK (transfer_confidence_bp BETWEEN 0 AND 10000),
+              trust_bp INTEGER NOT NULL CHECK (trust_bp BETWEEN 0 AND 10000),
+              freshness_bp INTEGER NOT NULL CHECK (freshness_bp BETWEEN 0 AND 10000),
+              order_readiness_bp INTEGER NOT NULL
+                CHECK (order_readiness_bp BETWEEN 0 AND 10000),
+              strategy_alignment_bp INTEGER NOT NULL
+                CHECK (strategy_alignment_bp BETWEEN 0 AND 10000),
+              material_availability_bp INTEGER NOT NULL
+                CHECK (material_availability_bp BETWEEN 0 AND 10000),
+              low_trust_penalty_bp INTEGER NOT NULL
+                CHECK (low_trust_penalty_bp BETWEEN 0 AND 10000),
+              mismatch_penalty_bp INTEGER NOT NULL
+                CHECK (mismatch_penalty_bp BETWEEN 0 AND 10000),
+              final_score INTEGER NOT NULL,
+              chosen INTEGER NOT NULL DEFAULT 0 CHECK (chosen IN (0,1)),
+              displaced_by_row_id INTEGER REFERENCES source_choice_rows(id),
+              stop_reason TEXT,
+              evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(evidence_json) AND json_type(evidence_json)='object'),
+              UNIQUE (run_id, source_item_id),
+              FOREIGN KEY (run_id, target_slug)
+                REFERENCES source_choice_runs(id, target_slug),
+              CHECK (
+                (chosen=1 AND displaced_by_row_id IS NULL AND stop_reason IS NULL)
+                OR (chosen=0 AND (
+                  (displaced_by_row_id IS NOT NULL AND stop_reason IS NULL)
+                  OR (displaced_by_row_id IS NULL AND length(trim(stop_reason)) > 0)
+                ))
+              ),
+              CHECK (displaced_by_row_id IS NULL OR displaced_by_row_id != id)
+            );
+            """,
+            "CREATE UNIQUE INDEX ux_source_choice_one_chosen ON source_choice_rows(run_id) WHERE chosen=1;",
+            "CREATE INDEX idx_strategy_sources_target_kind ON strategy_sources(target_slug, source_kind, active);",
+            "CREATE INDEX idx_strategy_items_target_order ON strategy_source_items(target_slug, discipline, source_order, id);",
+            "CREATE INDEX idx_strategy_mappings_topic ON topic_source_mappings(target_slug, target_topic_id, mapping_status, confidence_bp DESC);",
+            "CREATE INDEX idx_strategy_mappings_unresolved ON topic_source_mappings(mapping_status, target_slug, id);",
+            "CREATE INDEX idx_source_choice_topic ON source_choice_runs(target_slug, target_topic_id, block_kind, id);",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

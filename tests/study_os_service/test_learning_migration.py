@@ -73,8 +73,8 @@ def test_version_six_upgrades_without_losing_planner_evidence(tmp_path: Path):
             """
         ).lastrowid
 
-        assert MigrationRunner(connection).migrate() == 7
-        assert CURRENT_SCHEMA_VERSION == 7
+        assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
+        assert CURRENT_SCHEMA_VERSION == 8
         assert ADAPTIVE_TABLES <= table_names(connection)
         assert connection.execute(
             "SELECT COUNT(*) FROM target_topics"
