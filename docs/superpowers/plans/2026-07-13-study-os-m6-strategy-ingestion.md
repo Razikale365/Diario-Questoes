@@ -94,14 +94,14 @@ Build a deterministic local mapper using inventory discipline, course, lesson nu
 
 Support local PDF/table/paste inputs through source-specific adapters. Each adapter emits one strict neutral DTO: target, discipline, topic hint, source order, source role, incidence, banca, lesson/material/external reference, and provenance.
 
-- [ ] Estratégia regular order comes from the validated inventory, never dashboard scraping inside Study OS.
-- [ ] Passo/Trilha steps retain their prescribed order and revision emphasis as advisory metadata.
-- [ ] LS metas retain target identity and task linkage; mismatched targets are partial or rejected.
-- [ ] Andréty guides enter as editable advisory rows with source date/version.
-- [ ] TEC paste accepts aggregate incidence and caderno metadata only and fails closed on question-content fields.
-- [ ] Ambiguous or unmapped rows return a visible rejection report and do not mutate planner evidence.
-- [ ] Every retry is idempotent; changed payload under the same key returns a structured conflict.
-- [ ] Commit `feat: ingest Study OS strategy metadata`.
+- [x] Estratégia regular order comes from the validated inventory, never dashboard scraping inside Study OS.
+- [x] Passo/Trilha steps retain their prescribed order and revision emphasis as advisory metadata.
+- [x] LS metas retain target identity and task linkage; mismatched targets are partial or rejected.
+- [x] Andréty guides enter as editable advisory rows with source date/version.
+- [x] TEC paste accepts aggregate incidence and caderno metadata only and fails closed on question-content fields.
+- [x] Ambiguous or unmapped rows return a visible rejection report and do not mutate planner evidence.
+- [x] Every retry is idempotent; changed payload under the same key returns a structured conflict.
+- [x] Commit `feat: ingest Study OS strategy metadata`.
 
 ## Task 5: Score and Explain Source Choice
 
