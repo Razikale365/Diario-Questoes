@@ -1,0 +1,108 @@
+{
+  "schema": "study-os.browser-migration.v1",
+  "migrationId": "browser-20260713-a1",
+  "exportedAt": "2026-07-13T14:00:00-03:00",
+  "activeTargetSlug": "rfb_auditor",
+  "targetProfiles": [
+    {
+      "legacyId": "profile-rfb-auditor",
+      "targetSlug": "rfb_auditor",
+      "displayName": "RFB Auditor",
+      "institution": "Receita Federal",
+      "role": "Auditor-Fiscal",
+      "banca": "FGV",
+      "phase": "pre_edital",
+      "deadline": null,
+      "dailyQuota": 4,
+      "priorityScore": 88,
+      "sourceUrls": [
+        "https://www.gov.br/receitafederal/"
+      ],
+      "notes": "Migrated browser profile",
+      "active": true
+    }
+  ],
+  "coverageRows": [
+    {
+      "legacyId": "coverage-rfb-credito",
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "topic": "Credito tributario",
+      "coverageStatus": "weak",
+      "editalWeight": 2,
+      "incidence": 78,
+      "tier": 1,
+      "bancaFit": 82,
+      "overlapValue": 65,
+      "transferKind": "target_specific",
+      "sourceKind": "manual",
+      "plannedQuestions": 20,
+      "reviewDebt": 70,
+      "notes": "Legacy self-audit",
+      "active": true
+    }
+  ],
+  "lsTasks": [
+    {
+      "legacyId": "ls-meta-46-task-29",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "rfb_auditor",
+      "discipline": "Direito Tributario",
+      "topicHint": "Credito tributario",
+      "order": 29,
+      "taskKind": "questions",
+      "status": "completed",
+      "scheduledDate": "2026-07-10",
+      "metadata": {
+        "metaNumber": 46,
+        "source": "ls-meta-pdf"
+      }
+    }
+  ],
+  "sourceSignals": [
+    {
+      "legacyId": "trilha-credito-01",
+      "sourceTargetSlug": "rfb_auditor",
+      "targetSlug": "rfb_auditor",
+      "sourceKey": "legacy-trilha-rfb",
+      "sourceKind": "trilha",
+      "displayName": "Trilha Estrategica RFB",
+      "trustTier": 7,
+      "discipline": "Direito Tributario",
+      "topicHint": "Credito tributario",
+      "order": 1,
+      "contentRole": "schedule_advice",
+      "targetTopicId": null,
+      "transferKind": "target_specific",
+      "incidenceBp": 0,
+      "banca": "FGV",
+      "edition": "legacy-browser",
+      "notes": "Imported once during cutover",
+      "externalUrl": null,
+      "externalId": "trilha-credito-01",
+      "metadata": {
+        "source": "study_os_source_signals_v1"
+      }
+    }
+  ],
+  "learningItems": [
+    {
+      "legacyId": "aggregate-question-1",
+      "targetSlug": "rfb_auditor",
+      "targetTopicId": null,
+      "discipline": "Direito Tributario",
+      "topic": "Credito tributario",
+      "eventKind": "questions",
+      "occurredAt": "2026-07-10T12:00:00-03:00",
+      "sourceDate": "2026-07-10",
+      "questionsDone": 10,
+      "correctCount": 6,
+      "wrongCount": 4,
+      "doubtCount": 2,
+      "favoriteCount": 1,
+      "sourceLabel": "Professor - Aula 02",
+      "banca": "FGV",
+      "tags": ["Meta 46"]
+    }
+  ]
+}

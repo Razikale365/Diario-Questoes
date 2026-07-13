@@ -52,12 +52,12 @@
 - Produces: `LegacyBrowserBundle.from_payload(payload)` and `LegacyMigrationService.import_bundle(bundle, migration_key)`.
 - Bundle schema: `study-os.browser-migration.v1` with `migrationId`, `exportedAt`, `activeTargetSlug`, `targetProfiles`, `coverageRows`, `lsTasks`, `sourceSignals`, and aggregate-only `learningItems`.
 
-- [ ] Write failing parser tests for canonical valid input, unsupported fields, malformed IDs/counts/dates, cross-target records, and duplicate legacy IDs.
-- [ ] Write recursive rejection tests for `statement`, `question`, `questionText`, `alternatives`, `correctAnswer`, cookies, credentials, tokens, and passwords at any depth.
-- [ ] Write service tests proving target/profile import, coverage matching, LS/source ingestion, learning aggregate import, preference selection, and legacy-ID mappings.
-- [ ] Prove replay returns the original report; the same migration key with a different payload returns a conflict; a failed stage resumes without duplicating completed stages.
-- [ ] Implement strict immutable domain records and a stage-based migration service using deterministic idempotency keys for each delegated service.
-- [ ] Run focused and strategy/learning/profile regressions, compileall, and commit `feat: migrate legacy Study OS metadata safely`.
+- [x] Write failing parser tests for canonical valid input, unsupported fields, malformed IDs/counts/dates, cross-target records, and duplicate legacy IDs.
+- [x] Write recursive rejection tests for `statement`, `question`, `questionText`, `alternatives`, `correctAnswer`, cookies, credentials, tokens, and passwords at any depth.
+- [x] Write service tests proving target/profile import, coverage matching, LS/source ingestion, learning aggregate import, preference selection, and legacy-ID mappings.
+- [x] Prove replay returns the original report; the same migration key with a different payload returns a conflict; a failed stage resumes without duplicating completed stages.
+- [x] Implement strict immutable domain records and a stage-based migration service using deterministic idempotency keys for each delegated service.
+- [x] Run focused and strategy/learning/profile regressions, compileall, and commit `feat: migrate legacy Study OS metadata safely`.
 
 ### Task 3: Cutover API and Strict Frontend Client
 
