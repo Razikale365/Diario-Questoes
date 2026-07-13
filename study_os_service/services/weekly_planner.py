@@ -14,6 +14,7 @@ from study_os_service.repositories.planner_profiles import PlannerProfileReposit
 from study_os_service.repositories.weekly import WeeklyRepository
 from study_os_service.services.planner_candidates import (
     CandidatePool,
+    attach_source_choices,
     build_candidates,
     collect_candidate_evidence,
 )
@@ -22,7 +23,7 @@ from study_os_service.services.planner_scoring import ScoredCandidate, ScoringCo
 from study_os_service.services.review_queue import ReviewQueueService
 
 
-WEEKLY_ALGORITHM_VERSION = "m5-week-v1"
+WEEKLY_ALGORITHM_VERSION = "m6-week-source-v1"
 
 
 class WeeklyIdempotencyConflictError(RuntimeError):
@@ -48,7 +49,9 @@ class GeneratedWeek:
 
 
 def align_pool_to_forecast(
-    pool: CandidatePool, forecast_keys: set[str]
+    pool: CandidatePool,
+    forecast_keys: set[str],
+    forecast_source_rows: dict[str, int | None] | None = None,
 ) -> CandidatePool:
     if not forecast_keys:
         return pool
@@ -57,7 +60,16 @@ def align_pool_to_forecast(
         evidence = dict(candidate.evidence)
         follows = candidate.candidate_key in forecast_keys
         evidence["weeklyAlignment"] = 100 if follows else 0
-        if follows:
+        current_choice = evidence.get("sourceChoice")
+        current_row = (
+            current_choice.get("choiceRowId")
+            if isinstance(current_choice, dict)
+            else None
+        )
+        forecast_row = (forecast_source_rows or {}).get(candidate.candidate_key)
+        if follows and forecast_row is not None and current_row != forecast_row:
+            reason = "weekly_source_diverged"
+        elif follows:
             reason = "weekly_forecast_follow"
         elif candidate.executable:
             reason = "weekly_diverged_current_evidence"
@@ -178,6 +190,9 @@ class WeeklyPlannerService:
                     self.connection, target_name, plan_date
                 )
                 pool = build_candidates(target_name, evidence)
+                pool = attach_source_choices(
+                    self.connection, target_name, plan_date, pool
+                )
                 context = ScoringContext(
                     target=target,
                     plan_date=plan_date,

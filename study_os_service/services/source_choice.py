@@ -10,11 +10,15 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
 from study_os_service.domain.planner import PlannerSourceSelection
-from study_os_service.domain.strategy import SourceChoiceRow, SourceChoiceRun
+from study_os_service.domain.strategy import (
+    SourceChoiceRow,
+    SourceChoiceRun,
+    validate_strategy_metadata,
+)
 from study_os_service.repositories.strategy import StrategyRepository
 
 
-ALGORITHM_VERSION = "m6-source-choice-v1"
+ALGORITHM_VERSION = "m6-source-choice-v2"
 BlockKind = Literal["theory", "questions", "review"]
 
 _BLOCK_ROLES = {
@@ -46,6 +50,7 @@ class _Candidate:
     external_url: str | None
     external_id: str | None
     incidence_bp: int
+    banca: str
     item_version: int
     mapping_status: str
     mapping_confidence_bp: int
@@ -109,6 +114,7 @@ class SourceChoiceService:
         target_topic_id: int,
         block_kind: BlockKind,
         as_of: date,
+        context: Mapping[str, object] | None = None,
     ) -> SourceChoiceResult:
         target = target_slug.strip()
         if not target:
@@ -117,6 +123,9 @@ class SourceChoiceService:
             raise ValueError("invalid source choice block kind")
         if not isinstance(as_of, date):
             raise ValueError("source choice as-of must be a date")
+        choice_context = dict(
+            validate_strategy_metadata(context or {}, "source choice context")
+        )
         topic = self.connection.execute(
             """
             SELECT * FROM target_topics
@@ -128,6 +137,9 @@ class SourceChoiceService:
             raise KeyError(
                 f"target topic {target_topic_id} does not belong to {target}"
             )
+        target_banca = self.connection.execute(
+            "SELECT banca FROM exam_targets WHERE target_slug=?", (target,)
+        ).fetchone()[0]
         candidates = self._candidates(target, target_topic_id)
         input_hash = self._input_hash(
             target=target,
@@ -135,13 +147,21 @@ class SourceChoiceService:
             block_kind=block_kind,
             as_of=as_of,
             candidates=candidates,
+            context=choice_context,
         )
         key = f"source-choice:{target}:{target_topic_id}:{block_kind}:{input_hash}"
         existing = self.repository.get_choice_run_by_key(key)
         if existing is not None:
             return self._result(existing)
 
-        scored = self._score_all(candidates, target, block_kind, as_of)
+        scored = self._score_all(
+            candidates,
+            target,
+            block_kind,
+            as_of,
+            target_banca,
+            choice_context,
+        )
         viable = tuple(item for item in scored if item.stop_reason is None)
         chosen = (
             sorted(
@@ -159,7 +179,9 @@ class SourceChoiceService:
         shortfall_reason = self._shortfall_reason(
             candidates, scored, block_kind, as_of
         )
-        self.connection.execute("BEGIN IMMEDIATE")
+        owns_transaction = not self.connection.in_transaction
+        if owns_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
         try:
             run = self.repository.insert_choice_run(
                 idempotency_key=key,
@@ -189,10 +211,12 @@ class SourceChoiceService:
                         else None
                     ),
                 )
-            self.connection.commit()
+            if owns_transaction:
+                self.connection.commit()
             return self._result(run)
         except Exception:
-            self.connection.rollback()
+            if owns_transaction:
+                self.connection.rollback()
             raise
 
     def _candidates(
@@ -205,7 +229,8 @@ class SourceChoiceService:
                    items.material_id,
                    COALESCE(items.external_url, sources.external_url) AS external_url,
                    COALESCE(items.external_id, sources.external_id) AS external_id,
-                   items.incidence_bp, items.version AS item_version,
+                   items.incidence_bp, items.banca,
+                   items.version AS item_version,
                    sources.source_kind, sources.display_name,
                    sources.trust_tier, sources.target_slug AS source_target_slug,
                    sources.version AS source_version, sources.edition,
@@ -245,6 +270,7 @@ class SourceChoiceService:
                 external_url=row["external_url"],
                 external_id=row["external_id"],
                 incidence_bp=row["incidence_bp"],
+                banca=row["banca"],
                 item_version=row["item_version"],
                 mapping_status=row["mapping_status"],
                 mapping_confidence_bp=row["confidence_bp"],
@@ -271,6 +297,7 @@ class SourceChoiceService:
         block_kind: str,
         as_of: date,
         candidates: tuple[_Candidate, ...],
+        context: Mapping[str, object],
     ) -> str:
         return _hash(
             {
@@ -292,6 +319,7 @@ class SourceChoiceService:
                         "materialId": item.material_id,
                         "externalUrl": item.external_url,
                         "incidenceBp": item.incidence_bp,
+                        "banca": item.banca,
                         "itemVersion": item.item_version,
                         "mappingStatus": item.mapping_status,
                         "mappingConfidenceBp": item.mapping_confidence_bp,
@@ -304,6 +332,7 @@ class SourceChoiceService:
                     }
                     for item in candidates
                 ],
+                "choiceContext": dict(context),
             }
         )
 
@@ -313,13 +342,23 @@ class SourceChoiceService:
         target_slug: str,
         block_kind: str,
         as_of: date,
+        target_banca: str,
+        context: Mapping[str, object],
     ) -> tuple[_Scored, ...]:
         newest_year = max(
             (_edition_year(item.edition) or 0 for item in candidates),
             default=0,
         )
         return tuple(
-            self._score(item, target_slug, block_kind, as_of, newest_year)
+            self._score(
+                item,
+                target_slug,
+                block_kind,
+                as_of,
+                newest_year,
+                target_banca,
+                context,
+            )
             for item in candidates
         )
 
@@ -330,6 +369,8 @@ class SourceChoiceService:
         block_kind: str,
         as_of: date,
         newest_year: int,
+        target_banca: str,
+        context: Mapping[str, object],
     ) -> _Scored:
         same_target = item.source_target_slug == target_slug
         target_fit = (
@@ -353,8 +394,15 @@ class SourceChoiceService:
             "unread": 7500,
             "skipped": 5000,
         }.get(item.lesson_status, 8000)
+        banca_fit = (
+            7000
+            if not item.banca.strip()
+            else 10000
+            if item.banca.casefold() == target_banca.casefold()
+            else 3000
+        )
         strategy_alignment = SourceChoiceService._strategy_alignment(
-            item, block_kind
+            item, block_kind, context
         )
         availability = SourceChoiceService._availability(item)
         low_trust_penalty = max(0, 5000 - trust)
@@ -377,6 +425,7 @@ class SourceChoiceService:
             + strategy_alignment * 3
             + availability * 2
             + min(2000, item.incidence_bp // 5)
+            + banca_fit
             - low_trust_penalty * 2
             - mismatch_penalty * 2
         )
@@ -399,9 +448,14 @@ class SourceChoiceService:
                 "lowTrustPenaltyBp": low_trust_penalty,
                 "mismatchPenaltyBp": mismatch_penalty,
                 "incidenceBp": item.incidence_bp,
+                "banca": item.banca,
+                "targetBanca": target_banca,
+                "bancaFitBp": banca_fit,
+                "choiceContext": dict(context),
                 "edition": item.edition,
                 "lessonId": item.lesson_id,
                 "materialId": item.material_id,
+                "materialKind": item.material_kind,
                 "externalUrl": item.external_url,
                 "externalId": item.external_id,
                 "mappingStatus": item.mapping_status,
@@ -430,7 +484,11 @@ class SourceChoiceService:
         )
 
     @staticmethod
-    def _strategy_alignment(item: _Candidate, block_kind: str) -> int:
+    def _strategy_alignment(
+        item: _Candidate,
+        block_kind: str,
+        context: Mapping[str, object],
+    ) -> int:
         role_scores = {
             "theory": {"primary_theory": 10000},
             "questions": {
@@ -449,6 +507,25 @@ class SourceChoiceService:
             score = min(10000, score + 500)
         if item.manual_override:
             score = min(10000, score + 500)
+        coverage = context.get("coverageStatus")
+        if (
+            block_kind == "review"
+            and coverage in {"weak", "stale"}
+            and item.content_role == "review_support"
+        ):
+            score = min(10000, score + 500)
+        if (
+            block_kind == "review"
+            and context.get("reviewQueueReason")
+            and item.source_kind in {"passo", "trilha"}
+        ):
+            score = min(10000, score + 500)
+        if (
+            block_kind == "theory"
+            and coverage in {"unread", "in_progress"}
+            and item.content_role == "primary_theory"
+        ):
+            score = min(10000, score + 300)
         return score
 
     @staticmethod

@@ -13,6 +13,7 @@ from study_os_service.services.weekly_planner import (
     WeeklyPlannerService,
 )
 from tests.study_os_service.test_planner_generation import prepare_target
+from tests.study_os_service.test_source_choice import _add_source, _local_material
 
 
 def setup_week(connection, target_slug="bacen_economia_financas"):
@@ -202,5 +203,97 @@ def test_fresh_evidence_can_diverge_from_forecast_and_refresh_preserves_old_week
             (slot.id, slot.candidate_key, slot.state, slot.day_run_id)
             for slot in weekly.get_week_by_run(first.run.id).slots
         ) == old_snapshot
+    finally:
+        connection.close()
+
+
+def test_week_keeps_old_source_snapshot_when_day_chooses_new_evidence(
+    tmp_path: Path,
+):
+    connection = connect_database(tmp_path / "study.sqlite3")
+    try:
+        MigrationRunner(connection).migrate()
+        topic_ids = prepare_target(connection, "rfb_auditor")
+        _, old_lesson, old_material = _local_material(
+            connection,
+            target_slug="rfb_auditor",
+            label="week-source-old",
+        )
+        _, new_lesson, new_material = _local_material(
+            connection,
+            target_slug="rfb_auditor",
+            label="week-source-new",
+        )
+        old_source, _, _ = _add_source(
+            connection,
+            target_slug="rfb_auditor",
+            target_topic_id=topic_ids[0],
+            source_key="week-course-old",
+            source_kind="course",
+            content_role="primary_theory",
+            trust_tier=10,
+            edition="2026.1",
+            lesson_id=old_lesson,
+            material_id=old_material,
+            primary_eligible=True,
+        )
+        new_source, _, _ = _add_source(
+            connection,
+            target_slug="rfb_auditor",
+            target_topic_id=topic_ids[0],
+            source_key="week-course-new",
+            source_kind="course",
+            content_role="primary_theory",
+            trust_tier=8,
+            edition="2026.1",
+            lesson_id=new_lesson,
+            material_id=new_material,
+            primary_eligible=True,
+        )
+        quotas = {
+            date(2026, 7, 13 + offset): 1
+            for offset in range(7)
+        }
+        weekly = WeeklyPlannerService(connection)
+        week = weekly.generate_week(
+            "rfb_auditor",
+            date(2026, 7, 13),
+            idempotency_key="source-snapshot-week",
+            daily_quotas=quotas,
+        )
+        forecast = next(slot for slot in week.slots if slot.block_kind == "theory")
+        before_choice = forecast.evidence["candidateEvidence"]["sourceChoice"]
+        assert before_choice["sourceItemId"]
+
+        connection.execute(
+            "UPDATE materials SET available=0 WHERE id=?", (old_material,)
+        )
+        connection.execute(
+            "UPDATE strategy_sources SET trust_tier=10, version=version+1 WHERE id=?",
+            (new_source.id,),
+        )
+        connection.commit()
+        day = PlannerGenerationService(connection).generate_day(
+            "rfb_auditor",
+            forecast.scheduled_date,
+            idempotency_key="source-diverged-day",
+            time_budget_minutes=60,
+        )
+        day_choice = next(
+            item
+            for item in day.candidates
+            if item.chosen_position is not None and item.block_kind == "theory"
+        )
+        after = weekly.get_week_by_run(week.run.id)
+        preserved = next(slot for slot in after.slots if slot.id == forecast.id)
+
+        assert day_choice.material_id == new_material
+        assert day_choice.adaptation_reason == "weekly_source_diverged"
+        assert (
+            day_choice.evidence["candidateEvidence"]["sourceChoice"]["choiceRowId"]
+            != before_choice["choiceRowId"]
+        )
+        assert preserved.evidence["candidateEvidence"]["sourceChoice"] == before_choice
+        assert old_source.id != new_source.id
     finally:
         connection.close()

@@ -13,6 +13,7 @@ from study_os_service.services.planner_generation import (
     PlannerIdempotencyConflictError,
 )
 from study_os_service.services.planner_profiles import PlannerProfileService
+from tests.study_os_service.test_source_choice import _add_source, _local_material
 
 
 def seed_material(connection, target_slug: str) -> tuple[int, int]:
@@ -210,6 +211,234 @@ def test_idempotency_key_cannot_be_reused_for_another_request(planner_connection
             idempotency_key="same-key",
             time_budget_minutes=240,
         )
+
+
+def test_strategy_mappings_generate_full_no_ls_day_with_source_snapshots(
+    planner_connection,
+):
+    topic_ids = prepare_target(planner_connection, "rfb_auditor")
+    _, lesson_id, material_id = _local_material(
+        planner_connection,
+        target_slug="rfb_auditor",
+        label="strategy-current-course",
+    )
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[0],
+        source_key="strategy-course",
+        source_kind="course",
+        content_role="primary_theory",
+        trust_tier=10,
+        edition="2026.2",
+        lesson_id=lesson_id,
+        material_id=material_id,
+        primary_eligible=True,
+    )
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[0],
+        source_key="strategy-passo",
+        source_kind="passo",
+        content_role="review_support",
+        trust_tier=7,
+        edition="2026.2",
+        lesson_id=lesson_id,
+        material_id=material_id,
+    )
+    for index, topic_id in enumerate(topic_ids[:3]):
+        _add_source(
+            planner_connection,
+            target_slug="rfb_auditor",
+            target_topic_id=topic_id,
+            source_key=f"strategy-tec-{index}",
+            source_kind="tec",
+            content_role="incidence_signal",
+            trust_tier=9,
+            edition="2026-07-13",
+            external_url=(
+                f"https://www.tecconcursos.com.br/questoes/cadernos/{index + 1}"
+            ),
+            incidence_bp=9000 - index * 500,
+        )
+
+    day = PlannerGenerationService(planner_connection).generate_day(
+        "rfb_auditor",
+        date(2026, 7, 13),
+        idempotency_key="strategy-full-day",
+        time_budget_minutes=240,
+    )
+
+    assert day.run.status == "generated"
+    assert [block.block_kind for block in day.blocks] == [
+        "theory",
+        "questions",
+        "questions",
+        "review",
+    ]
+    chosen = [
+        item for item in day.candidates if item.chosen_position is not None
+    ]
+    assert all(
+        item.evidence["candidateEvidence"]["sourceChoice"]["choiceRowId"]
+        for item in chosen
+    )
+    theory = next(item for item in chosen if item.block_kind == "theory")
+    assert theory.material_id == material_id
+    assert theory.evidence["candidateEvidence"]["sourceChoice"]["sourceKind"] == "course"
+    assert (
+        theory.evidence["candidateEvidence"]["sourceChoice"]["evidence"]
+        ["choiceContext"]["coverageStatus"]
+        == "weak"
+    )
+    assert {
+        item.evidence["candidateEvidence"]["sourceChoice"]["sourceKind"]
+        for item in chosen
+        if item.block_kind == "questions"
+    } == {"tec"}
+    assert all(
+        item.evidence["candidateEvidence"]["sourceChoice"]["evidence"]
+        ["bancaFitBp"]
+        == 10000
+        for item in chosen
+        if item.block_kind == "questions"
+    )
+
+
+def test_active_strategy_with_only_proposed_mapping_is_named_shortfall(
+    planner_connection,
+):
+    topic_ids = prepare_target(planner_connection, "rfb_auditor")
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[0],
+        source_key="ambiguous-tec",
+        source_kind="tec",
+        content_role="incidence_signal",
+        trust_tier=9,
+        edition="2026",
+        external_url="https://www.tecconcursos.com.br/questoes/cadernos/9",
+        mapping_status="proposed",
+    )
+
+    day = PlannerGenerationService(planner_connection).generate_day(
+        "rfb_auditor",
+        date(2026, 7, 13),
+        idempotency_key="ambiguous-strategy-day",
+        time_budget_minutes=60,
+    )
+
+    assert day.run.status == "shortfall"
+    assert day.blocks == ()
+    assert "no executable theory candidate" in day.run.shortfall_reasons
+    assert {
+        item.stop_reason
+        for item in day.candidates
+        if item.block_kind == "theory"
+    } >= {"source_mapping_ambiguous", "source_mapping_missing"}
+
+
+def test_refresh_names_real_source_change_after_persisted_evidence(
+    planner_connection,
+):
+    topic_ids = prepare_target(planner_connection, "rfb_auditor")
+    _, old_lesson, old_material = _local_material(
+        planner_connection,
+        target_slug="rfb_auditor",
+        label="refresh-source-old",
+    )
+    _, new_lesson, new_material = _local_material(
+        planner_connection,
+        target_slug="rfb_auditor",
+        label="refresh-source-new",
+    )
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[0],
+        source_key="refresh-course-old",
+        source_kind="course",
+        content_role="primary_theory",
+        trust_tier=10,
+        edition="2026.2",
+        lesson_id=old_lesson,
+        material_id=old_material,
+        primary_eligible=True,
+    )
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[0],
+        source_key="refresh-course-new",
+        source_kind="course",
+        content_role="primary_theory",
+        trust_tier=8,
+        edition="2026.2",
+        lesson_id=new_lesson,
+        material_id=new_material,
+        primary_eligible=True,
+    )
+    _add_source(
+        planner_connection,
+        target_slug="rfb_auditor",
+        target_topic_id=topic_ids[1],
+        source_key="refresh-tec",
+        source_kind="tec",
+        content_role="incidence_signal",
+        trust_tier=9,
+        edition="2026-07-13",
+        external_url="https://www.tecconcursos.com.br/questoes/cadernos/20",
+    )
+    service = PlannerGenerationService(planner_connection)
+    first = service.generate_day(
+        "rfb_auditor",
+        date(2026, 7, 13),
+        idempotency_key="refresh-source-first",
+        time_budget_minutes=120,
+    )
+    first_theory = next(
+        item
+        for item in first.candidates
+        if item.chosen_position is not None and item.block_kind == "theory"
+    )
+    question = next(block for block in first.blocks if block.block_kind == "questions")
+    service.record_block_result(
+        question.id,
+        state="completed",
+        questions_done=20,
+        correct_count=18,
+        wrong_count=2,
+        doubt_count=0,
+        favorite_count=0,
+        expected_version=question.version,
+    )
+    planner_connection.execute(
+        "UPDATE materials SET available=0 WHERE id=?", (old_material,)
+    )
+    planner_connection.commit()
+
+    refreshed = service.refresh_day(
+        first.run.id,
+        "rfb_auditor",
+        date(2026, 7, 14),
+        idempotency_key="refresh-source-second",
+        time_budget_minutes=60,
+    )
+    refreshed_theory = next(
+        item
+        for item in refreshed.candidates
+        if item.chosen_position is not None and item.block_kind == "theory"
+    )
+
+    assert refreshed_theory.material_id == new_material
+    assert refreshed_theory.adaptation_reason == "source_changed_after_evidence"
+    choice = refreshed_theory.evidence["candidateEvidence"]["sourceChoice"]
+    assert choice["previousSourceItemId"] == (
+        first_theory.evidence["candidateEvidence"]["sourceChoice"]["sourceItemId"]
+    )
+    assert choice["sourceItemId"] != choice["previousSourceItemId"]
 
 
 def test_scoreboard_persists_every_component_and_displaced_alternative(

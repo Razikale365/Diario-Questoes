@@ -144,12 +144,12 @@ Store `source_fit`, `freshness`, `order_readiness`, `strategy_alignment`, `mater
 
 Every candidate receives the immutable chosen source and alternatives snapshot. Day execution opens the selected local material or external TEC caderno. Refresh may change source only when new persisted evidence changes the source score, with an explicit adaptation reason.
 
-- [ ] No-LS planning remains complete when validated course/TEC metadata exists.
-- [ ] LS/trilha alignment is advisory and target-aware.
-- [ ] Week forecasts preserve source choices; daily divergence never mutates the old week.
-- [ ] Missing or ambiguous source mapping creates a named shortfall, never a fabricated task.
-- [ ] Review blocks remain 5-10 questions and topic-bounded after strategy integration.
-- [ ] Commit `feat: plan with auditable Study OS sources`.
+- [x] No-LS planning remains complete when validated course/TEC metadata exists.
+- [x] LS/trilha alignment is advisory and target-aware.
+- [x] Week forecasts preserve source choices; daily divergence never mutates the old week.
+- [x] Missing or ambiguous source mapping creates a named shortfall, never a fabricated task.
+- [x] Review blocks remain 5-10 questions and topic-bounded after strategy integration.
+- [x] Commit `feat: plan with auditable Study OS sources`.
 
 ## Task 7: Add the Strategy Mapping Workbench to Home
 

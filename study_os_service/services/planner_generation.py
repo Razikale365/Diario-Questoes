@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 import hashlib
 import json
 import sqlite3
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 from study_os_service.domain.planner import (
     PlannerBlock,
@@ -19,13 +20,13 @@ from study_os_service.repositories.planner_runs import (
 )
 from study_os_service.services.planner_candidates import (
     CandidateDraft,
+    attach_source_choices,
     build_candidates,
     collect_candidate_evidence,
 )
 from study_os_service.services.learning_projection import LearningProjectionService
 from study_os_service.services.planner_profiles import TargetProfileNotFoundError
 from study_os_service.services.planner_scoring import (
-    ALGORITHM_VERSION,
     ScoredCandidate,
     ScoringContext,
     canonical_input_hash,
@@ -57,6 +58,9 @@ class PlannerBlockNotFoundError(KeyError):
 
 class PlannerRefreshConflictError(RuntimeError):
     pass
+
+
+DAY_ALGORITHM_VERSION = "m6-day-source-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +161,7 @@ class PlannerGenerationService:
                 return result
 
             excluded_topic_ids: set[int] = set()
+            previous_source_choices: dict[tuple[int, str], dict[str, int]] = {}
             if supersedes_run_id is not None:
                 previous = self.repository.get_run(supersedes_run_id)
                 if previous is None:
@@ -166,6 +171,9 @@ class PlannerGenerationService:
                         "previous run belongs to another target"
                     )
                 excluded_topic_ids = self._refresh_exclusions(previous.id)
+                previous_source_choices = _previous_source_choices(
+                    self.repository.list_candidates(previous.id)
+                )
 
             effective_quota = min(
                 target.daily_quota,
@@ -176,11 +184,20 @@ class PlannerGenerationService:
                 self.connection, target_name, resolved_date
             )
             pool = build_candidates(target_name, evidence)
+            pool = attach_source_choices(
+                self.connection, target_name, resolved_date, pool
+            )
+            pool = _mark_source_choice_changes(pool, previous_source_choices)
             forecast_slots = self.weekly_repository.latest_slots_for_date(
                 target_name, resolved_date
             )
             pool = align_pool_to_forecast(
-                pool, {slot.candidate_key for slot in forecast_slots}
+                pool,
+                {slot.candidate_key for slot in forecast_slots},
+                {
+                    slot.candidate_key: _forecast_source_choice_row(slot.evidence)
+                    for slot in forecast_slots
+                },
             )
             base_context = ScoringContext(
                 target=target,
@@ -218,7 +235,7 @@ class PlannerGenerationService:
                 phase=target.phase,
                 daily_quota=effective_quota,
                 time_budget_minutes=budget,
-                algorithm_version=ALGORITHM_VERSION,
+                algorithm_version=DAY_ALGORITHM_VERSION,
                 input_hash=input_hash,
                 supersedes_run_id=supersedes_run_id,
                 status=status,
@@ -560,6 +577,87 @@ class PlannerGenerationService:
         if not 15 <= resolved <= 720:
             raise ValueError("time budget minutes must be between 15 and 720")
         return resolved
+
+
+def _forecast_source_choice_row(evidence: Any) -> int | None:
+    if not isinstance(evidence, Mapping):
+        return None
+    candidate = evidence.get("candidateEvidence")
+    if not isinstance(candidate, Mapping):
+        return None
+    choice = candidate.get("sourceChoice")
+    if not isinstance(choice, Mapping):
+        return None
+    row_id = choice.get("choiceRowId")
+    return row_id if isinstance(row_id, int) and row_id > 0 else None
+
+
+def _source_choice_mapping(
+    evidence: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    nested = evidence.get("candidateEvidence")
+    choice = (
+        nested.get("sourceChoice")
+        if isinstance(nested, Mapping)
+        else evidence.get("sourceChoice")
+    )
+    return choice if isinstance(choice, Mapping) else None
+
+
+def _previous_source_choices(
+    candidates: tuple[PlannerCandidate, ...],
+) -> dict[tuple[int, str], dict[str, int]]:
+    result: dict[tuple[int, str], dict[str, int]] = {}
+    for candidate in candidates:
+        if candidate.target_topic_id is None:
+            continue
+        choice = _source_choice_mapping(candidate.evidence)
+        if choice is None:
+            continue
+        source_item_id = choice.get("sourceItemId")
+        choice_row_id = choice.get("choiceRowId")
+        if not isinstance(source_item_id, int) or source_item_id < 1:
+            continue
+        result[(candidate.target_topic_id, candidate.block_kind)] = {
+            "sourceItemId": source_item_id,
+            "choiceRowId": (
+                choice_row_id
+                if isinstance(choice_row_id, int) and choice_row_id > 0
+                else 0
+            ),
+        }
+    return result
+
+
+def _mark_source_choice_changes(
+    pool,
+    previous: Mapping[tuple[int, str], Mapping[str, int]],
+):
+    if not previous:
+        return pool
+    changed = []
+    for candidate in pool.all:
+        old = previous.get((candidate.target_topic_id, candidate.block_kind))
+        current = candidate.source_choice
+        if old is None or current is None or (
+            old["sourceItemId"] == current.source_item_id
+        ):
+            changed.append(candidate)
+            continue
+        evidence = dict(candidate.evidence)
+        choice = dict(evidence["sourceChoice"])
+        choice["previousSourceItemId"] = old["sourceItemId"]
+        choice["previousChoiceRowId"] = old["choiceRowId"] or None
+        evidence["sourceChoice"] = choice
+        evidence["adaptationReason"] = "source_changed_after_evidence"
+        changed.append(
+            replace(
+                candidate,
+                evidence=MappingProxyType(evidence),
+                adaptation_reason="source_changed_after_evidence",
+            )
+        )
+    return type(pool)(tuple(changed))
 
 
 __all__ = [

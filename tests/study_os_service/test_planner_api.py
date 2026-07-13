@@ -4,6 +4,10 @@ from fastapi.testclient import TestClient
 
 from study_os_service.app import create_app
 from study_os_service.config import StudyOsSettings
+from study_os_service.db.connection import connect_database
+from study_os_service.db.migrations import MigrationRunner
+from tests.study_os_service.test_planner_generation import prepare_target
+from tests.study_os_service.test_source_choice import _add_source, _local_material
 
 
 def test_empty_seeded_profile_generates_shortfall_and_exposes_scoreboard(tmp_path: Path):
@@ -40,6 +44,59 @@ def test_empty_seeded_profile_generates_shortfall_and_exposes_scoreboard(tmp_pat
         "finalScore" in item["scoreBreakdown"]
         for item in scoreboard.json()["items"]
     )
+
+
+def test_planner_api_promotes_immutable_source_choice_on_block_and_scoreboard(
+    tmp_path: Path,
+):
+    settings = StudyOsSettings.from_environment(tmp_path)
+    connection = connect_database(settings.database_path)
+    try:
+        MigrationRunner(connection).migrate()
+        topic_ids = prepare_target(connection, "rfb_auditor")
+        _, lesson_id, material_id = _local_material(
+            connection,
+            target_slug="rfb_auditor",
+            label="api-strategy-course",
+        )
+        _add_source(
+            connection,
+            target_slug="rfb_auditor",
+            target_topic_id=topic_ids[0],
+            source_key="api-strategy-source",
+            source_kind="course",
+            content_role="primary_theory",
+            trust_tier=10,
+            edition="2026.2",
+            lesson_id=lesson_id,
+            material_id=material_id,
+            primary_eligible=True,
+        )
+    finally:
+        connection.close()
+    app = create_app(settings)
+    with TestClient(app) as client:
+        generated = client.post(
+            "/api/v1/planner/generate-day",
+            headers={"Idempotency-Key": "api-strategy-day"},
+            json={
+                "targetSlug": "rfb_auditor",
+                "date": "2026-07-13",
+                "timeBudgetMinutes": 60,
+            },
+        )
+        scoreboard = client.get(
+            f"/api/v1/planner/scoreboard?runId={generated.json()['run']['id']}"
+        )
+
+    assert generated.status_code == 201
+    block = generated.json()["blocks"][0]
+    assert block["sourceChoice"]["sourceKind"] == "course"
+    assert block["sourceChoice"]["choiceRowId"] > 0
+    chosen = next(
+        item for item in scoreboard.json()["items"] if item["chosenPosition"] == 1
+    )
+    assert chosen["sourceChoice"] == block["sourceChoice"]
 
 
 def test_planner_api_returns_structured_input_and_result_errors(tmp_path: Path):

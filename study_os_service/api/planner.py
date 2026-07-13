@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import sqlite3
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse
@@ -149,6 +149,7 @@ def _candidate_payload(candidate: PlannerCandidate) -> dict[str, Any]:
         "displacedBy": candidate.displaced_by_candidate_key,
         "stopReason": candidate.stop_reason,
         "evidence": dict(candidate.evidence),
+        "sourceChoice": _candidate_source_choice(candidate),
         "adaptationReason": candidate.adaptation_reason,
     }
 
@@ -187,6 +188,7 @@ def _block_payload(
                 "materialId": candidate.material_id,
                 "scoreBreakdown": _score_payload(candidate),
                 "evidence": dict(candidate.evidence),
+                "sourceChoice": _candidate_source_choice(candidate),
                 "adaptationReason": candidate.adaptation_reason,
             }
         )
@@ -225,6 +227,7 @@ def _week_payload(week: GeneratedWeek) -> dict[str, Any]:
                 "plannedQuestions": slot.planned_questions,
                 "score": dict(slot.score),
                 "evidence": dict(slot.evidence),
+                "sourceChoice": _source_choice_from_evidence(slot.evidence),
                 "state": slot.state,
                 "dayRunId": slot.day_run_id,
                 "dayBlockId": slot.day_block_id,
@@ -232,6 +235,24 @@ def _week_payload(week: GeneratedWeek) -> dict[str, Any]:
             for slot in week.slots
         ],
     }
+
+
+def _candidate_source_choice(
+    candidate: PlannerCandidate,
+) -> dict[str, Any] | None:
+    return _source_choice_from_evidence(candidate.evidence)
+
+
+def _source_choice_from_evidence(
+    evidence: Mapping[str, object],
+) -> dict[str, Any] | None:
+    candidate_evidence = evidence.get("candidateEvidence")
+    source = (
+        candidate_evidence.get("sourceChoice")
+        if isinstance(candidate_evidence, Mapping)
+        else evidence.get("sourceChoice")
+    )
+    return dict(source) if isinstance(source, Mapping) else None
 
 
 def _day_payload(day: GeneratedDay) -> dict[str, Any]:

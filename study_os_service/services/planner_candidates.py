@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 import hashlib
 import json
@@ -41,6 +41,10 @@ CandidateStopReason = Literal[
     "tec_source_missing",
     "review_evidence_missing",
     "adaptive_cooldown",
+    "source_mapping_missing",
+    "source_mapping_ambiguous",
+    "source_current_material_missing",
+    "source_choice_shortfall",
 ]
 
 
@@ -56,6 +60,10 @@ STOP_REASONS: tuple[CandidateStopReason, ...] = (
     "tec_source_missing",
     "review_evidence_missing",
     "adaptive_cooldown",
+    "source_mapping_missing",
+    "source_mapping_ambiguous",
+    "source_current_material_missing",
+    "source_choice_shortfall",
 )
 
 _MATERIAL_KINDS = {
@@ -301,6 +309,192 @@ def build_candidates(
                 )
             )
     return CandidatePool(tuple(candidates))
+
+
+def attach_source_choices(
+    connection: sqlite3.Connection,
+    selected_target_slug: str,
+    plan_date: date,
+    pool: CandidatePool,
+) -> CandidatePool:
+    strategy_active = connection.execute(
+        """
+        SELECT 1
+        FROM topic_source_mappings
+        WHERE target_slug=?
+        UNION ALL
+        SELECT 1
+        FROM strategy_sources
+        WHERE target_slug=? AND active=1
+        LIMIT 1
+        """,
+        (selected_target_slug, selected_target_slug),
+    ).fetchone()
+    if strategy_active is None:
+        return pool
+
+    from study_os_service.services.source_choice import SourceChoiceService
+
+    service = SourceChoiceService(connection)
+    attached = []
+    for candidate in pool.all:
+        result = service.choose(
+            target_slug=selected_target_slug,
+            target_topic_id=candidate.target_topic_id,
+            block_kind=candidate.block_kind,
+            as_of=plan_date,
+            context={
+                "coverageStatus": candidate.evidence.get("coverageStatus"),
+                "reviewQueueReason": candidate.evidence.get("reviewQueueReason"),
+                "adaptationReason": candidate.adaptation_reason,
+            },
+        )
+        evidence = dict(candidate.evidence)
+        alternatives = [
+            {
+                "choiceRowId": row.id,
+                "sourceItemId": row.source_item_id,
+                "chosen": row.chosen,
+                "displacedByRowId": row.displaced_by_row_id,
+                "stopReason": row.stop_reason,
+                "finalScore": row.final_score,
+                "evidence": dict(row.evidence),
+            }
+            for row in result.rows
+        ]
+        if result.selection is None:
+            evidence["sourceChoice"] = {
+                "status": "shortfall",
+                "choiceRunId": result.run.id,
+                "shortfallReason": result.run.shortfall_reason,
+                "alternatives": alternatives,
+            }
+            stop_reason = candidate.stop_reason
+            if stop_reason is None or stop_reason in _SOURCE_STOP_REASONS:
+                stop_reason = _choice_stop_reason(result.run.shortfall_reason)
+            attached.append(
+                replace(
+                    candidate,
+                    stop_reason=stop_reason,
+                    evidence=MappingProxyType(evidence),
+                    adaptation_reason="strategy_source_shortfall",
+                    source_choice=None,
+                )
+            )
+            continue
+
+        selection = result.selection
+        choice_evidence = dict(selection.evidence)
+        evidence["sourceChoice"] = {
+            "status": "chosen",
+            "choiceRunId": selection.choice_run_id,
+            "choiceRowId": selection.choice_row_id,
+            "sourceItemId": selection.source_item_id,
+            "sourceKind": selection.source_kind,
+            "displayName": selection.display_name,
+            "contentRole": selection.content_role,
+            "sourceTargetSlug": selection.source_target_slug,
+            "lessonId": selection.lesson_id,
+            "materialId": selection.material_id,
+            "externalUrl": selection.external_url,
+            "externalId": selection.external_id,
+            "finalScore": selection.final_score,
+            "evidence": choice_evidence,
+            "alternatives": alternatives,
+        }
+        evidence.update(
+            {
+                "sourceTargetSlug": selection.source_target_slug,
+                "transferConfidence": choice_evidence[
+                    "transferConfidenceBp"
+                ]
+                // 100,
+                "profileSourceKind": _planner_source_kind(selection.source_kind),
+                "lessonId": selection.lesson_id,
+                "materialId": selection.material_id,
+                "materialKind": choice_evidence.get("materialKind"),
+                "materialTrust": choice_evidence["trustBp"] // 1000,
+            }
+        )
+        proof = _tec_proof_source(result.rows)
+        if selection.source_kind == "tec":
+            evidence["tecSourceUrl"] = selection.external_url
+            evidence["tecSourceId"] = selection.external_id
+        elif proof is not None:
+            evidence["tecSourceUrl"] = proof.get("externalUrl")
+            evidence["tecSourceId"] = proof.get("externalId")
+            evidence["reviewProofSource"] = proof
+
+        stop_reason = candidate.stop_reason
+        if stop_reason in _SOURCE_STOP_REASONS:
+            if candidate.block_kind == "review" and evidence.get("tecSourceUrl") is None:
+                stop_reason = "tec_source_missing"
+            else:
+                stop_reason = None
+        attached.append(
+            replace(
+                candidate,
+                source_target_slug=selection.source_target_slug,
+                source_kind=_planner_source_kind(selection.source_kind),
+                lesson_id=selection.lesson_id,
+                material_id=selection.material_id,
+                stop_reason=stop_reason,
+                evidence=MappingProxyType(evidence),
+                adaptation_reason="strategy_source_choice",
+                source_choice=selection,
+            )
+        )
+    return CandidatePool(tuple(attached))
+
+
+_SOURCE_STOP_REASONS = {
+    "material_unmapped",
+    "material_missing",
+    "material_unavailable",
+    "primary_material_missing",
+    "low_trust_primary",
+    "material_target_mismatch",
+    "tec_source_missing",
+    "source_mapping_missing",
+    "source_mapping_ambiguous",
+    "source_current_material_missing",
+    "source_choice_shortfall",
+}
+
+
+def _choice_stop_reason(reason: str | None) -> CandidateStopReason:
+    if reason == "no_source_mapping":
+        return "source_mapping_missing"
+    if reason == "no_approved_source_mapping":
+        return "source_mapping_ambiguous"
+    if reason == "missing_current_material":
+        return "source_current_material_missing"
+    return "source_choice_shortfall"
+
+
+def _planner_source_kind(source_kind: str) -> PlannerSourceKind:
+    if source_kind == "passo":
+        return "trilha"
+    if source_kind == "andrety":
+        return "manual"
+    return source_kind
+
+
+def _tec_proof_source(rows) -> dict[str, Any] | None:
+    for row in rows:
+        evidence = dict(row.evidence)
+        if (
+            evidence.get("sourceKind") == "tec"
+            and evidence.get("externalUrl")
+            and evidence.get("mappingStatus") == "approved"
+            and evidence.get("stopReason") is None
+        ):
+            return {
+                "sourceItemId": row.source_item_id,
+                "externalUrl": evidence["externalUrl"],
+                "externalId": evidence.get("externalId"),
+            }
+    return None
 
 
 def _candidate(
