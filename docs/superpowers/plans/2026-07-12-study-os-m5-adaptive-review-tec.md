@@ -51,10 +51,10 @@
 
 Add foreign keys, enum/count/version checks, target/date/due indexes, unique source-event identity, and unique week/date/position constraints.
 
-- [ ] RED migration/domain tests, including v6-to-v7 preservation and invalid proprietary payload rejection.
-- [ ] Implement immutable validated records and migration.
-- [ ] Verify v4/v5/v6 fixtures still migrate to v7 without row loss.
-- [ ] Commit `feat: add Study OS adaptive learning schema`.
+- [x] RED migration/domain tests, including v6-to-v7 preservation and invalid proprietary payload rejection.
+- [x] Implement immutable validated records and migration.
+- [x] Verify v4/v5/v6 fixtures still migrate to v7 without row loss.
+- [x] Commit `feat: add Study OS adaptive learning schema`.
 
 ## Task 2: Project Planner and Session Outcomes into Learning State
 
@@ -68,11 +68,11 @@ Add foreign keys, enum/count/version checks, target/date/due indexes, unique sou
 
 Append one event in the same transaction that finalizes a planner block or study session. Replaying the same idempotency key returns the existing event. Projection is a pure ordered fold with a repository command that can rebuild and compare the stored state.
 
-- [ ] RED tests for completed/partial/skipped/failed theory and TEC/review aggregates.
-- [ ] Prove rollback leaves neither result nor event partially committed.
-- [ ] Prove rebuilding from events returns the exact stored projection.
-- [ ] Prove no event field accepts question text or answer content.
-- [ ] Commit `feat: project Study OS learning evidence`.
+- [x] RED tests for completed/partial/skipped/failed theory and TEC/review aggregates.
+- [x] Prove rollback leaves neither result nor event partially committed.
+- [x] Prove rebuilding from events returns the exact stored projection.
+- [x] Prove no event field accepts question text or answer content.
+- [x] Commit `feat: project Study OS learning evidence`.
 
 ## Task 3: Build a Bounded Review Queue and Stale Detector
 
@@ -94,10 +94,10 @@ POST /api/v1/review/items/{id}/defer
 
 Review candidates must reference a queue item, its trigger events, and a proof-set count. Completing a review resolves or reduces only that item. Stale detection creates deterministic due evidence on read/generation; it does not require a scheduler.
 
-- [ ] RED tests for 5-10 question bounds, topic isolation, debt reduction, deferral, stale intervals, and deadline caps.
-- [ ] Prove repeated rebuild/detection is idempotent.
-- [ ] Prove a broad LS-style discipline review cannot be emitted.
-- [ ] Commit `feat: build bounded Study OS review queue`.
+- [x] RED tests for 5-10 question bounds, topic isolation, debt reduction, deferral, stale intervals, and deadline caps.
+- [x] Prove repeated rebuild/detection is idempotent.
+- [x] Prove a broad LS-style discipline review cannot be emitted.
+- [x] Commit `feat: build bounded Study OS review queue`.
 
 ## Task 4: Feed Adaptive State Back into Day Generation
 
@@ -110,10 +110,10 @@ Review candidates must reference a queue item, its trigger events, and a proof-s
 
 Replace cumulative raw-count scoring with projected current debt where available, while retaining raw event evidence in the scoreboard. Persist `weekly_alignment` and `adaptation_reason`. A completed high-accuracy topic cools down, a failed/low-accuracy topic receives bounded review, partial theory resumes, and stale topics re-enter coverage without erasing prior mastery.
 
-- [ ] RED tests for cooldown, low-accuracy review, partial resume, stale return, deadline pressure, and deterministic replay.
-- [ ] Prove old raw planner rows still generate through a compatibility fallback.
-- [ ] Prove refresh never mutates the superseded run or week.
-- [ ] Commit `feat: adapt Study OS day from outcomes`.
+- [x] RED tests for cooldown, low-accuracy review, partial resume, stale return, deadline pressure, and deterministic replay.
+- [x] Prove old raw planner rows still generate through a compatibility fallback.
+- [x] Prove refresh never mutates the superseded run or week.
+- [x] Commit `feat: adapt Study OS day from outcomes`.
 
 ## Task 5: Generate an Immutable Weekly Forecast
 
@@ -134,9 +134,9 @@ GET  /api/v1/planner/week?targetSlug=...&weekStart=YYYY-MM-DD
 
 The forecast spans Monday-Sunday using editable per-day quota/time budgets. It distributes executable identities without accidental same-week duplication, reserves the normal block mix where evidence permits, and records explicit shortfalls. Generating/refreshing a day links materialized blocks to forecast slots and records follow/diverge reasons.
 
-- [ ] RED tests for no-LS BACEN/RFB weeks, target isolation, weekly balance, pool exhaustion, idempotency, supersession, and day divergence after new evidence.
-- [ ] Prove a daily refresh cannot rewrite prior forecast slots.
-- [ ] Commit `feat: forecast adaptive Study OS weeks`.
+- [x] RED tests for no-LS BACEN/RFB weeks, target isolation, weekly balance, pool exhaustion, idempotency, supersession, and day divergence after new evidence.
+- [x] Prove a daily refresh cannot rewrite prior forecast slots.
+- [x] Commit `feat: forecast adaptive Study OS weeks`.
 
 ## Task 6: Add Strict Clients and Aggregate-Only Legacy Migration
 
@@ -152,10 +152,10 @@ The forecast spans Monday-Sunday using editable per-day quota/time budgets. It d
 
 Add `POST /api/v1/learning/import-aggregates`. The browser groups existing local attempts by explicit target/discipline/topic/date and sends counts only. Ambiguous target/topic rows are rejected into a visible report. No question statement, alternative, answer, comment, or observation crosses the boundary.
 
-- [ ] RED parser tests and import contract tests.
-- [ ] Prove malformed/proprietary fields fail closed.
-- [ ] Prove retry is idempotent and does not double debt.
-- [ ] Commit `feat: migrate aggregate Study OS evidence`.
+- [x] RED parser tests and import contract tests.
+- [x] Prove malformed/proprietary fields fail closed.
+- [x] Prove retry is idempotent and does not double debt.
+- [x] Commit `feat: migrate aggregate Study OS evidence`.
 
 ## Task 7: Add Weekly and Review Surfaces to Home
 
@@ -169,10 +169,10 @@ Add `POST /api/v1/learning/import-aggregates`. The browser groups existing local
 
 Home keeps today’s best blocks first. Below it, show a compact seven-day forecast with today emphasized, planned mix/shortfalls, and follow/diverge status. A review block opens its bounded evidence reasons and proof-set target. Add an aggregate migration report, not a question-content importer. Keep the legacy LS calendar folded and secondary.
 
-- [ ] RED view-model tests for due/overdue review, stale topics, weekly divergence, and import rejection reporting.
-- [ ] Run frontend tests, lint, and build.
-- [ ] Compact browser gate at desktop/390px with no overflow, external request, console error, or proprietary content.
-- [ ] Commit `feat: show adaptive Study OS week and reviews`.
+- [x] RED view-model tests for due/overdue review, stale topics, weekly divergence, and import rejection reporting.
+- [x] Run frontend tests, lint, and build.
+- [x] Compact browser gate at desktop/390px with no overflow, external request, console error, or proprietary content.
+- [x] Commit `feat: show adaptive Study OS week and reviews`.
 
 ## Task 8: M5 Durability Gate and M6 Plan
 

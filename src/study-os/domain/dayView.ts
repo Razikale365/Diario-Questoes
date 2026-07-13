@@ -1,4 +1,5 @@
 import type { PlannerBlock, PlannerRun } from '../api/planner';
+import { adaptationReasonLabel } from './adaptiveView';
 
 export interface PlannerBlockView {
   kindLabel: string;
@@ -42,6 +43,7 @@ const scorePercent = (value: number) => Math.round(value / 100);
 export function buildBlockView(block: PlannerBlock): PlannerBlockView {
   const score = block.scoreBreakdown;
   const reasons: string[] = [];
+  if (block.adaptationReason) reasons.push(adaptationReasonLabel(block.adaptationReason));
   if (block.blockKind === 'review' && score?.reviewDebt) {
     reasons.push(`revisão ${scorePercent(score.reviewDebt)}%`);
   }

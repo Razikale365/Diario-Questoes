@@ -101,9 +101,9 @@ export function parseLearningImportReport(value: unknown): LearningImportReport 
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
-export async function fetchReviewQueue(targetSlug: string, asOf: string): Promise<ReviewQueue> {
+export async function fetchReviewQueue(targetSlug: string, asOf: string, signal?: AbortSignal): Promise<ReviewQueue> {
   const query = new URLSearchParams({ targetSlug, asOf });
-  return parseReviewQueue(await requestJson(`/api/v1/review/queue?${query}`));
+  return parseReviewQueue(await requestJson(`/api/v1/review/queue?${query}`, { signal }));
 }
 
 export async function rebuildReviewQueue(

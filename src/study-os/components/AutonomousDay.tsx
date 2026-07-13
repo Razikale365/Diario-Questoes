@@ -16,6 +16,7 @@ import {
   Target,
 } from 'lucide-react';
 
+import type { QuestionBankItem } from '../../types';
 import { StudyOsApiError } from '../api/client';
 import type { MaterialKind, MaterialSummary } from '../api/inventory';
 import {
@@ -35,6 +36,9 @@ import {
   type TargetTopic,
 } from '../api/planner';
 import { buildBlockView, buildShortfallGuidance } from '../domain/dayView';
+import { AdaptiveWeek } from './AdaptiveWeek';
+import { LegacyEvidenceImport } from './LegacyEvidenceImport';
+import { ReviewQueue } from './ReviewQueue';
 import { StudySessionPanel } from './StudySessionPanel';
 
 
@@ -51,6 +55,7 @@ interface AutonomousDayProps {
   targetSlug: string;
   onTargetChange: (targetSlug: string) => void;
   legacyTasks: LegacyTaskSummary[];
+  questionBankItems: QuestionBankItem[];
   onOpenLegacyTask: (taskId: string) => void;
   showToast: (message: string) => void;
 }
@@ -181,6 +186,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
   targetSlug,
   onTargetChange,
   legacyTasks,
+  questionBankItems,
   onOpenLegacyTask,
   showToast,
 }) => {
@@ -193,6 +199,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [resultBlockId, setResultBlockId] = useState<number | null>(null);
   const [resultDraft, setResultDraft] = useState<ResultDraft | null>(null);
+  const [adaptiveRefreshToken, setAdaptiveRefreshToken] = useState(0);
 
   const selectedTarget = targets.find((target) => target.targetSlug === targetSlug) || null;
 
@@ -299,6 +306,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
         newKey('generate', targetSlug, date),
       );
       setDay(generated);
+      setAdaptiveRefreshToken((current) => current + 1);
       showToast(generated.run.status === 'generated'
         ? 'Dia autônomo gerado e salvo.'
         : `${generated.blocks.length} bloco(s) reais; lacunas mantidas explícitas.`);
@@ -319,6 +327,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
         newKey('refresh', targetSlug, date),
       );
       setDay(refreshed);
+      setAdaptiveRefreshToken((current) => current + 1);
       showToast('Dia recalculado; o plano anterior foi preservado.');
     } catch (refreshError: unknown) {
       setError(errorText(refreshError));
@@ -343,6 +352,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
       setResultBlockId(null);
       setResultDraft(null);
       await reloadDay();
+      setAdaptiveRefreshToken((current) => current + 1);
       showToast(resultState === 'completed' ? 'Resultado registrado.' : resultState === 'skipped' ? 'Pulo registrado.' : 'Falha registrada para o refresh.');
     } catch (resultError: unknown) {
       setError(errorText(resultError));
@@ -402,6 +412,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
       }]);
       const saved = response.items[0];
       setTopics((current) => current.map((item) => item.id === saved.id ? saved : item));
+      setAdaptiveRefreshToken((current) => current + 1);
       showToast('Cobertura do tópico salva.');
     } catch (saveError: unknown) {
       setError(errorText(saveError));
@@ -525,6 +536,32 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
 
         {day ? <ScoreboardTable day={day} /> : null}
 
+        <AdaptiveWeek
+          targetSlug={targetSlug}
+          selectedDate={date}
+          refreshToken={adaptiveRefreshToken}
+          onDateChange={setDate}
+          onError={setError}
+          showToast={showToast}
+        />
+
+        <ReviewQueue
+          targetSlug={targetSlug}
+          asOf={date}
+          topics={topics}
+          refreshToken={adaptiveRefreshToken}
+          onError={setError}
+          showToast={showToast}
+        />
+
+        <LegacyEvidenceImport
+          targetSlug={targetSlug}
+          questionBankItems={questionBankItems}
+          onImported={() => setAdaptiveRefreshToken((current) => current + 1)}
+          onError={setError}
+          showToast={showToast}
+        />
+
         <details className="border-t border-white/10 py-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-black uppercase tracking-widest text-gray-300">
             <ListChecks className="h-4 w-4 text-sky-300" /> Comparação LS / trilha
@@ -644,9 +681,9 @@ const ScoreboardTable: React.FC<{ day: PlannerDay }> = ({ day }) => (
   <details className="border-t border-white/10 py-3">
     <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-black uppercase tracking-widest text-gray-300"><ListChecks className="h-4 w-4 text-[#84cc16]" /> Score completo <span className="ml-auto text-[10px] text-gray-600">{day.scoreboard.length} alternativas auditadas</span></summary>
     <div className="mt-3 max-h-[420px] overflow-auto border border-white/10">
-      <table className="w-full min-w-[1440px] border-collapse text-right text-[10px]">
-        <thead className="sticky top-0 bg-[#0d0d0d] font-black uppercase tracking-widest text-gray-500"><tr><th className="px-2 py-2 text-left">Alternativa</th><th>Fraq.</th><th>Incid.</th><th>Tier</th><th>Cobert.</th><th>Revisão</th><th>LS</th><th>Target</th><th>Overlap</th><th>Prazo</th><th>Banca</th><th>Peso</th><th>Balance</th><th>Baixa conf.</th><th className="px-2">Final</th><th className="px-2 text-left">Decisão</th></tr></thead>
-        <tbody>{day.scoreboard.map((row) => <tr key={row.id} className={`border-t border-white/5 ${row.chosenPosition ? 'bg-[#84cc16]/5 text-white' : 'text-gray-500'}`}><td className="max-w-[280px] px-2 py-2 text-left"><p className="truncate font-black">{row.discipline}</p><p className="truncate text-[9px]">{row.topic} · {row.blockKind}</p></td><ScoreCell value={row.scoreBreakdown.weakness} /><ScoreCell value={row.scoreBreakdown.incidence} /><ScoreCell value={row.scoreBreakdown.tier} /><ScoreCell value={row.scoreBreakdown.coverageNeed} /><ScoreCell value={row.scoreBreakdown.reviewDebt} /><ScoreCell value={row.scoreBreakdown.lsAlignment} /><ScoreCell value={row.scoreBreakdown.targetFit} /><ScoreCell value={row.scoreBreakdown.overlapValue} /><ScoreCell value={row.scoreBreakdown.deadlinePressure} /><ScoreCell value={row.scoreBreakdown.bancaFit} /><ScoreCell value={row.scoreBreakdown.editalWeight} /><ScoreCell value={row.scoreBreakdown.balancePenalty} /><ScoreCell value={row.scoreBreakdown.lowTrustPenalty} /><td className="px-2 font-black text-[#bef264]">{row.scoreBreakdown.finalScore}</td><td className="max-w-[220px] px-2 text-left">{row.chosenPosition ? `Escolhido #${row.chosenPosition}` : row.stopReason || (row.displacedBy ? `Deslocado por ${row.displacedBy.slice(-8)}` : 'Alternativa')}</td></tr>)}</tbody>
+      <table className="w-full min-w-[1520px] border-collapse text-right text-[10px]">
+        <thead className="sticky top-0 bg-[#0d0d0d] font-black uppercase tracking-widest text-gray-500"><tr><th className="px-2 py-2 text-left">Alternativa</th><th>Fraq.</th><th>Incid.</th><th>Tier</th><th>Cobert.</th><th>Revisão</th><th>LS</th><th>Semana</th><th>Target</th><th>Overlap</th><th>Prazo</th><th>Banca</th><th>Peso</th><th>Balance</th><th>Baixa conf.</th><th className="px-2">Final</th><th className="px-2 text-left">Decisão</th></tr></thead>
+        <tbody>{day.scoreboard.map((row) => <tr key={row.id} className={`border-t border-white/5 ${row.chosenPosition ? 'bg-[#84cc16]/5 text-white' : 'text-gray-500'}`}><td className="max-w-[280px] px-2 py-2 text-left"><p className="truncate font-black">{row.discipline}</p><p className="truncate text-[9px]">{row.topic} · {row.blockKind}</p></td><ScoreCell value={row.scoreBreakdown.weakness} /><ScoreCell value={row.scoreBreakdown.incidence} /><ScoreCell value={row.scoreBreakdown.tier} /><ScoreCell value={row.scoreBreakdown.coverageNeed} /><ScoreCell value={row.scoreBreakdown.reviewDebt} /><ScoreCell value={row.scoreBreakdown.lsAlignment} /><ScoreCell value={row.scoreBreakdown.weeklyAlignment} /><ScoreCell value={row.scoreBreakdown.targetFit} /><ScoreCell value={row.scoreBreakdown.overlapValue} /><ScoreCell value={row.scoreBreakdown.deadlinePressure} /><ScoreCell value={row.scoreBreakdown.bancaFit} /><ScoreCell value={row.scoreBreakdown.editalWeight} /><ScoreCell value={row.scoreBreakdown.balancePenalty} /><ScoreCell value={row.scoreBreakdown.lowTrustPenalty} /><td className="px-2 font-black text-[#bef264]">{row.scoreBreakdown.finalScore}</td><td className="max-w-[240px] px-2 text-left"><p>{row.chosenPosition ? `Escolhido #${row.chosenPosition}` : row.stopReason || (row.displacedBy ? `Deslocado por ${row.displacedBy.slice(-8)}` : 'Alternativa')}</p><p className="mt-0.5 text-[9px] text-gray-600">{row.adaptationReason}</p></td></tr>)}</tbody>
       </table>
     </div>
   </details>

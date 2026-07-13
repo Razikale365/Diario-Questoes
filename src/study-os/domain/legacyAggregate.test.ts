@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { QuestionBankItem } from '../../types';
-import { buildLegacyAggregateImport } from './legacyAggregate';
+import { buildLegacyAggregateBatchIdentity, buildLegacyAggregateImport } from './legacyAggregate';
 
 
 const makeItem = (overrides: Partial<QuestionBankItem> = {}): QuestionBankItem => ({
@@ -81,5 +81,36 @@ test('legacy aggregate source identities are deterministic', () => {
   assert.equal(
     buildLegacyAggregateImport(items, 'bacen_economia_financas').items[0]?.sourceItemId,
     buildLegacyAggregateImport(items, 'bacen_economia_financas').items[0]?.sourceItemId,
+  );
+});
+
+test('aggregate batch identity is stable for one source snapshot and changes for a new day', () => {
+  const first = buildLegacyAggregateImport([makeItem()], 'bacen_economia_financas');
+  const same = buildLegacyAggregateImport([makeItem()], 'bacen_economia_financas');
+  const changedCounts = buildLegacyAggregateImport([
+    makeItem({
+      attempts: [
+        { answer: 'A', isCorrect: false, attemptedAt: '2026-07-10T10:00:00Z' },
+        { answer: 'B', isCorrect: true, attemptedAt: '2026-07-10T11:00:00Z' },
+      ],
+    }),
+  ], 'bacen_economia_financas');
+  const newDay = buildLegacyAggregateImport([
+    makeItem({
+      attempts: [{ answer: 'B', isCorrect: true, attemptedAt: '2026-07-11T11:00:00Z' }],
+    }),
+  ], 'bacen_economia_financas');
+
+  assert.equal(
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', first.items),
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', same.items),
+  );
+  assert.equal(
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', first.items),
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', changedCounts.items),
+  );
+  assert.notEqual(
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', first.items),
+    buildLegacyAggregateBatchIdentity('bacen_economia_financas', newDay.items),
   );
 });

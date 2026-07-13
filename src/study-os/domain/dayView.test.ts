@@ -88,6 +88,15 @@ test('TEC and review blocks expose bounded external commands', () => {
   assert.match(review.whyNow, /revisão/i);
 });
 
+test('block view explains when current evidence diverged from the weekly shell', () => {
+  const view = buildBlockView({
+    ...block,
+    adaptationReason: 'weekly_diverged_current_evidence',
+  });
+
+  assert.match(view.whyNow, /evidência nova/i);
+});
+
 test('shortfall guidance preserves each backend reason without filler', () => {
   const run = {
     status: 'shortfall',

@@ -43,6 +43,17 @@ const validIso = (value: string) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+export const buildLegacyAggregateBatchIdentity = (
+  targetSlug: string,
+  items: LearningAggregateItem[],
+): string => {
+  const safePayload = JSON.stringify({
+    targetSlug,
+    sourceItemIds: items.map((item) => item.sourceItemId).sort(),
+  });
+  return `legacy-bank-${hash(safePayload)}`;
+};
+
 export function buildLegacyAggregateImport(
   questionBank: QuestionBankItem[],
   targetSlug: string,

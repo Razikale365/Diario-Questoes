@@ -1596,6 +1596,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               targetSlug: task.targetSlug,
               status: task.status,
             }))}
+            questionBankItems={questionBankItems}
             onOpenLegacyTask={setSelectedTaskId}
             showToast={showToast}
           />
