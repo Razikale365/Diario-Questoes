@@ -10,7 +10,20 @@ $venvRoot = Join-Path $repoRoot '.venv-study-os'
 $venvPython = Join-Path $venvRoot 'Scripts\python.exe'
 $pyprojectPath = Join-Path $repoRoot 'pyproject.toml'
 $dependencyStamp = Join-Path $venvRoot 'study-os-pyproject.sha256'
-$dependencyHash = (Get-FileHash -LiteralPath $pyprojectPath -Algorithm SHA256).Hash
+
+function Get-Sha256([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha256.ComputeHash($stream)
+    return ([System.BitConverter]::ToString($hash)).Replace('-', '')
+  } finally {
+    $sha256.Dispose()
+    $stream.Dispose()
+  }
+}
+
+$dependencyHash = Get-Sha256 $pyprojectPath
 $installedDependencyHash = if (Test-Path -LiteralPath $dependencyStamp) {
   (Get-Content -LiteralPath $dependencyStamp -Raw).Trim()
 } else {

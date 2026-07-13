@@ -855,6 +855,12 @@ export async function fetchPlannerDay(targetSlug: string, dateValue: string, sig
   return parsePlannerDay(await requestJson(`/api/v1/planner/day?${query}`, { signal }));
 }
 
+export async function fetchOptionalPlannerDay(targetSlug: string, dateValue: string, signal?: AbortSignal): Promise<PlannerDay | null> {
+  const query = new URLSearchParams({ targetSlug, date: dateValue, allowMissing: 'true' });
+  const value = await requestJson(`/api/v1/planner/day?${query}`, { signal });
+  return value === null ? null : parsePlannerDay(value);
+}
+
 export async function generatePlannerWeek(input: GeneratePlannerWeekInput, idempotencyKey: string): Promise<PlannerWeek> {
   return parsePlannerWeek(await requestJson('/api/v1/planner/generate-week', {
     method: 'POST',
@@ -874,6 +880,12 @@ export async function refreshPlannerWeek(input: RefreshPlannerWeekInput, idempot
 export async function fetchPlannerWeek(targetSlug: string, weekStart: string, signal?: AbortSignal): Promise<PlannerWeek> {
   const query = new URLSearchParams({ targetSlug, weekStart });
   return parsePlannerWeek(await requestJson(`/api/v1/planner/week?${query}`, { signal }));
+}
+
+export async function fetchOptionalPlannerWeek(targetSlug: string, weekStart: string, signal?: AbortSignal): Promise<PlannerWeek | null> {
+  const query = new URLSearchParams({ targetSlug, weekStart, allowMissing: 'true' });
+  const value = await requestJson(`/api/v1/planner/week?${query}`, { signal });
+  return value === null ? null : parsePlannerWeek(value);
 }
 
 export async function fetchPlannerScoreboard(runId: number, signal?: AbortSignal): Promise<PlannerScoreboard> {

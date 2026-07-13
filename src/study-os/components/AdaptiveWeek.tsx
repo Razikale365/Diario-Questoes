@@ -9,7 +9,7 @@ import {
 
 import { StudyOsApiError } from '../api/client';
 import {
-  fetchPlannerWeek,
+  fetchOptionalPlannerWeek,
   generatePlannerWeek,
   refreshPlannerWeek,
   type PlannerWeek,
@@ -73,14 +73,10 @@ export const AdaptiveWeek: React.FC<AdaptiveWeekProps> = ({
   const loadWeek = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      setWeek(await fetchPlannerWeek(targetSlug, weekStart, signal));
+      setWeek(await fetchOptionalPlannerWeek(targetSlug, weekStart, signal));
     } catch (error: unknown) {
       if (signal?.aborted) return;
-      if (error instanceof StudyOsApiError && error.status === 404) {
-        setWeek(null);
-      } else {
-        onError(errorText(error));
-      }
+      onError(errorText(error));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }

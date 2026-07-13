@@ -154,13 +154,15 @@
 **Interfaces:**
 - Production evidence includes migration report/hash, settings, legacy mappings, inventory, progress, sessions, review, planner, strategy, and learning table hashes.
 
-- [ ] Import a realistic legacy browser bundle twice and prove identical reports plus table hashes across restart.
-- [ ] Export, restore into a fresh data directory, and compare all command-layer hashes and exact session cursor/version values.
-- [ ] Start through `start-app.bat` with Docker stopped/unavailable and block every HTTPS request.
+- [x] Import a realistic legacy browser bundle twice and prove identical reports plus table hashes across restart.
+- [x] Export, restore into a fresh data directory, and compare all command-layer hashes and exact session cursor/version values.
+- [x] Start through `start-app.bat` with Docker stopped/unavailable and block every HTTPS request.
 - [ ] Complete one real mapped regular-PDF block, one metadata-only TEC block, one bounded review, and a next-day refresh without LS.
-- [ ] Verify no proprietary question content or credential-like field appears in API payloads, SQLite, logs, migration reports, or archive members.
-- [ ] Run full Python/frontend regressions, compileall, TypeScript, build, diff checks, and desktop/390 px browser gates.
+- [x] Verify no proprietary question content or credential-like field appears in API payloads, SQLite, logs, migration reports, or archive members.
+- [x] Run full Python/frontend regressions, compileall, TypeScript, build, diff checks, and desktop/390 px browser gates.
 - [ ] Close M2/M6/M7 only after package `249654` is freshly validated, scanned, mapped, and included in this gate; commit `docs: close Study OS production cutover`.
+
+The fixture-backed equivalent of the real execution sequence is green, including a valid 12-page PDF, metadata-only TEC, bounded review, and next-day refresh. The real-PDF checkbox remains open until that sequence uses the freshly downloaded package `249654`.
 
 ## M7 Acceptance
 

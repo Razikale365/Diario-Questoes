@@ -374,9 +374,14 @@ async def get_week(
     request: Request,
     target_slug: str = Query(alias="targetSlug", min_length=1),
     week_start: str = Query(alias="weekStart", min_length=1),
-) -> dict[str, Any]:
+    allow_missing: bool = Query(False, alias="allowMissing"),
+) -> dict[str, Any] | None:
     try:
         week = _weekly_service(request).get_week(target_slug, _date(week_start))
+    except WeeklyPlanNotFoundError as exc:
+        if allow_missing:
+            return None
+        raise _translate(exc) from exc
     except Exception as exc:
         raise _translate(exc) from exc
     return _week_payload(week)
@@ -407,9 +412,14 @@ async def get_day(
     request: Request,
     target_slug: str = Query(alias="targetSlug", min_length=1),
     day_value: str = Query(alias="date", min_length=1),
-) -> dict[str, Any]:
+    allow_missing: bool = Query(False, alias="allowMissing"),
+) -> dict[str, Any] | None:
     try:
         day = _service(request).get_day(target_slug, _date(day_value))
+    except PlannerDayNotFoundError as exc:
+        if allow_missing:
+            return None
+        raise _translate(exc) from exc
     except Exception as exc:
         raise _translate(exc) from exc
     return _day_payload(day)

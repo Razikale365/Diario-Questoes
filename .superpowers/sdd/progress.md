@@ -147,8 +147,8 @@ Plan: `docs/superpowers/plans/2026-07-13-study-os-m7-migration-cutover.md`
 | 3. Cutover API and strict frontend client | complete | `e1c5361` | `c17358c` | 34 Python and 4 frontend tests; compileall; TypeScript | exact command and stale preference contracts approved |
 | 4. Portable export and restore | complete | `c17358c` | `68fefb5` | 18 tests; compileall | checksums, integrity, traversal rejection, backup and rollback approved |
 | 5. One-time browser bridge | complete | `68fefb5` | `54448fa` | 15 focused frontend tests; TypeScript; build; desktop/390px smoke | five duplicated keys removed only after confirmed import |
-| 6. Local planner command retirement | complete | `54448fa` | current task commit | 181 frontend tests; TypeScript; build; desktop/390px smoke | local Study OS generator removed; LS execution bridge preserved |
-| 7. Final durability, offline, and real-package gate | pending | pending | pending | pending | package `249654` remains the external acceptance blocker |
+| 6. Local planner command retirement | complete | `54448fa` | `c923266` | 181 frontend tests; TypeScript; build; desktop/390px smoke | local Study OS generator removed; LS execution bridge preserved |
+| 7. Final durability, offline, and real-package gate | in progress | `c923266` | current task commit | 416 pytest, 1 skipped; 182 frontend; compileall; TypeScript; build; `.bat` offline gate | fixture sequence approved; package `249654` remains the external acceptance blocker |
 
 ### M7 Current Evidence
 
@@ -156,4 +156,7 @@ Plan: `docs/superpowers/plans/2026-07-13-study-os-m7-migration-cutover.md`
 - PlannerArea has a source-level regression forbidding the five retired `study_os_*` keys and the duplicate `StudyOSPlannerPanel` command surface.
 - The service-owned Home rendered at 1280x720 and 390x844 with SQLite active, the SEFAZ target selected, no duplicate planner, no page-level horizontal overflow, and no console errors.
 - LS import, history, local calendar, task execution, question cards, TEC metadata, and the LS next-meta utility remain available as optional comparison/execution surfaces.
-- Final closure still requires the fresh authenticated Estratégia package manifest, real scan/mapping/execution evidence, restore equality, and HTTPS-blocked startup gate.
+- `test_cutover_durability.py` proves byte-stable migration replay, every SQLite command-table hash across portable restore, exact `(12, 12, covered, 2700, 1, 3)` progress and finished-session versions, a valid local PDF, metadata-only TEC, bounded review, and next-day no-LS refresh.
+- The default `start-app.bat` gate exposed Windows PowerShell lacking `Get-FileHash`; startup now uses .NET SHA-256, starts with Docker stopped, and renders at 390x844 and 1280x720 while every HTTPS request is blocked. No external request, failed response, overflow, or console error occurred.
+- Missing day/week reads now use explicit `allowMissing=true` success responses, so an empty target renders setup guidance without noisy expected 404s.
+- Final closure now requires only the fresh authenticated package manifest followed by real scan, mapping, regular-PDF/TEC/review/refresh execution, and count reconciliation.

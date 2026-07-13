@@ -30,7 +30,7 @@ An auditable downloader source is checked out separately at `C:\Docker\Cursos Es
 
 The latest completed attempt (`run3`) targeted `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-13-run3`. It timed out after 1,800 seconds waiting for the authenticated dashboard, downloaded zero PDFs, and emitted no manifest. This is explicit failure evidence, not a completed acquisition.
 
-A new clean attempt (`run4`) was launched on 2026-07-13 toward `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-13-run4` with a one-hour manual-login window. Its stdout/stderr logs are `package-249654-run4.stdout.log` and `package-249654-run4.stderr.log` in the parent Downloads directory. Status remains `selected` unless that process finishes with a consistent manifest, nonzero observed PDF count, and zero unresolved failures.
+The clean retry (`run4`) targeted `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-13-run4` with a one-hour manual-login window. It also ended with Selenium `TimeoutException` while waiting for the authenticated dashboard, downloaded zero PDFs, and emitted no manifest. Its stdout/stderr logs are `package-249654-run4.stdout.log` and `package-249654-run4.stderr.log` in the parent Downloads directory. Status therefore remains `selected`; a new authenticated run is required.
 
 ## Why This Package
 

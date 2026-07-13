@@ -10,7 +10,9 @@ def test_start_script_reinstalls_dependencies_when_pyproject_changes():
     )
 
     assert "$dependencyStamp" in script
-    assert "Get-FileHash" in script
+    assert "Get-Sha256" in script
+    assert "System.Security.Cryptography.SHA256" in script
+    assert "Get-FileHash" not in script
     assert "study-os-pyproject.sha256" in script
     assert "Set-Content -LiteralPath $dependencyStamp" in script
     assert "-not $SkipInstall -and $installedDependencyHash -ne $dependencyHash" in script

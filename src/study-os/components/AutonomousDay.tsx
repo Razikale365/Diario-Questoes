@@ -20,7 +20,7 @@ import type { QuestionBankItem } from '../../types';
 import { StudyOsApiError } from '../api/client';
 import type { MaterialKind, MaterialSummary } from '../api/inventory';
 import {
-  fetchPlannerDay,
+  fetchOptionalPlannerDay,
   fetchPlannerTargets,
   fetchTargetTopics,
   generatePlannerDay,
@@ -223,14 +223,7 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
     setError(null);
     try {
       const topicResponse = await fetchTargetTopics(resolvedTarget, signal);
-      let nextDay: PlannerDay | null = null;
-      try {
-        nextDay = await fetchPlannerDay(resolvedTarget, resolvedDate, signal);
-      } catch (dayError: unknown) {
-        if (!(dayError instanceof StudyOsApiError && dayError.status === 404)) {
-          throw dayError;
-        }
-      }
+      const nextDay = await fetchOptionalPlannerDay(resolvedTarget, resolvedDate, signal);
       if (signal.aborted) return;
       setTopics(topicResponse.items);
       setDay(nextDay);
@@ -275,11 +268,9 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
   const reloadDay = useCallback(async () => {
     if (!targetSlug) return;
     try {
-      setDay(await fetchPlannerDay(targetSlug, date));
+      setDay(await fetchOptionalPlannerDay(targetSlug, date));
     } catch (loadError: unknown) {
-      if (!(loadError instanceof StudyOsApiError && loadError.status === 404)) {
-        setError(errorText(loadError));
-      }
+      setError(errorText(loadError));
     }
   }, [date, targetSlug]);
 

@@ -4,6 +4,8 @@ import test from 'node:test';
 import { StudyOsApiError } from './client';
 import {
   fetchPlannerDay,
+  fetchOptionalPlannerDay,
+  fetchOptionalPlannerWeek,
   fetchPlannerScoreboard,
   fetchPlannerTargets,
   fetchTargetTopics,
@@ -349,6 +351,21 @@ test('week generation, lookup, and refresh requests are exact', async (context) 
   assert.equal(requests[1]?.input, '/api/v1/planner/week?targetSlug=bacen_economia_financas&weekStart=2026-07-13');
   assert.equal(requests[2]?.input, '/api/v1/planner/refresh-week');
   assert.equal(new Headers(requests[2]?.init?.headers).get('Idempotency-Key'), 'week-2');
+});
+
+test('optional day and week reads use successful null responses for empty plans', async (context) => {
+  const requests: string[] = [];
+  context.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+    requests.push(String(input));
+    return jsonResponse(null);
+  });
+
+  assert.equal(await fetchOptionalPlannerDay('sefaz_ce', '2026-07-13'), null);
+  assert.equal(await fetchOptionalPlannerWeek('sefaz_ce', '2026-07-13'), null);
+  assert.deepEqual(requests, [
+    '/api/v1/planner/day?targetSlug=sefaz_ce&date=2026-07-13&allowMissing=true',
+    '/api/v1/planner/week?targetSlug=sefaz_ce&weekStart=2026-07-13&allowMissing=true',
+  ]);
 });
 
 test('planner parsers reject malformed nested scores, evidence, and shortfalls', () => {

@@ -115,6 +115,14 @@ def test_planner_api_returns_structured_input_and_result_errors(tmp_path: Path):
         missing_day = client.get(
             "/api/v1/planner/day?targetSlug=bacen_economia_financas&date=2026-07-13"
         )
+        optional_day = client.get(
+            "/api/v1/planner/day?targetSlug=bacen_economia_financas"
+            "&date=2026-07-13&allowMissing=true"
+        )
+        optional_week = client.get(
+            "/api/v1/planner/week?targetSlug=bacen_economia_financas"
+            "&weekStart=2026-07-13&allowMissing=true"
+        )
 
     assert missing_target.status_code == 404
     assert missing_target.json()["code"] == "target_profile_not_found"
@@ -122,6 +130,10 @@ def test_planner_api_returns_structured_input_and_result_errors(tmp_path: Path):
     assert invalid_date.json()["code"] == "invalid_planner_request"
     assert missing_day.status_code == 404
     assert missing_day.json()["code"] == "planner_day_not_found"
+    assert optional_day.status_code == 200
+    assert optional_day.json() is None
+    assert optional_week.status_code == 200
+    assert optional_week.json() is None
 
 
 def test_block_result_and_refresh_api_are_optimistic_and_immutable(tmp_path: Path):
