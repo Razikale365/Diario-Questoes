@@ -187,6 +187,7 @@ def _block_payload(
                 "materialId": candidate.material_id,
                 "scoreBreakdown": _score_payload(candidate),
                 "evidence": dict(candidate.evidence),
+                "adaptationReason": candidate.adaptation_reason,
             }
         )
     return payload

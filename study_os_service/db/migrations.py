@@ -605,6 +605,16 @@ CREATE TABLE planner_blocks (
               created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
             );
             """,
+            """
+            CREATE TABLE learning_import_runs (
+              idempotency_key TEXT PRIMARY KEY CHECK (length(trim(idempotency_key)) > 0),
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug),
+              request_hash TEXT NOT NULL CHECK (length(trim(request_hash)) > 0),
+              result_json TEXT NOT NULL
+                CHECK (json_valid(result_json) AND json_type(result_json)='object'),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            );
+            """,
             "CREATE UNIQUE INDEX ux_planner_week_runs_id_target ON planner_week_runs(id, target_slug);",
             """
             CREATE TABLE planner_week_slots (

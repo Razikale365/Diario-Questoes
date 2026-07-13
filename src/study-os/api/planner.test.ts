@@ -13,6 +13,10 @@ import {
   parsePlannerTargetList,
   parseTargetTopicList,
   refreshPlannerDay,
+  fetchPlannerWeek,
+  generatePlannerWeek,
+  parsePlannerWeek,
+  refreshPlannerWeek,
   seedPlannerTargets,
   submitPlannerBlockResult,
   updatePlannerTarget,
@@ -74,6 +78,7 @@ const scoreBreakdown = {
   editalWeight: 2000,
   balancePenalty: 0,
   lowTrustPenalty: 0,
+  weeklyAlignment: 0,
   finalScore: 98500,
 } as const;
 
@@ -141,6 +146,7 @@ const candidate = {
   displacedBy: null,
   stopReason: null,
   evidence,
+  adaptationReason: 'profile_fallback',
 } as const;
 
 const block = {
@@ -169,6 +175,42 @@ const block = {
   materialId: 13,
   scoreBreakdown,
   evidence,
+  adaptationReason: 'profile_fallback',
+} as const;
+
+const week = {
+  run: {
+    id: 51,
+    targetSlug: 'bacen_economia_financas',
+    weekStart: '2026-07-13',
+    phase: 'pre_edital',
+    algorithmVersion: 'm5-week-v1',
+    requestHash: 'c'.repeat(64),
+    inputHash: 'd'.repeat(64),
+    supersedesWeekRunId: null,
+    status: 'shortfall',
+    shortfallCount: 1,
+    shortfallReasons: ['2026-07-14: no unique executable review candidate'],
+    generatedAt: '2026-07-13T10:00:00Z',
+  },
+  slots: [{
+    id: 61,
+    weekRunId: 51,
+    targetSlug: 'bacen_economia_financas',
+    date: '2026-07-13',
+    position: 1,
+    candidateKey: 'candidate-abc',
+    topicTargetSlug: 'bacen_economia_financas',
+    targetTopicId: 11,
+    blockKind: 'theory',
+    durationMinutes: 60,
+    plannedQuestions: 0,
+    score: scoreBreakdown,
+    evidence: { discipline: 'Macroeconomia', topic: 'Politica monetaria', adaptationReason: 'profile_fallback', candidateEvidence: evidence.candidateEvidence },
+    state: 'forecast',
+    dayRunId: null,
+    dayBlockId: null,
+  }],
 } as const;
 
 const run = {
@@ -199,6 +241,39 @@ test('planner parsers accept complete target, topic, day, and scoreboard DTOs', 
   assert.deepEqual(parseTargetTopicList({ items: [topic] }).items[0], topic);
   assert.deepEqual(parsePlannerDay(day), day);
   assert.deepEqual(parsePlannerScoreboard({ items: [candidate] }).items[0], candidate);
+  assert.deepEqual(parsePlannerWeek(week), week);
+});
+
+test('week generation, lookup, and refresh requests are exact', async (context) => {
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  const refreshedWeek = {
+    ...week,
+    run: { ...week.run, id: 52, supersedesWeekRunId: 51 },
+    slots: week.slots.map((slot) => ({ ...slot, weekRunId: 52 })),
+  };
+  const responses = [jsonResponse(week, 201), jsonResponse(week), jsonResponse(refreshedWeek, 201)];
+  context.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ input: String(input), init });
+    return responses.shift() ?? jsonResponse({}, 500);
+  });
+
+  await generatePlannerWeek({
+    targetSlug: 'bacen_economia_financas',
+    weekStart: '2026-07-13',
+    dailyQuotas: { '2026-07-13': 2 },
+  }, 'week-1');
+  await fetchPlannerWeek('bacen_economia_financas', '2026-07-13');
+  await refreshPlannerWeek({
+    previousWeekRunId: 51,
+    targetSlug: 'bacen_economia_financas',
+    weekStart: '2026-07-13',
+  }, 'week-2');
+
+  assert.equal(requests[0]?.input, '/api/v1/planner/generate-week');
+  assert.equal(new Headers(requests[0]?.init?.headers).get('Idempotency-Key'), 'week-1');
+  assert.equal(requests[1]?.input, '/api/v1/planner/week?targetSlug=bacen_economia_financas&weekStart=2026-07-13');
+  assert.equal(requests[2]?.input, '/api/v1/planner/refresh-week');
+  assert.equal(new Headers(requests[2]?.init?.headers).get('Idempotency-Key'), 'week-2');
 });
 
 test('planner parsers reject malformed nested scores, evidence, and shortfalls', () => {

@@ -63,6 +63,21 @@ export interface PlannerRun {
   generatedAt: string;
 }
 
+export interface PlannerWeekRun {
+  id: number;
+  targetSlug: string;
+  weekStart: string;
+  phase: PlannerPhase;
+  algorithmVersion: string;
+  requestHash: string;
+  inputHash: string;
+  supersedesWeekRunId: number | null;
+  status: 'generated' | 'shortfall';
+  shortfallCount: number;
+  shortfallReasons: string[];
+  generatedAt: string;
+}
+
 export interface PlannerScoreBreakdown {
   weakness: number;
   incidence: number;
@@ -77,6 +92,7 @@ export interface PlannerScoreBreakdown {
   editalWeight: number;
   balancePenalty: number;
   lowTrustPenalty: number;
+  weeklyAlignment: number;
   finalScore: number;
 }
 
@@ -148,6 +164,7 @@ export interface PlannerCandidate {
   displacedBy: string | null;
   stopReason: string | null;
   evidence: PlannerEvidence;
+  adaptationReason: string;
 }
 
 export interface PlannerBlock {
@@ -176,12 +193,44 @@ export interface PlannerBlock {
   materialId?: number | null;
   scoreBreakdown?: PlannerScoreBreakdown;
   evidence?: PlannerEvidence;
+  adaptationReason?: string;
 }
 
 export interface PlannerDay {
   run: PlannerRun;
   blocks: PlannerBlock[];
   scoreboard: PlannerCandidate[];
+}
+
+export interface PlannerWeekSlotEvidence {
+  discipline: string;
+  topic: string;
+  adaptationReason: string;
+  candidateEvidence: Record<string, unknown>;
+}
+
+export interface PlannerWeekSlot {
+  id: number;
+  weekRunId: number;
+  targetSlug: string;
+  date: string;
+  position: number;
+  candidateKey: string;
+  topicTargetSlug: string;
+  targetTopicId: number;
+  blockKind: PlannerBlockKind;
+  durationMinutes: number;
+  plannedQuestions: number;
+  score: PlannerScoreBreakdown;
+  evidence: PlannerWeekSlotEvidence;
+  state: 'forecast' | 'materialized' | 'skipped';
+  dayRunId: number | null;
+  dayBlockId: number | null;
+}
+
+export interface PlannerWeek {
+  run: PlannerWeekRun;
+  slots: PlannerWeekSlot[];
 }
 
 export interface PlannerTargetList { items: PlannerTarget[] }
@@ -209,6 +258,17 @@ export interface RefreshPlannerDayInput extends GeneratePlannerDayInput {
   previousRunId: number;
 }
 
+export interface GeneratePlannerWeekInput {
+  targetSlug: string;
+  weekStart: string;
+  dailyQuotas?: Record<string, number>;
+  dailyTimeBudgets?: Record<string, number>;
+}
+
+export interface RefreshPlannerWeekInput extends GeneratePlannerWeekInput {
+  previousWeekRunId: number;
+}
+
 export interface PlannerBlockResultInput {
   state: Extract<PlannerBlockState, 'completed' | 'skipped' | 'failed'>;
   questionsDone: number;
@@ -225,6 +285,7 @@ const transferKinds = ['target_specific', 'shared', 'partial'] as const;
 const sourceKinds = ['course', 'tec', 'ls', 'trilha', 'manual', 'bizu'] as const;
 const blockKinds = ['theory', 'questions', 'review'] as const;
 const blockStates = ['pending', 'active', 'completed', 'skipped', 'failed'] as const;
+const weekSlotStates = ['forecast', 'materialized', 'skipped'] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -343,7 +404,7 @@ export function parsePlannerScore(value: unknown): PlannerScoreBreakdown {
   const boundedKeys = [
     'weakness', 'incidence', 'tier', 'coverageNeed', 'reviewDebt', 'lsAlignment',
     'targetFit', 'overlapValue', 'deadlinePressure', 'bancaFit', 'editalWeight',
-    'balancePenalty', 'lowTrustPenalty',
+    'balancePenalty', 'lowTrustPenalty', 'weeklyAlignment',
   ];
   if (!boundedKeys.every((key) => isInteger(record[key]) && Number(record[key]) >= 0 && Number(record[key]) <= 10000)
     || !isInteger(record.finalScore)) invalid('score');
@@ -434,6 +495,7 @@ export function parsePlannerCandidate(value: unknown): PlannerCandidate {
     || !isNullablePositiveInteger(record.chosenPosition)
     || !isNullableString(record.displacedBy)
     || !isNullableString(record.stopReason)
+    || !isNonEmptyString(record.adaptationReason)
     || (record.chosenPosition !== null && (record.displacedBy !== null || record.stopReason !== null))) invalid('candidate');
   const score = parsePlannerScore(record.scoreBreakdown);
   const evidence = parsePlannerEvidence(record.evidence);
@@ -466,6 +528,7 @@ export function parsePlannerBlock(value: unknown, requireCandidate = false): Pla
   if (requireCandidate && (!isNonEmptyString(record.discipline)
     || !isNonEmptyString(record.topic)
     || !oneOf(record.sourceKind, sourceKinds)
+    || !isNonEmptyString(record.adaptationReason)
     || !isNullablePositiveInteger(record.lessonId)
     || !isNullablePositiveInteger(record.materialId))) invalid('block');
   const parsed = { ...record };
@@ -494,6 +557,70 @@ export function parsePlannerScoreboard(value: unknown): PlannerScoreboard {
   const items = record.items;
   if (!Array.isArray(items)) invalid('scoreboard');
   return { items: (items as unknown[]).map(parsePlannerCandidate) };
+}
+
+function parsePlannerWeekRun(value: unknown): PlannerWeekRun {
+  const record = isRecord(value) ? value : invalid('week run');
+  if (!isPositiveInteger(record.id)
+    || !isNonEmptyString(record.targetSlug)
+    || !isIsoDate(record.weekStart)
+    || new Date(`${record.weekStart}T00:00:00Z`).getUTCDay() !== 1
+    || !oneOf(record.phase, phases)
+    || !isNonEmptyString(record.algorithmVersion)
+    || !isNonEmptyString(record.requestHash)
+    || !isNonEmptyString(record.inputHash)
+    || !isNullablePositiveInteger(record.supersedesWeekRunId)
+    || !oneOf(record.status, ['generated', 'shortfall'] as const)
+    || !isNonNegativeInteger(record.shortfallCount)
+    || !Array.isArray(record.shortfallReasons)
+    || !record.shortfallReasons.every(isNonEmptyString)
+    || record.shortfallReasons.length !== record.shortfallCount
+    || (record.status === 'generated' && record.shortfallCount !== 0)
+    || (record.status === 'shortfall' && record.shortfallCount < 1)
+    || !isNonEmptyString(record.generatedAt)) invalid('week run');
+  return record as unknown as PlannerWeekRun;
+}
+
+function parsePlannerWeekSlot(value: unknown): PlannerWeekSlot {
+  const record = isRecord(value) ? value : invalid('week slot');
+  const evidence = isRecord(record.evidence) ? record.evidence : invalid('week slot evidence');
+  if (!isPositiveInteger(record.id)
+    || !isPositiveInteger(record.weekRunId)
+    || !isNonEmptyString(record.targetSlug)
+    || !isIsoDate(record.date)
+    || !isPositiveInteger(record.position)
+    || !isNonEmptyString(record.candidateKey)
+    || !isNonEmptyString(record.topicTargetSlug)
+    || !isPositiveInteger(record.targetTopicId)
+    || !oneOf(record.blockKind, blockKinds)
+    || !isPositiveInteger(record.durationMinutes)
+    || record.durationMinutes < 45
+    || record.durationMinutes > 75
+    || !isNonNegativeInteger(record.plannedQuestions)
+    || (record.blockKind === 'theory' && record.plannedQuestions !== 0)
+    || (record.blockKind !== 'theory' && record.plannedQuestions < 1)
+    || !isNonEmptyString(evidence.discipline)
+    || !isNonEmptyString(evidence.topic)
+    || !isNonEmptyString(evidence.adaptationReason)
+    || !isRecord(evidence.candidateEvidence)
+    || !oneOf(record.state, weekSlotStates)
+    || !isNullablePositiveInteger(record.dayRunId)
+    || !isNullablePositiveInteger(record.dayBlockId)
+    || ((record.dayRunId === null) !== (record.dayBlockId === null))) invalid('week slot');
+  return {
+    ...record,
+    score: parsePlannerScore(record.score),
+    evidence: evidence as unknown as PlannerWeekSlotEvidence,
+  } as unknown as PlannerWeekSlot;
+}
+
+export function parsePlannerWeek(value: unknown): PlannerWeek {
+  const record = isRecord(value) ? value : invalid('week');
+  if (!Array.isArray(record.slots)) invalid('week');
+  const run = parsePlannerWeekRun(record.run);
+  const slots = (record.slots as unknown[]).map(parsePlannerWeekSlot);
+  if (!slots.every((slot) => slot.weekRunId === run.id && slot.targetSlug === run.targetSlug)) invalid('week');
+  return { run, slots };
 }
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
@@ -555,6 +682,27 @@ export async function refreshPlannerDay(input: RefreshPlannerDayInput, idempoten
 export async function fetchPlannerDay(targetSlug: string, dateValue: string, signal?: AbortSignal): Promise<PlannerDay> {
   const query = new URLSearchParams({ targetSlug, date: dateValue });
   return parsePlannerDay(await requestJson(`/api/v1/planner/day?${query}`, { signal }));
+}
+
+export async function generatePlannerWeek(input: GeneratePlannerWeekInput, idempotencyKey: string): Promise<PlannerWeek> {
+  return parsePlannerWeek(await requestJson('/api/v1/planner/generate-week', {
+    method: 'POST',
+    headers: { ...jsonHeaders, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(input),
+  }));
+}
+
+export async function refreshPlannerWeek(input: RefreshPlannerWeekInput, idempotencyKey: string): Promise<PlannerWeek> {
+  return parsePlannerWeek(await requestJson('/api/v1/planner/refresh-week', {
+    method: 'POST',
+    headers: { ...jsonHeaders, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(input),
+  }));
+}
+
+export async function fetchPlannerWeek(targetSlug: string, weekStart: string, signal?: AbortSignal): Promise<PlannerWeek> {
+  const query = new URLSearchParams({ targetSlug, weekStart });
+  return parsePlannerWeek(await requestJson(`/api/v1/planner/week?${query}`, { signal }));
 }
 
 export async function fetchPlannerScoreboard(runId: number, signal?: AbortSignal): Promise<PlannerScoreboard> {

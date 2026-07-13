@@ -19,6 +19,7 @@ ADAPTIVE_TABLES = {
     "review_queue_mutations",
     "planner_week_runs",
     "planner_week_slots",
+    "learning_import_runs",
 }
 
 
