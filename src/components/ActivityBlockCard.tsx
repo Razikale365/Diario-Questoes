@@ -1,10 +1,19 @@
 import React, { memo, useRef, forwardRef, useState, useEffect } from 'react';
-import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare, Star } from 'lucide-react';
+import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare, Star, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ActivityBlock, Question } from '../types';
 import { useSnapResizer } from '../hooks/useSnapResizer';
+import { QuestionEditorModal } from './QuestionEditorModal';
+import {
+  buildAnswerSelectionUpdate,
+  QuestionDraft,
+  SaveQuestionDraftResult,
+  shouldShowQuestionCorrectness,
+  toggleAllQuestionAnswers,
+  toggleQuestionAnswerReveal,
+} from '../utils/questionExecution';
 
 interface PerformanceStats {
   total: number;
@@ -22,6 +31,7 @@ interface ActivityBlockCardProps {
   index: number;
   displayMode?: 'caderno' | 'questoes' | 'gabarito';
   onUpdateQuestion: (blockId: string, qNumber: number, updates: Partial<Question>) => void;
+  onSaveQuestion: (blockId: string, draft: QuestionDraft, editingQuestionNumber?: number) => SaveQuestionDraftResult;
   onToggleLock: (blockId: string) => void;
   onEditBlock: (block?: ActivityBlock) => void;
   onDeleteBlock: (blockId: string) => void;
@@ -83,6 +93,7 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     block,
     displayMode = 'caderno',
     onUpdateQuestion,
+    onSaveQuestion,
     onToggleLock,
     onEditBlock,
     onDeleteBlock,
@@ -103,10 +114,16 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
   const [isRenaming, setIsRenaming] = useState(false);
   const [tempTitle, setTempTitle] = useState(block.title);
   const [editingObs, setEditingObs] = useState<Record<number, boolean>>({});
+  const [revealedQuestionIds, setRevealedQuestionIds] = useState<Set<string>>(() => new Set());
+  const [questionBeingEdited, setQuestionBeingEdited] = useState<Question | null | undefined>(undefined);
 
   useEffect(() => {
     setTempTitle(block.title);
   }, [block.title]);
+
+  useEffect(() => {
+    setRevealedQuestionIds(new Set());
+  }, [block.id]);
 
   const handleFinishRename = () => {
     if (tempTitle !== block.title && onRenameSection) {
@@ -301,14 +318,22 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
   }
 
   // Activity Block Logic
+  const getQuestionIdentity = (question: Question) => question.localId || `${block.id}:${question.number}`;
+  const isQuestionRevealed = (question: Question) => revealedQuestionIds.has(getQuestionIdentity(question));
+  const canShowQuestionFeedback = (question: Question) => displayMode !== 'questoes'
+    || shouldShowQuestionCorrectness(question, isQuestionRevealed(question));
+  const statsQuestions = displayMode === 'questoes'
+    ? (block.questions || []).filter((question) =>
+        shouldShowQuestionCorrectness(question, isQuestionRevealed(question)) && question.isCorrect !== null)
+    : (block.questions || []);
   const blockStatsRaw = {
     total: (block.questions || []).length,
-    answered: (block.questions || []).filter(q => q.answer).length,
-    correct: (block.questions || []).filter(q => q.isCorrect === true).length,
-    incorrect: (block.questions || []).filter(q => q.isCorrect === false).length,
+    answered: statsQuestions.filter(q => q.answer).length,
+    correct: statsQuestions.filter(q => q.isCorrect === true).length,
+    incorrect: statsQuestions.filter(q => q.isCorrect === false).length,
     doubts: (block.questions || []).filter(q => q.hasDoubt).length,
-    doubtsCorrect: (block.questions || []).filter(q => q.hasDoubt && q.isCorrect === true).length,
-    doubtsIncorrect: (block.questions || []).filter(q => q.hasDoubt && q.isCorrect === false).length,
+    doubtsCorrect: statsQuestions.filter(q => q.hasDoubt && q.isCorrect === true).length,
+    doubtsIncorrect: statsQuestions.filter(q => q.hasDoubt && q.isCorrect === false).length,
   };
   const accuracy = blockStatsRaw.answered > 0 ? (blockStatsRaw.correct / blockStatsRaw.answered) * 100 : 0;
   const currentBlockStats: PerformanceStats = { ...blockStatsRaw, accuracy };
@@ -341,16 +366,44 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     onUpdateQuestion(block.id, question.number, { correctAnswer: answer || undefined });
   };
 
+  const toggleQuestionReveal = (question: Question) => {
+    if (!question.correctAnswer) return;
+    const decision = toggleQuestionAnswerReveal(
+      revealedQuestionIds,
+      getQuestionIdentity(question),
+      question,
+    );
+    setRevealedQuestionIds(decision.revealedIds);
+    if (!block.isLocked && decision.updates) {
+      onUpdateQuestion(block.id, question.number, decision.updates);
+    }
+  };
+
+  const toggleBlockReveal = () => {
+    const targets = (block.questions || []).map((question) => ({
+      id: getQuestionIdentity(question),
+      question,
+    }));
+    const decision = toggleAllQuestionAnswers(revealedQuestionIds, targets);
+    setRevealedQuestionIds(decision.revealedIds);
+    if (block.isLocked) return;
+    decision.updates.forEach(({ id, updates }) => {
+      const question = block.questions.find((candidate) => getQuestionIdentity(candidate) === id);
+      if (question) onUpdateQuestion(block.id, question.number, updates);
+    });
+  };
+
   const selectAlternative = (question: Question, alternative: string) => {
     if (block.isLocked) return;
-    if (question.answer === alternative) {
-      onUpdateQuestion(block.id, question.number, { answer: '' });
-      return;
-    }
-
+    const identity = getQuestionIdentity(question);
+    setRevealedQuestionIds((current) => {
+      const next = new Set(current);
+      next.delete(identity);
+      return next;
+    });
     const newEliminated = (question.eliminated || []).filter((item: string) => item !== alternative);
     onUpdateQuestion(block.id, question.number, {
-      answer: alternative,
+      ...buildAnswerSelectionUpdate(question, alternative),
       eliminated: newEliminated.length > 0 ? newEliminated : undefined
     });
   };
@@ -412,6 +465,30 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
   const renderQuestionActions = (question: Question) => (
     <div className="flex items-center gap-1 ml-auto">
       <button
+        type="button"
+        onClick={() => setQuestionBeingEdited(question)}
+        disabled={block.isLocked}
+        className="p-1.5 rounded-lg text-gray-700 transition-all hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+        title="Editar questão"
+      >
+        <Edit2 className="w-4 h-4" />
+      </button>
+      {displayMode === 'questoes' && question.correctAnswer && (
+        <button
+          type="button"
+          onClick={() => toggleQuestionReveal(question)}
+          aria-pressed={isQuestionRevealed(question)}
+          className={`p-1.5 rounded-lg transition-all ${
+            isQuestionRevealed(question)
+              ? 'bg-purple-500/10 text-purple-300'
+              : 'text-gray-700 hover:bg-white/5 hover:text-white'
+          }`}
+          title={isQuestionRevealed(question) ? 'Ocultar gabarito' : 'Revelar gabarito'}
+        >
+          <BookOpen className="w-4 h-4" />
+        </button>
+      )}
+      <button
         onClick={() => setEditingObs(prev => ({ ...prev, [question.number]: !prev[question.number] }))}
         disabled={block.isLocked}
         className={`p-1.5 rounded-lg transition-all ${question.observations || editingObs[question.number] ? 'text-blue-400 bg-blue-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}
@@ -433,13 +510,17 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
       >
         <Flag className={`w-4 h-4 ${question.hasDoubt ? 'fill-orange-500' : ''}`} />
       </button>
-      <div className="w-[1px] h-4 bg-white/5 mx-1" />
-      <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: true })} disabled={block.isLocked}
-        className={`p-1.5 rounded-lg transition-all ${question.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-4 h-4" /></button>
-      <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: false })} disabled={block.isLocked}
-        className={`p-1.5 rounded-lg transition-all ${question.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-4 h-4" /></button>
+      {displayMode !== 'questoes' && (
+        <>
+          <div className="w-[1px] h-4 bg-white/5 mx-1" />
+          <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: true })} disabled={block.isLocked}
+            className={`p-1.5 rounded-lg transition-all ${question.isCorrect === true ? 'text-[#84cc16] bg-[#84cc16]/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><Check className="w-4 h-4" /></button>
+          <button onClick={() => onUpdateQuestion(block.id, question.number, { isCorrect: false })} disabled={block.isLocked}
+            className={`p-1.5 rounded-lg transition-all ${question.isCorrect === false ? 'text-red-500 bg-red-500/10' : 'text-gray-700 hover:text-white hover:bg-white/5'}`}><X className="w-4 h-4" /></button>
+        </>
+      )}
 
-      {block.showGabarito && (
+      {displayMode !== 'questoes' && block.showGabarito && (
         <div className="ml-2 pl-3 border-l border-white/5 flex flex-col items-center min-w-[36px]">
           <span className="text-[8px] uppercase font-black text-gray-600 mb-0.5">GAB</span>
           <span
@@ -482,6 +563,9 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
 
   const availableQuestions = (block.questions || []).filter((question) => question.statement && question.alternatives?.length);
   const renderedQuestions = displayMode === 'questoes' ? availableQuestions : (block.questions || []);
+  const keyedQuestions = availableQuestions.filter((question) => question.correctAnswer);
+  const areAllQuestionAnswersRevealed = keyedQuestions.length > 0
+    && keyedQuestions.every((question) => isQuestionRevealed(question));
 
   return (
     <div
@@ -523,11 +607,28 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               {block.isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
             </button>
             <button 
-              onClick={() => onToggleGabarito(block.id)} 
-              className={`p-1.5 rounded-lg transition-all ${block.showGabarito ? 'text-purple-400 bg-purple-500/10' : 'text-gray-600 hover:text-white hover:bg-white/5'}`}
-              title={block.showGabarito ? "Ocultar Gabarito Manual" : "Mostrar Gabarito Manual (Editar)"}
+              onClick={() => displayMode === 'questoes' ? toggleBlockReveal() : onToggleGabarito(block.id)}
+              disabled={displayMode === 'questoes' && keyedQuestions.length === 0}
+              aria-pressed={displayMode === 'questoes' ? areAllQuestionAnswersRevealed : Boolean(block.showGabarito)}
+              className={`p-1.5 rounded-lg transition-all ${
+                (displayMode === 'questoes' ? areAllQuestionAnswersRevealed : block.showGabarito)
+                  ? 'text-purple-400 bg-purple-500/10'
+                  : 'text-gray-600 hover:text-white hover:bg-white/5'
+              } disabled:cursor-not-allowed disabled:opacity-30`}
+              title={displayMode === 'questoes'
+                ? (areAllQuestionAnswersRevealed ? 'Ocultar gabaritos do bloco' : 'Revelar gabaritos do bloco')
+                : (block.showGabarito ? 'Ocultar gabarito manual' : 'Mostrar gabarito manual')}
             >
               <BookOpen className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setQuestionBeingEdited(null)}
+              disabled={block.isLocked}
+              className="p-1.5 text-gray-600 hover:text-purple-300 hover:bg-purple-500/10 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-30"
+              title="Adicionar questão"
+            >
+              <Plus className="w-4 h-4" />
             </button>
             <button 
               onClick={() => onImportGabarito(block.id)} 
@@ -647,9 +748,9 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
                       <span className={`text-[10px] p-2 font-black rounded-lg w-8 h-8 flex items-center justify-center select-none transition-all ${
-                        q.isCorrect === true
+                        canShowQuestionFeedback(q) && q.isCorrect === true
                           ? 'bg-[#84cc16]/15 text-[#84cc16] ring-1 ring-[#84cc16]/30'
-                          : q.isCorrect === false
+                          : canShowQuestionFeedback(q) && q.isCorrect === false
                             ? 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20'
                             : 'bg-[#2d2d2d] text-gray-400'
                       }`}>
@@ -667,9 +768,9 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                               {q.year}
                             </span>
                           )}
-                          {block.showGabarito && q.correctAnswer && (
+                          {isQuestionRevealed(q) && q.correctAnswer && (
                             <span className="rounded bg-[#84cc16]/10 px-2 py-0.5 text-[10px] font-black text-[#84cc16]">
-                              GAB {q.correctAnswer}
+                              {q.correctAnswer === 'ANULADA' ? 'ANULADA' : `GAB ${q.correctAnswer}`}
                             </span>
                           )}
                         </div>
@@ -731,6 +832,17 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
           </div>
         )}
       </motion.div>
+      {questionBeingEdited !== undefined && (
+        <QuestionEditorModal
+          question={questionBeingEdited || undefined}
+          suggestedSourceNumber={Math.max(
+            0,
+            ...(block.questions || []).map((question) => question.sourceQuestionNumber || 0),
+          ) + 1}
+          onClose={() => setQuestionBeingEdited(undefined)}
+          onSave={(draft) => onSaveQuestion(block.id, draft, questionBeingEdited?.number)}
+        />
+      )}
     </div>
   );
 }));

@@ -2,34 +2,15 @@ import { useState, useEffect, useMemo } from 'react';
 import { StudyTask, ActivityBlock, Question } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
 import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
-import { syncStoredQuestionBankProgress } from '../utils/questionBank';
+import { syncStoredQuestionBankContent, syncStoredQuestionBankProgress } from '../utils/questionBank';
+import {
+  applyQuestionUpdate,
+  QuestionDraft,
+  saveQuestionDraft as materializeQuestionDraft,
+  SaveQuestionDraftResult,
+} from '../utils/questionExecution';
 
 const now = () => new Date().toISOString();
-
-const applyQuestionUpdate = (question: Question, updates: Partial<Question>) => {
-  const newQ = { ...question, ...updates };
-
-  if (('answer' in updates || 'correctAnswer' in updates) && newQ.correctAnswer) {
-    let userAns = newQ.answer.toUpperCase();
-    let correctAns = newQ.correctAnswer.toUpperCase();
-    if (userAns === 'CERTO') userAns = 'C';
-    if (userAns === 'ERRADO') userAns = 'E';
-    if (correctAns === 'CERTO') correctAns = 'C';
-    if (correctAns === 'ERRADO') correctAns = 'E';
-
-    if (correctAns === 'ANULADA') {
-      newQ.isCorrect = true;
-    } else if (newQ.answer) {
-      newQ.isCorrect = userAns === correctAns;
-    } else {
-      newQ.isCorrect = null;
-    }
-  } else if ('correctAnswer' in updates && !newQ.correctAnswer) {
-    newQ.isCorrect = null;
-  }
-
-  return newQ;
-};
 
 export const useTasks = () => {
   const [tasks, setTasks] = useState<StudyTask[]>(() => {
@@ -122,6 +103,34 @@ export const useTasks = () => {
     if (nextQuestion) {
       syncStoredQuestionBankProgress(nextQuestion, updates);
     }
+  };
+
+  const saveQuestion = (
+    taskId: string,
+    blockId: string,
+    draft: QuestionDraft,
+    editingQuestionNumber?: number,
+  ): SaveQuestionDraftResult => {
+    const targetTask = tasks.find((task) => task.id === taskId);
+    const targetBlock = targetTask?.blocks.find((block) => block.id === blockId);
+    if (!targetBlock) return { ok: false, errors: ['Bloco não encontrado.'] };
+    if (targetBlock.isLocked) return { ok: false, errors: ['Desbloqueie o bloco para editar questões.'] };
+
+    const result = materializeQuestionDraft(targetBlock, draft, { editingQuestionNumber });
+    if (!result.ok) return result;
+
+    setTasks((previous) => previous.map((task) => {
+      if (task.id !== taskId) return task;
+      return {
+        ...task,
+        updatedAt: now(),
+        blocks: task.blocks.map((block) => (block.id === blockId ? result.block : block)),
+      };
+    }));
+
+    syncStoredQuestionBankContent(result.question);
+
+    return result;
   };
 
   const toggleLock = (taskId: string, blockId: string) => {
@@ -531,6 +540,7 @@ export const useTasks = () => {
     updateTask,
     deleteTask,
     updateQuestion,
+    saveQuestion,
     toggleLock,
     saveBlock,
     importGabarito,

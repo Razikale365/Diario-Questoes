@@ -5,8 +5,10 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Edit2,
   Flag,
   MessageSquare,
+  Plus,
   Star,
   X,
 } from 'lucide-react';
@@ -17,10 +19,19 @@ import {
   findFirstUnansweredCardIndex,
   summarizeQuestionCardDeck,
 } from '../utils/questionCardDeck';
+import { QuestionEditorModal } from './QuestionEditorModal';
+import {
+  buildAnswerSelectionUpdate,
+  QuestionDraft,
+  SaveQuestionDraftResult,
+  shouldShowQuestionCorrectness,
+  toggleQuestionAnswerReveal,
+} from '../utils/questionExecution';
 
 interface QuestionCardDeckProps {
   task: StudyTask;
   onUpdateQuestion: (blockId: string, qNumber: number, updates: Partial<Question>) => void;
+  onSaveQuestion: (blockId: string, draft: QuestionDraft, editingQuestionNumber?: number) => SaveQuestionDraftResult;
   onFinishTask?: () => void;
 }
 
@@ -29,16 +40,18 @@ const clampIndex = (value: number, total: number) => {
   return Math.min(Math.max(value, 0), total - 1);
 };
 
-const resultClassName = (question: Question) => {
-  if (question.isCorrect === true) return 'bg-[#84cc16]/15 text-[#84cc16] ring-[#84cc16]/30';
-  if (question.isCorrect === false) return 'bg-red-500/10 text-red-300 ring-red-500/30';
+const resultClassName = (question: Question, isRevealed: boolean) => {
+  if (isRevealed && question.correctAnswer === 'ANULADA') return 'bg-amber-500/10 text-amber-200 ring-amber-500/30';
+  if (shouldShowQuestionCorrectness(question, isRevealed) && question.isCorrect === true) return 'bg-[#84cc16]/15 text-[#84cc16] ring-[#84cc16]/30';
+  if (shouldShowQuestionCorrectness(question, isRevealed) && question.isCorrect === false) return 'bg-red-500/10 text-red-300 ring-red-500/30';
   if (question.answer) return 'bg-purple-500/10 text-purple-200 ring-purple-500/30';
   return 'bg-white/5 text-gray-400 ring-white/10';
 };
 
-const resultLabel = (question: Question) => {
-  if (question.isCorrect === true) return 'Certa';
-  if (question.isCorrect === false) return 'Errada';
+const resultLabel = (question: Question, isRevealed: boolean) => {
+  if (isRevealed && question.correctAnswer === 'ANULADA') return 'Anulada';
+  if (shouldShowQuestionCorrectness(question, isRevealed) && question.isCorrect === true) return 'Certa';
+  if (shouldShowQuestionCorrectness(question, isRevealed) && question.isCorrect === false) return 'Errada';
   if (question.answer) return 'Respondida';
   return 'Pendente';
 };
@@ -46,20 +59,34 @@ const resultLabel = (question: Question) => {
 export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
   task,
   onUpdateQuestion,
+  onSaveQuestion,
   onFinishTask,
 }) => {
   const cards = useMemo(() => buildQuestionCardDeck(task), [task]);
-  const summary = useMemo(() => summarizeQuestionCardDeck(cards), [cards]);
   const initializedTaskIdRef = useRef<string | null>(null);
   const deckRef = useRef<HTMLElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(0);
   const [isEditingObservation, setIsEditingObservation] = useState(false);
+  const [revealedQuestionIds, setRevealedQuestionIds] = useState<Set<string>>(() => new Set());
+  const [questionBeingEdited, setQuestionBeingEdited] = useState<Question | null | undefined>(undefined);
+  const summary = useMemo(() => {
+    const visibleCards = cards.map((card) => shouldShowQuestionCorrectness(card.question, revealedQuestionIds.has(card.id))
+      ? card
+      : { ...card, isCorrect: false, isWrong: false });
+    const visibleSummary = summarizeQuestionCardDeck(visibleCards);
+    const graded = visibleSummary.correct + visibleSummary.wrong;
+    return {
+      ...visibleSummary,
+      accuracy: graded > 0 ? Number(((visibleSummary.correct / graded) * 100).toFixed(1)) : 0,
+    };
+  }, [cards, revealedQuestionIds]);
 
   useEffect(() => {
     if (initializedTaskIdRef.current !== task.id) {
       initializedTaskIdRef.current = task.id;
       setCurrentIndex(findFirstUnansweredCardIndex(cards));
+      setRevealedQuestionIds(new Set());
       return;
     }
 
@@ -68,6 +95,8 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
 
   const currentCard = cards[currentIndex];
   const currentQuestion = currentCard?.question;
+  const currentBlock = currentCard ? task.blocks.find((block) => block.id === currentCard.blockId) : undefined;
+  const isCurrentQuestionRevealed = Boolean(currentCard && revealedQuestionIds.has(currentCard.id));
   const answeredPercent = summary.total > 0 ? (summary.answered / summary.total) * 100 : 0;
 
   useEffect(() => {
@@ -77,6 +106,19 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
   const updateCurrentQuestion = (updates: Partial<Question>) => {
     if (!currentCard || currentCard.blockIsLocked) return;
     onUpdateQuestion(currentCard.blockId, currentCard.question.number, updates);
+  };
+
+  const toggleCurrentQuestionReveal = () => {
+    if (!currentCard || !currentQuestion?.correctAnswer) return;
+    const decision = toggleQuestionAnswerReveal(
+      revealedQuestionIds,
+      currentCard.id,
+      currentQuestion,
+    );
+    setRevealedQuestionIds(decision.revealedIds);
+    if (!currentCard.blockIsLocked && decision.updates) {
+      onUpdateQuestion(currentCard.blockId, currentQuestion.number, decision.updates);
+    }
   };
 
   const goToCard = (nextIndex: number, nextDirection: number) => {
@@ -101,15 +143,17 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
 
   const selectAlternative = (alternative: string) => {
     if (!currentQuestion) return;
-
-    if (currentQuestion.answer === alternative) {
-      updateCurrentQuestion({ answer: '' });
-      return;
+    if (currentCard) {
+      setRevealedQuestionIds((current) => {
+        const next = new Set(current);
+        next.delete(currentCard.id);
+        return next;
+      });
     }
 
     const nextEliminated = (currentQuestion.eliminated || []).filter((item) => item !== alternative);
     updateCurrentQuestion({
-      answer: alternative,
+      ...buildAnswerSelectionUpdate(currentQuestion, alternative),
       eliminated: nextEliminated.length > 0 ? nextEliminated : undefined,
     });
   };
@@ -124,12 +168,34 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
     updateCurrentQuestion({ [field]: next.length > 0 ? next : undefined });
   };
 
+  const firstEditableBlock = task.blocks.find((block) => !block.isSection);
+
   if (cards.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-white/10 bg-[#262626] p-8 text-center">
-        <BookOpen className="mx-auto mb-4 h-8 w-8 text-gray-600" />
-        <p className="text-sm font-bold text-gray-500">Nenhuma questão completa disponível nesta tarefa.</p>
-      </div>
+      <>
+        <div className="rounded-lg border border-dashed border-white/10 bg-[#262626] p-8 text-center">
+          <BookOpen className="mx-auto mb-4 h-8 w-8 text-gray-600" />
+          <p className="text-sm font-bold text-gray-500">Nenhuma questão completa disponível nesta tarefa.</p>
+          {firstEditableBlock && !firstEditableBlock.isLocked && (
+            <button
+              type="button"
+              onClick={() => setQuestionBeingEdited(null)}
+              className="mx-auto mt-5 flex h-10 items-center gap-2 rounded-lg bg-purple-600 px-4 text-xs font-black text-white transition-colors hover:bg-purple-500"
+            >
+              <Plus className="h-4 w-4" />
+              Adicionar questão
+            </button>
+          )}
+        </div>
+        {questionBeingEdited !== undefined && firstEditableBlock && (
+          <QuestionEditorModal
+            question={questionBeingEdited || undefined}
+            suggestedSourceNumber={1}
+            onClose={() => setQuestionBeingEdited(undefined)}
+            onSave={(draft) => onSaveQuestion(firstEditableBlock.id, draft, questionBeingEdited?.number)}
+          />
+        )}
+      </>
     );
   }
 
@@ -158,6 +224,15 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
           </div>
 
           <div className="flex items-center justify-between gap-2 md:justify-end">
+            <button
+              type="button"
+              onClick={() => setQuestionBeingEdited(null)}
+              disabled={!currentCard || currentCard.blockIsLocked}
+              className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/5 text-gray-400 transition-colors hover:bg-purple-500/10 hover:text-purple-200 disabled:cursor-not-allowed disabled:opacity-40"
+              title="Adicionar questão neste bloco"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
             <button
               type="button"
               onClick={goPrevious}
@@ -204,7 +279,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
             >
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-sm font-black ring-1 ${resultClassName(currentQuestion)}`}>
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-sm font-black ring-1 ${resultClassName(currentQuestion, isCurrentQuestionRevealed)}`}>
                     {currentCard.displayNumber}
                   </div>
                   <div className="min-w-0">
@@ -217,9 +292,9 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                           {currentCard.blockLesson}
                         </span>
                       )}
-                      {currentQuestion.correctAnswer && (
+                      {isCurrentQuestionRevealed && currentQuestion.correctAnswer && (
                         <span className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[#84cc16]">
-                          Gab {currentQuestion.correctAnswer}
+                          {currentQuestion.correctAnswer === 'ANULADA' ? 'Anulada' : `Gab ${currentQuestion.correctAnswer}`}
                         </span>
                       )}
                     </div>
@@ -230,9 +305,33 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <span className={`mr-1 rounded px-2 py-1 text-[10px] font-black uppercase tracking-widest ring-1 ${resultClassName(currentQuestion)}`}>
-                    {resultLabel(currentQuestion)}
+                  <span className={`mr-1 rounded px-2 py-1 text-[10px] font-black uppercase tracking-widest ring-1 ${resultClassName(currentQuestion, isCurrentQuestionRevealed)}`}>
+                    {resultLabel(currentQuestion, isCurrentQuestionRevealed)}
                   </span>
+                  {currentQuestion.correctAnswer && (
+                    <button
+                      type="button"
+                      onClick={toggleCurrentQuestionReveal}
+                      aria-pressed={isCurrentQuestionRevealed}
+                      className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                        isCurrentQuestionRevealed
+                          ? 'bg-purple-500/10 text-purple-200'
+                          : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
+                      }`}
+                      title={isCurrentQuestionRevealed ? 'Ocultar gabarito' : 'Revelar gabarito'}
+                    >
+                      <BookOpen className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setQuestionBeingEdited(currentQuestion)}
+                    disabled={currentCard.blockIsLocked}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-gray-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Editar questão"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => updateCurrentQuestion({ favorite: !currentQuestion.favorite })}
@@ -294,9 +393,9 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                           disabled={currentCard.blockIsLocked}
                           className={`flex min-h-[52px] flex-1 items-start gap-3 rounded-xl px-3 py-3 text-left transition-[background-color,box-shadow,color,opacity] ${
                             isSelected
-                              ? currentQuestion.isCorrect === true
+                              ? shouldShowQuestionCorrectness(currentQuestion, isCurrentQuestionRevealed) && currentQuestion.isCorrect === true
                                 ? 'bg-[#84cc16]/15 text-white ring-1 ring-[#84cc16]/50'
-                                : currentQuestion.isCorrect === false
+                                : shouldShowQuestionCorrectness(currentQuestion, isCurrentQuestionRevealed) && currentQuestion.isCorrect === false
                                   ? 'bg-red-500/15 text-white ring-1 ring-red-500/50'
                                   : 'bg-purple-600 text-white ring-1 ring-purple-400/50'
                               : isEliminated
@@ -389,6 +488,17 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
           )}
         </AnimatePresence>
       </div>
+      {questionBeingEdited !== undefined && currentBlock && (
+        <QuestionEditorModal
+          question={questionBeingEdited || undefined}
+          suggestedSourceNumber={Math.max(
+            0,
+            ...currentBlock.questions.map((question) => question.sourceQuestionNumber || 0),
+          ) + 1}
+          onClose={() => setQuestionBeingEdited(undefined)}
+          onSave={(draft) => onSaveQuestion(currentBlock.id, draft, questionBeingEdited?.number)}
+        />
+      )}
     </section>
   );
 };

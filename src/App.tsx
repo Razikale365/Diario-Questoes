@@ -73,6 +73,7 @@ function App() {
     updateTask,
     deleteTask,
     updateQuestion,
+    saveQuestion,
     toggleLock,
     saveBlock,
     importGabarito,
@@ -576,6 +577,7 @@ function App() {
                       <QuestionCardDeck
                         task={activeTask}
                         onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
+                        onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(activeTaskId!, blockId, draft, editingQuestionNumber)}
                         onFinishTask={finishTask}
                       />
                     ) : (
@@ -609,6 +611,7 @@ function App() {
                                   globalShowStats={showStats}
                                   sectionStats={sectionStats}
                                   onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
+                                  onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(activeTaskId!, blockId, draft, editingQuestionNumber)}
                                   onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
                                   onEditBlock={openEditBlock}
                                   onDeleteBlock={handleDeleteBlock}
@@ -699,6 +702,7 @@ function App() {
                     <QuestionCardDeck
                       task={viewingTask}
                       onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(viewingTask.id, blockId, qNumber, updates)}
+                      onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(viewingTask.id, blockId, draft, editingQuestionNumber)}
                     />
                   ) : (
                     <div className="grid grid-cols-12 gap-8">
@@ -729,6 +733,7 @@ function App() {
                             globalShowStats={showStats}
                             sectionStats={sectionStats}
                             onUpdateQuestion={(bid, qn, upd) => updateQuestion(viewingTask.id, bid, qn, upd)}
+                            onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(viewingTask.id, blockId, draft, editingQuestionNumber)}
                             onToggleLock={(bid) => toggleLock(viewingTask.id, bid)}
                             onEditBlock={openEditBlock}
                             onDeleteBlock={handleDeleteBlock}

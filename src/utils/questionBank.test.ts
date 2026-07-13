@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as questionBankModule from './questionBank';
 
 import {
   answerQuestionBankItemInline,
@@ -671,6 +672,56 @@ test('syncQuestionBankItemProgress updates the latest attempt when correctness i
   assert.equal(result.attemptAdded, false);
   assert.deepEqual(result.items[0].attempts, [
     { answer: 'C', isCorrect: true, attemptedAt: '2026-07-03T13:00:00.000Z' },
+  ]);
+});
+
+test('syncQuestionBankItemContent persists repairs made to an imported question', () => {
+  const syncQuestionBankItemContent = (
+    questionBankModule as unknown as {
+      syncQuestionBankItemContent?: (
+        items: ReturnType<typeof buildQuestionBankItems>,
+        question: {
+          localId: string;
+          sourceQuestionNumber: number;
+          statement: string;
+          alternatives: Array<{ label: string; text: string }>;
+          correctAnswer: string;
+          isMultipleChoice: boolean;
+          sourceName: string;
+        },
+        updatedAt: string,
+      ) => { items: ReturnType<typeof buildQuestionBankItems>; changed: boolean };
+    }
+  ).syncQuestionBankItemContent;
+  assert.equal(typeof syncQuestionBankItemContent, 'function');
+  const [bankItem] = buildQuestionBankItems(importedQuestions, context);
+
+  const result = syncQuestionBankItemContent!(
+    [bankItem],
+    {
+      localId: bankItem.id,
+      sourceQuestionNumber: 17,
+      statement: 'Enunciado reparado.',
+      alternatives: [
+        { label: 'A', text: 'Alternativa A corrigida.' },
+        { label: 'B', text: 'Alternativa B corrigida.' },
+      ],
+      correctAnswer: 'B',
+      isMultipleChoice: true,
+      sourceName: 'PDF corrigido',
+    },
+    '2026-07-13T15:00:00.000Z',
+  );
+
+  assert.equal(result.changed, true);
+  assert.equal(result.items[0].statement, 'Enunciado reparado.');
+  assert.equal(result.items[0].sourceQuestionNumber, 17);
+  assert.equal(result.items[0].correctAnswer, 'B');
+  assert.equal(result.items[0].sourceName, 'PDF corrigido');
+  assert.equal(result.items[0].updatedAt, '2026-07-13T15:00:00.000Z');
+  assert.deepEqual(result.items[0].alternatives, [
+    { label: 'A', text: 'Alternativa A corrigida.' },
+    { label: 'B', text: 'Alternativa B corrigida.' },
   ]);
 });
 

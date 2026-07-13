@@ -511,6 +511,69 @@ export const buildQuestionFingerprint = (
   return hashString(`${question.sourceQuestionNumber || ''}|${normalize(question.statement)}|${alternatives}`);
 };
 
+type QuestionContentSnapshot = Pick<
+  Question,
+  | 'localId'
+  | 'sourceQuestionNumber'
+  | 'statement'
+  | 'alternatives'
+  | 'correctAnswer'
+  | 'isMultipleChoice'
+  | 'sourceName'
+>;
+
+export const syncQuestionBankItemContent = (
+  existing: QuestionBankItem[],
+  question: QuestionContentSnapshot,
+  updatedAt = new Date().toISOString(),
+) => {
+  const statement = question.statement;
+  const alternatives = question.alternatives;
+  if (!question.localId || !statement || !alternatives?.length) {
+    return { items: existing, changed: false };
+  }
+
+  let changed = false;
+  const items = existing.map((item) => {
+    if (item.id !== question.localId) return item;
+
+    const nextContent = {
+      sourceQuestionNumber: question.sourceQuestionNumber,
+      statement,
+      alternatives,
+      correctAnswer: question.correctAnswer,
+      isMultipleChoice: question.isMultipleChoice,
+      sourceName: question.sourceName || item.sourceName,
+    };
+    const contentChanged = item.sourceQuestionNumber !== nextContent.sourceQuestionNumber
+      || item.statement !== nextContent.statement
+      || JSON.stringify(item.alternatives) !== JSON.stringify(nextContent.alternatives)
+      || item.correctAnswer !== nextContent.correctAnswer
+      || item.isMultipleChoice !== nextContent.isMultipleChoice
+      || item.sourceName !== nextContent.sourceName;
+    if (!contentChanged) return item;
+
+    changed = true;
+    return {
+      ...item,
+      ...nextContent,
+      fingerprint: buildQuestionFingerprint(nextContent),
+      updatedAt,
+    };
+  });
+
+  return { items, changed };
+};
+
+export const syncStoredQuestionBankContent = (
+  question: QuestionContentSnapshot,
+  updatedAt = new Date().toISOString(),
+) => {
+  const result = syncQuestionBankItemContent(loadStoredQuestionBank(), question, updatedAt);
+  if (result.changed) persistQuestionBank(result.items);
+  return result;
+};
+
 export const buildQuestionBankItems = (
   questions: ImportedObjectiveQuestion[],
   context: QuestionBankImportContext,
