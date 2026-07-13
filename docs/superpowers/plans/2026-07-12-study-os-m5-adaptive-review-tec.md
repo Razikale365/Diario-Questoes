@@ -180,13 +180,13 @@ Home keeps today’s best blocks first. Below it, show a compact seven-day forec
 - Update: `.superpowers/sdd/progress.md`
 - Create: `docs/superpowers/plans/2026-07-13-study-os-m6-strategy-ingestion.md`
 
-- [ ] Run full Python/frontend/compile/build/diff gates.
-- [ ] Restart and compare event/state/queue/week/day hashes.
-- [ ] Backup/restore and rebuild topic state from immutable events.
-- [ ] Run offline desktop/390px acceptance.
-- [ ] Prove a seven-day simulated outcome sequence adapts without broad review or hidden filler.
-- [ ] Plan M6 for fresh Estratégia package validation, lesson-to-edital mapping, trilha/guia/LS metadata ingestion, “mais cai” incidence updates, and source-choice comparison.
-- [ ] Commit `docs: plan Study OS strategy ingestion`.
+- [x] Run full Python/frontend/compile/build/diff gates.
+- [x] Restart and compare event/state/queue/week/day hashes.
+- [x] Backup/restore and rebuild topic state from immutable events.
+- [x] Run offline desktop/390px acceptance.
+- [x] Prove a seven-day simulated outcome sequence adapts without broad review or hidden filler.
+- [x] Plan M6 for fresh Estratégia package validation, lesson-to-edital mapping, trilha/guia/LS metadata ingestion, “mais cai” incidence updates, and source-choice comparison.
+- [x] Commit `docs: plan Study OS strategy ingestion`.
 
 ## M5 Acceptance
 

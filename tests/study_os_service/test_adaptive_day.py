@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from study_os_service.db.connection import connect_database
@@ -228,5 +228,110 @@ def test_stale_topic_reenters_with_explicit_adaptation_reason(tmp_path: Path):
             for item in candidates
         )
         assert any(item.adaptation_reason == "stale_return" for item in candidates)
+    finally:
+        connection.close()
+
+
+def test_seven_day_outcome_sequence_stays_bounded_and_explicit(tmp_path: Path):
+    connection = connect_database(tmp_path / "study.sqlite3")
+    try:
+        MigrationRunner(connection).migrate()
+        setup_adaptive_target(connection, tmp_path)
+        planner = PlannerGenerationService(connection)
+        start = date.today()
+        adaptation_reasons: set[str] = set()
+
+        for offset in range(7):
+            plan_date = start + timedelta(days=offset)
+            day = planner.generate_day(
+                "bacen_economia_financas",
+                plan_date,
+                idempotency_key=f"seven-day-plan-{offset}",
+                time_budget_minutes=240,
+            )
+            chosen = [item for item in day.candidates if item.chosen_position]
+            adaptation_reasons.update(item.adaptation_reason for item in chosen)
+
+            assert len(day.blocks) + day.run.shortfall_count == day.run.daily_quota
+            assert len(day.run.shortfall_reasons) == day.run.shortfall_count
+            assert all(item.target_topic_id is not None for item in chosen)
+            assert all(
+                5 <= item.planned_questions <= 10
+                for item in chosen
+                if item.block_kind == "review"
+            )
+
+            review = next(
+                (block for block in day.blocks if block.block_kind == "review"),
+                None,
+            )
+            questions = next(
+                (block for block in day.blocks if block.block_kind == "questions"),
+                None,
+            )
+            block = review if offset == 1 and review is not None else questions
+            block = block or day.blocks[0]
+
+            if block.block_kind == "theory":
+                result = dict(
+                    state="completed",
+                    questions_done=0,
+                    correct_count=0,
+                    wrong_count=0,
+                    doubt_count=0,
+                    favorite_count=0,
+                )
+            elif offset == 0:
+                result = dict(
+                    state="completed",
+                    questions_done=block.planned_questions,
+                    correct_count=max(0, block.planned_questions // 3),
+                    wrong_count=block.planned_questions - block.planned_questions // 3,
+                    doubt_count=2,
+                    favorite_count=1,
+                )
+            elif offset == 3:
+                result = dict(
+                    state="skipped",
+                    questions_done=0,
+                    correct_count=0,
+                    wrong_count=0,
+                    doubt_count=0,
+                    favorite_count=0,
+                )
+            elif offset == 5:
+                result = dict(
+                    state="failed",
+                    questions_done=block.planned_questions,
+                    correct_count=0,
+                    wrong_count=block.planned_questions,
+                    doubt_count=1,
+                    favorite_count=0,
+                )
+            else:
+                result = dict(
+                    state="completed",
+                    questions_done=block.planned_questions,
+                    correct_count=max(0, block.planned_questions - 1),
+                    wrong_count=min(1, block.planned_questions),
+                    doubt_count=0,
+                    favorite_count=0,
+                )
+            planner.record_block_result(
+                block.id,
+                expected_version=block.version,
+                **result,
+            )
+
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_events"
+        ).fetchone()[0] == 7
+        assert "bounded_review_due" in adaptation_reasons
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM review_queue_items
+            WHERE target_topic_id IS NULL OR bounded_questions NOT BETWEEN 5 AND 10
+            """
+        ).fetchone()[0] == 0
     finally:
         connection.close()
