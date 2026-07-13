@@ -20,7 +20,7 @@ import { SectionEditModal } from './components/SectionEditModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
-import { formatQuestionList, parseQuestionsText, parseLSTask } from './utils/parser';
+import { formatQuestionList, parseQuestionsText } from './utils/parser';
 import {
   QUESTION_BANK_BACKUP_SCHEMA,
   QUESTION_BANK_UPDATED_EVENT,
@@ -452,7 +452,7 @@ function App() {
     const { isOpen, ...taskData } = revisionTaskModal;
     addTask(taskData);
     setActiveTaskId(taskData.id);
-    setTaskWorkTab('caderno');
+    setTaskWorkTab(getDefaultTaskWorkTab(taskData));
     setActiveTab('caderno');
     setRevisionTaskModal({ ...revisionTaskModal, isOpen: false });
     showToast('Revisão gerada!');
@@ -658,8 +658,7 @@ function App() {
           {activeTab === 'revisao' && (
             <RevisionArea 
               tasks={tasks} 
-              onGenerateRevisionTask={(revText, discipline, autoAssunto) => {
-                const blocks = parseLSTask(revText);
+              onGenerateRevisionTask={(revisionDraft, discipline, autoAssunto) => {
                 setRevisionTaskModal({
                   isOpen: true,
                   planejamento: 'Revisão',
@@ -668,7 +667,7 @@ function App() {
                   assunto: autoAssunto,
                   discipline: discipline,
                   bank: '',
-                  blocks,
+                  blocks: revisionDraft.blocks,
                   id: crypto.randomUUID(),
                   date: new Date().toISOString()
                 });

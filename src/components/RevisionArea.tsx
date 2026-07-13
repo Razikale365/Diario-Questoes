@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { CheckCircle2, AlertCircle, Copy, Plus } from 'lucide-react';
 import { StudyTask } from '../types';
-import { formatQuestionList } from '../utils/parser';
+import { buildRevisionTaskDraft, RevisionTaskDraft } from '../utils/revisionTask';
 
 interface RevisionAreaProps {
   tasks: StudyTask[];
-  onGenerateRevisionTask: (revText: string, discipline: string, autoAssunto: string) => void;
+  onGenerateRevisionTask: (draft: RevisionTaskDraft, discipline: string, autoAssunto: string) => void;
   showToast: (msg: string) => void;
 }
 
@@ -37,85 +37,17 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
   }, [tasks, revDiscipline]);
 
   const generatedRevision = useMemo(() => {
-    if (!revDiscipline || selectedLessons.size === 0) return [];
-
-    const filteredTasks = tasks.filter(t => t.discipline === revDiscipline && t.status === 'completed');
-    const grouped = new Map<string, { 
-      qSet: Set<number>, 
-      pSet: Set<string>, 
-      observations: Map<number, string>,
-      doubtedAlts: Map<number, string[]>
-    }>();
-
-    filteredTasks.forEach(task => {
-      task.blocks.forEach(block => {
-        if (!block.lesson || !selectedLessons.has(block.lesson)) return;
-
-        const key = `${block.lesson}|${block.bank || task.bank}`;
-        if (!grouped.has(key)) grouped.set(key, { 
-          qSet: new Set(), 
-          pSet: new Set(), 
-          observations: new Map(),
-          doubtedAlts: new Map()
-        });
-        const { qSet, pSet, observations, doubtedAlts } = grouped.get(key)!;
-
-        (block.questions || []).forEach(q => {
-          if (q.isCorrect === false || q.hasDoubt) {
-            qSet.add(q.number);
-            if (q.observations) observations.set(q.number, q.observations);
-            if (q.doubtedAlts && q.doubtedAlts.length > 0) doubtedAlts.set(q.number, q.doubtedAlts);
-          }
-        });
-
-        if (block.pages) pSet.add(block.pages);
-      });
-    });
-
-    const result: string[] = [];
-    result.push('Refaça as questões que você errou e marcou como favoritas (que devem incluir as erradas e que houve dúvida). Logo abaixo estão listados os cadernos de questões para realizar essas revisões:\n');
-
-    grouped.forEach(({ qSet, pSet, observations, doubtedAlts }, key) => {
-      const [lesson, bank] = key.split('|');
-      const qArray = Array.from(qSet).sort((a: number, b: number) => a - b);
-      
-      if (qArray.length > 0) {
-        const qString = formatQuestionList(qArray);
-        const pString = pSet.size > 0 ? ` (páginas ${Array.from(pSet).join(', ')})` : '';
-        result.push(`- Na ${lesson} - Resolver as questões ${qString} (total: ${qArray.length} questões)${pString}. ${bank}`);
-        
-        if (observations.size > 0 || doubtedAlts.size > 0) {
-          result.push('  Observações/Dúvidas:');
-          
-          const allQNums = Array.from(new Set([
-            ...Array.from(observations.keys()),
-            ...Array.from(doubtedAlts.keys())
-          ])).sort((a: number, b: number) => a - b);
-
-          allQNums.forEach(qNum => {
-            const obs = observations.get(qNum);
-            const alts = doubtedAlts.get(qNum);
-            let line = `  - Questão ${qNum}:`;
-            if (alts && alts.length > 0) line += ` [Considerou: ${alts.join(', ')}]`;
-            if (obs) line += ` ${obs}`;
-            result.push(line);
-          });
-        }
-      }
-    });
-
-    return result;
+    return buildRevisionTaskDraft(tasks, revDiscipline, selectedLessons);
   }, [tasks, revDiscipline, selectedLessons]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(generatedRevision.join('\n'));
+    navigator.clipboard.writeText(generatedRevision.lines.join('\n'));
     showToast('Texto copiado para a área de transferência!');
   };
 
   const openRevisionTaskModal = () => {
-    const revText = generatedRevision.join('\n');
     const autoAssunto = Array.from(selectedLessons).sort().join(', ');
-    onGenerateRevisionTask(revText, revDiscipline, autoAssunto);
+    onGenerateRevisionTask(generatedRevision, revDiscipline, autoAssunto);
   };
 
   return (
@@ -172,10 +104,10 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
               </div>
             )}
 
-            {generatedRevision.length > 0 && (
+            {generatedRevision.questionCount > 0 && (
               <div className="mt-8">
                 <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-bold text-lg text-white">Dicas e Bizus</h3>
+                  <h3 className="font-bold text-lg text-white">Questões para refazer</h3>
                   <div className="flex gap-2">
                    <button
                       onClick={handleCopy}
@@ -193,7 +125,7 @@ export const RevisionArea: React.FC<RevisionAreaProps> = ({
                 </div>
                 <div className="bg-[#262626] border border-[#404040] rounded p-6">
                   <pre className="whitespace-pre-wrap font-sans text-sm text-gray-300 leading-relaxed">
-                    {generatedRevision.join('\n')}
+                    {generatedRevision.lines.join('\n')}
                   </pre>
                 </div>
               </div>
