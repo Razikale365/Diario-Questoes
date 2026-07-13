@@ -52,6 +52,17 @@ export interface ImportRun {
   errorMessage: string | null;
 }
 
+export interface CourseTopicMappingSummary {
+  rootId: number;
+  targetSlug: string;
+  sourceIds: number[];
+  runIds: number[];
+  discoveredCount: number;
+  mappedCount: number;
+  unresolvedCount: number;
+  algorithmVersion: string;
+}
+
 export interface CourseSummary {
   id: number;
   rootId: number;
@@ -195,6 +206,24 @@ export function parseImportRun(value: unknown): ImportRun {
   return value as unknown as ImportRun;
 }
 
+export function parseCourseTopicMappingSummary(value: unknown): CourseTopicMappingSummary {
+  if (!isRecord(value)
+    || !isPositiveInteger(value.rootId)
+    || !isString(value.targetSlug)
+    || !value.targetSlug.trim()
+    || !Array.isArray(value.sourceIds)
+    || !value.sourceIds.every(isPositiveInteger)
+    || !Array.isArray(value.runIds)
+    || !value.runIds.every(isPositiveInteger)
+    || !isNonNegativeInteger(value.discoveredCount)
+    || !isNonNegativeInteger(value.mappedCount)
+    || !isNonNegativeInteger(value.unresolvedCount)
+    || value.mappedCount + value.unresolvedCount !== value.discoveredCount
+    || !isString(value.algorithmVersion)
+    || !value.algorithmVersion.trim()) invalid('course topic mapping');
+  return value as unknown as CourseTopicMappingSummary;
+}
+
 function parseCourse(value: unknown): CourseSummary {
   if (!isRecord(value)
     || !isPositiveInteger(value.id)
@@ -302,6 +331,20 @@ export async function startCourseScan(rootId: number): Promise<ImportRun> {
     headers: jsonHeaders,
     body: JSON.stringify({ rootId }),
   }));
+}
+
+export async function mapCourseRootToStrategy(
+  rootId: number,
+  targetSlug: string,
+): Promise<CourseTopicMappingSummary> {
+  return parseCourseTopicMappingSummary(await requestJson(
+    `/api/v1/course-roots/${rootId}/strategy-map`,
+    {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ targetSlug }),
+    },
+  ));
 }
 
 export async function fetchImportRun(runId: number, signal?: AbortSignal): Promise<ImportRun> {

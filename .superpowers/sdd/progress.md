@@ -123,13 +123,15 @@ Plan: `docs/superpowers/plans/2026-07-13-study-os-m6-strategy-ingestion.md`
 | 5. Deterministic source choice | complete | `3edcc67` | `58b2fc2` | trust/freshness/order/target/banca/availability tests | current course, Passo review, TEC practice, and displacement evidence approved |
 | 6. Day/week source integration | complete | `58b2fc2` | `261f755` | full no-LS day, named shortfall, refresh and immutable divergence tests | source choices frozen into day/week evidence |
 | 7. Home strategy workbench | complete | `261f755` | `d47bcd2` | 170 frontend tests; tsc; build; desktop/390px; console clean | today-first UI, optimistic mapping/source trust, and target-specific gaps approved |
-| 8. M6 production gate | in progress | `d47bcd2` | pending | 365 pytest, 1 skipped; 170 frontend; compileall, tsc, build; schema-v8 restart/backup and fixture restore | blocked only on authenticated real-package evidence and real-PDF/offline comparison |
+| 8. M6 production gate | in progress | `d47bcd2` | pending | 367 pytest, 1 skipped; 172 frontend; compileall, tsc, build; live scan-to-strategy route | authenticated real-package evidence and real-PDF/offline comparison remain open |
 
 ### M6 Current Evidence
 
 - Schema-v8 live service was backed up to `data/study-os/backups/study-os-20260713T140528Z.sqlite3`, restarted on port 4317, and returned healthy database/backup status.
 - The permanent strategy durability regression hashes sources, source items, mappings, ingestion runs, source-choice runs/rows, week slots, day candidates, and blocks; it verifies restart equality, idempotent LS replay, backup integrity, and restore equality.
 - The source mapping workbench exposes package state, unresolved mappings, competing mappings, target/topic assignment, editable trust, transfer type, status, primary eligibility, and notes. Mapping and shared source versions save atomically and stale source evidence rolls back the mapping write.
+- A completed validated course scan can now be mapped into strategy sources through `POST /api/v1/course-roots/{root_id}/strategy-map` or the Inventory command. Replays return the same source/run IDs, unresolved counts remain visible, and package/scan/target safeguards return structured errors.
+- The current bridge gate passed 367 Python tests with one intentional skip, 172 frontend tests, TypeScript, production build, compileall, and live service smoke on schema 8.
 - Desktop at 1280x720 and mobile at 390x844 had no page-level horizontal overflow or console errors. Dense tables retain their own horizontal scrolling; the mobile command center still starts with today's target and blocks.
 - BACEN with no package/source rows displays a BACEN-specific acquisition gap. Cross-target API tests reject labeling an RFB source as BACEN-specific.
 - Package `249654` is still `selected`, not `downloaded` or `validated`. Run3 produced zero PDFs/no manifest after login timeout; run4 is the active clean retry. No fixture or empty production table is being presented as real-package acceptance.

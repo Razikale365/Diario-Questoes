@@ -174,3 +174,109 @@ def test_scan_worker_bootstrap_failure_is_persisted(
     assert response.status_code == 202
     assert failed["state"] == "failed"
     assert failed["errorMessage"] == "worker database unavailable"
+
+
+def test_strategy_map_bridges_scanned_inventory_idempotently(tmp_path: Path):
+    app = create_app(StudyOsSettings.from_environment(tmp_path))
+    choice = make_validated_api_choice(tmp_path)
+
+    with TestClient(app) as client:
+        seeded = client.post(
+            "/api/v1/planner/targets/seed",
+            json={"targetSlugs": ["rfb_auditor"]},
+        )
+        root_id = register_api_root(client, choice)
+        run = client.post("/api/v1/scans", json={"rootId": root_id}).json()
+        assert wait_for_scan(client, run["id"])["state"] == "completed"
+
+        first = client.post(
+            f"/api/v1/course-roots/{root_id}/strategy-map",
+            json={"targetSlug": "rfb_auditor"},
+        )
+        second = client.post(
+            f"/api/v1/course-roots/{root_id}/strategy-map",
+            json={"targetSlug": "rfb_auditor"},
+        )
+
+    assert seeded.status_code == 201
+    assert first.status_code == 200
+    assert first.json() == second.json()
+    assert first.json() == {
+        "rootId": root_id,
+        "targetSlug": "rfb_auditor",
+        "sourceIds": first.json()["sourceIds"],
+        "runIds": first.json()["runIds"],
+        "discoveredCount": 2,
+        "mappedCount": 0,
+        "unresolvedCount": 2,
+        "algorithmVersion": "m6-course-map-v1",
+    }
+    assert len(first.json()["sourceIds"]) == 2
+    assert len(first.json()["runIds"]) == 2
+
+
+def test_strategy_map_reports_root_package_and_target_errors(tmp_path: Path):
+    app = create_app(StudyOsSettings.from_environment(tmp_path))
+    choice = make_validated_api_choice(tmp_path)
+    unvalidated_dir = tmp_path / "unvalidated"
+    unvalidated_dir.mkdir()
+    unvalidated_choice = make_validated_api_choice(unvalidated_dir)
+
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/planner/targets/seed",
+            json={"targetSlugs": ["rfb_auditor"]},
+        )
+        missing_root = client.post(
+            "/api/v1/course-roots/999/strategy-map",
+            json={"targetSlug": "rfb_auditor"},
+        )
+        validated_id = register_api_root(client, choice)
+        unvalidated_id = register_api_root(
+            client,
+            type(unvalidated_choice).from_dict(
+                unvalidated_choice.to_dict() | {"downloadStatus": "downloaded"}
+            ),
+        )
+        before_scan = client.post(
+            f"/api/v1/course-roots/{validated_id}/strategy-map",
+            json={"targetSlug": "rfb_auditor"},
+        )
+        not_ready = client.post(
+            f"/api/v1/course-roots/{unvalidated_id}/strategy-map",
+            json={"targetSlug": "rfb_auditor"},
+        )
+        unknown_target = client.post(
+            f"/api/v1/course-roots/{validated_id}/strategy-map",
+            json={"targetSlug": "target_inexistente"},
+        )
+        malformed = client.post(
+            f"/api/v1/course-roots/{validated_id}/strategy-map",
+            json={"topicAliases": []},
+        )
+
+    assert missing_root.status_code == 404
+    assert missing_root.json() == {
+        "code": "course_root_not_found",
+        "message": "Course root 999 was not found",
+    }
+    assert not_ready.status_code == 409
+    assert not_ready.json() == {
+        "code": "course_mapping_not_ready",
+        "message": "course mapping requires a validated fresh package",
+    }
+    assert before_scan.status_code == 409
+    assert before_scan.json() == {
+        "code": "course_mapping_not_ready",
+        "message": "course root must have a completed scan before mapping",
+    }
+    assert unknown_target.status_code == 404
+    assert unknown_target.json() == {
+        "code": "target_profile_not_found",
+        "message": "Target target_inexistente was not found",
+    }
+    assert malformed.status_code == 422
+    assert malformed.json() == {
+        "code": "invalid_course_mapping",
+        "message": "topicAliases must be an object keyed by positive integer IDs",
+    }

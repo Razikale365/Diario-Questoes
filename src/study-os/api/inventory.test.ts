@@ -9,7 +9,9 @@ import {
   parseLessonDetail,
   parseLessonList,
   parseSetupStatus,
+  parseCourseTopicMappingSummary,
   registerCourseRootFromPath,
+  mapCourseRootToStrategy,
 } from './inventory';
 
 const root = {
@@ -143,4 +145,60 @@ test('minimal root registration preserves structured API errors', async (context
       && error.status === 422
       && error.code === 'invalid_course_root',
   );
+});
+
+test('course topic mapping parser is strict about audit counts and IDs', () => {
+  const summary = {
+    rootId: 1,
+    targetSlug: 'rfb_auditor',
+    sourceIds: [10, 11],
+    runIds: [20, 21],
+    discoveredCount: 2,
+    mappedCount: 1,
+    unresolvedCount: 1,
+    algorithmVersion: 'm6-course-map-v1',
+  };
+
+  assert.deepEqual(parseCourseTopicMappingSummary(summary), summary);
+  assert.throws(
+    () => parseCourseTopicMappingSummary({ ...summary, sourceIds: [0] }),
+    /course topic mapping/i,
+  );
+  assert.throws(
+    () => parseCourseTopicMappingSummary({ ...summary, unresolvedCount: -1 }),
+    /course topic mapping/i,
+  );
+});
+
+test('course topic mapping client posts the selected root and target', async (context) => {
+  const response = {
+    rootId: 7,
+    targetSlug: 'rfb_auditor',
+    sourceIds: [10],
+    runIds: [20],
+    discoveredCount: 1,
+    mappedCount: 0,
+    unresolvedCount: 1,
+    algorithmVersion: 'm6-course-map-v1',
+  };
+  let requestPath = '';
+  let requestInit: RequestInit | undefined;
+  context.mock.method(globalThis, 'fetch', async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    requestPath = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  assert.deepEqual(await mapCourseRootToStrategy(7, 'rfb_auditor'), response);
+  assert.equal(requestPath, '/api/v1/course-roots/7/strategy-map');
+  assert.equal(requestInit?.method, 'POST');
+  assert.deepEqual(JSON.parse(String(requestInit?.body)), {
+    targetSlug: 'rfb_auditor',
+  });
 });

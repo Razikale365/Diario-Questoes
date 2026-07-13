@@ -21,6 +21,7 @@ from study_os_service.repositories.inventory import (
     LessonRecord,
     RootTargetConflictError,
 )
+from study_os_service.services.course_mapping import CourseMappingSummary
 from study_os_service.services.inventory import InventoryService
 
 
@@ -143,6 +144,48 @@ def _scan_payload(run: ImportRunSummary) -> dict[str, Any]:
         "completedAt": _iso(run.completed_at),
         "errorMessage": run.error_message,
     }
+
+
+def _course_mapping_payload(summary: CourseMappingSummary) -> dict[str, Any]:
+    return {
+        "rootId": summary.root_id,
+        "targetSlug": summary.target_slug,
+        "sourceIds": list(summary.source_ids),
+        "runIds": list(summary.run_ids),
+        "discoveredCount": summary.discovered_count,
+        "mappedCount": summary.mapped_count,
+        "unresolvedCount": summary.unresolved_count,
+        "algorithmVersion": summary.algorithm_version,
+    }
+
+
+def _mapping_hints(
+    payload: dict[str, Any], field: str
+) -> dict[int, tuple[str, ...]] | None:
+    raw = payload.get(field)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field} must be an object keyed by positive integer IDs")
+    parsed: dict[int, tuple[str, ...]] = {}
+    for raw_id, raw_values in raw.items():
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} keys must be positive integer IDs") from exc
+        if item_id < 1 or str(raw_id).strip() != str(item_id):
+            raise ValueError(f"{field} keys must be positive integer IDs")
+        if not isinstance(raw_values, list) or not raw_values:
+            raise ValueError(f"{field} values must be non-empty string arrays")
+        values = tuple(
+            value.strip()
+            for value in raw_values
+            if isinstance(value, str) and value.strip()
+        )
+        if len(values) != len(raw_values):
+            raise ValueError(f"{field} values must be non-empty string arrays")
+        parsed[item_id] = values
+    return parsed
 
 
 def _course_payload(
@@ -359,6 +402,87 @@ async def register_course_root(
     if root is None:
         raise InventoryApiError(500, "course_root_missing", "Registered course root disappeared")
     return _root_payload(root)
+
+
+@router.post("/course-roots/{root_id}/strategy-map")
+async def map_course_root_to_strategy(
+    request: Request,
+    root_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    target_slug = payload.get("targetSlug")
+    if target_slug is not None:
+        if not isinstance(target_slug, str) or not target_slug.strip():
+            raise InventoryApiError(
+                422,
+                "invalid_course_mapping",
+                "targetSlug must be a non-empty string",
+            )
+        target_slug = target_slug.strip()
+    try:
+        topic_aliases = _mapping_hints(payload, "topicAliases")
+        heading_hints = _mapping_hints(payload, "headingHints")
+    except ValueError as exc:
+        raise InventoryApiError(422, "invalid_course_mapping", str(exc)) from exc
+
+    connection = request.app.state.connection
+    repository = InventoryRepository(connection)
+    root = repository.get_root(root_id)
+    if root is None:
+        raise InventoryApiError(
+            404,
+            "course_root_not_found",
+            f"Course root {root_id} was not found",
+        )
+    if root.download_status != "validated":
+        raise InventoryApiError(
+            409,
+            "course_mapping_not_ready",
+            "course mapping requires a validated fresh package",
+        )
+
+    destination_target = target_slug or root.target_slug
+    target_exists = connection.execute(
+        "SELECT 1 FROM exam_targets WHERE target_slug=?",
+        (destination_target,),
+    ).fetchone()
+    if target_exists is None:
+        raise InventoryApiError(
+            404,
+            "target_profile_not_found",
+            f"Target {destination_target} was not found",
+        )
+    completed_scan = connection.execute(
+        """
+        SELECT 1 FROM import_runs
+        WHERE root_id=? AND state='completed'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (root_id,),
+    ).fetchone()
+    if completed_scan is None:
+        raise InventoryApiError(
+            409,
+            "course_mapping_not_ready",
+            "course root must have a completed scan before mapping",
+        )
+
+    try:
+        summary = InventoryService(repository).map_course_topics(
+            root_id,
+            target_slug=destination_target,
+            topic_aliases=topic_aliases,
+            heading_hints=heading_hints,
+        )
+    except KeyError as exc:
+        raise InventoryApiError(
+            404,
+            "course_mapping_reference_not_found",
+            str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise InventoryApiError(422, "invalid_course_mapping", str(exc)) from exc
+    return _course_mapping_payload(summary)
 
 
 @router.post("/scans", status_code=202)

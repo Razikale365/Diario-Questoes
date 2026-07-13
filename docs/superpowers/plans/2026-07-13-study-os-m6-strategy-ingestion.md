@@ -180,6 +180,7 @@ Keep today's execution first. Add a compact source label and â€œwhy this sourceâ
 - Create: next milestone plan only after real-package evidence reveals remaining work
 
 - [x] Run all Python and frontend regressions, compileall, TypeScript, build, and diff checks.
+- [x] Expose an idempotent API/UI bridge from a completed course scan into edital topic mappings; reject unvalidated, unscanned, missing-target, and malformed requests.
 - [ ] Restart and compare inventory/mapping/source-choice/week/day hashes.
 - [ ] Backup/restore the production database and replay mapping ingestion idempotently.
 - [ ] Run offline desktop/390 px execution from a real mapped regular PDF and a metadata-only TEC block.

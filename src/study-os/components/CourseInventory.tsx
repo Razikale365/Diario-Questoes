@@ -10,6 +10,7 @@ import {
   Loader2,
   RefreshCw,
   ScanSearch,
+  Waypoints,
   WifiOff,
 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ import {
   fetchLesson,
   fetchLessons,
   fetchSetupStatus,
+  mapCourseRootToStrategy,
   registerCourseRootFromPath,
   startCourseScan,
   updateLessonMapping,
@@ -94,7 +96,7 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
   const [selectedLesson, setSelectedLesson] = useState<LessonDetail | null>(null);
   const [disciplineDraft, setDisciplineDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
-  const [action, setAction] = useState<'register' | 'scan' | 'mapping' | 'refresh' | null>(null);
+  const [action, setAction] = useState<'register' | 'scan' | 'strategy-map' | 'mapping' | 'refresh' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadInventory = useCallback(async (signal?: AbortSignal): Promise<ReadyInventory> => {
@@ -233,6 +235,23 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
     setMessage(null);
     try {
       await refreshInventory();
+    } catch (error: unknown) {
+      setMessage(errorMessage(error));
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const handleStrategyMapping = async () => {
+    if (!selectedRoot) return;
+    setAction('strategy-map');
+    setMessage(null);
+    try {
+      const summary = await mapCourseRootToStrategy(selectedRoot.id, targetSlug);
+      setMessage(
+        `${summary.mappedCount} de ${summary.discoveredCount} aulas vinculadas ao edital; `
+        + `${summary.unresolvedCount} aguardam revisão no workbench.`,
+      );
     } catch (error: unknown) {
       setMessage(errorMessage(error));
     } finally {
@@ -385,6 +404,22 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
             {action === 'scan' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
             Escanear
           </button>
+          <button
+            type="button"
+            title="Criar ou atualizar vínculos entre aulas e tópicos do edital"
+            onClick={handleStrategyMapping}
+            disabled={
+              !selectedRoot
+              || selectedRoot.downloadStatus !== 'validated'
+              || !selectedRoot.lastScannedAt
+              || action !== null
+              || Boolean(activeRun && ['queued', 'running'].includes(activeRun.state))
+            }
+            className="flex h-10 items-center gap-2 rounded border border-sky-300/30 bg-sky-300/10 px-4 text-xs font-black text-sky-100 hover:bg-sky-300/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {action === 'strategy-map' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Waypoints className="h-4 w-4" />}
+            Mapear ao edital
+          </button>
         </div>
       </div>
 
@@ -393,7 +428,10 @@ export const CourseInventory: React.FC<CourseInventoryProps> = ({
           <span className="font-black text-gray-200">Raiz</span>
           <select
             value={selectedRoot?.id || ''}
-            onChange={(event) => setSelectedRootId(Number(event.target.value))}
+            onChange={(event) => {
+              setSelectedRootId(Number(event.target.value));
+              setMessage(null);
+            }}
             className="h-8 max-w-full rounded border border-white/10 bg-[#1a1a1a] px-2 font-bold text-white"
           >
             {state.roots.map((root) => <option key={root.id} value={root.id}>{root.rootPath}</option>)}
