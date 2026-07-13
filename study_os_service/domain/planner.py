@@ -16,6 +16,9 @@ PlannerSourceKind = Literal["course", "tec", "ls", "trilha", "manual", "bizu"]
 PlannerBlockKind = Literal["theory", "questions", "review"]
 PlannerRunStatus = Literal["generated", "shortfall"]
 PlannerBlockState = Literal["pending", "active", "completed", "skipped", "failed"]
+StrategySelectionSourceKind = Literal[
+    "course", "passo", "trilha", "ls", "andrety", "tec", "manual"
+]
 
 _PHASES = {"pre_edital", "pos_edital"}
 _COVERAGE_STATUSES = {
@@ -31,6 +34,22 @@ _SOURCE_KINDS = {"course", "tec", "ls", "trilha", "manual", "bizu"}
 _BLOCK_KINDS = {"theory", "questions", "review"}
 _RUN_STATUSES = {"generated", "shortfall"}
 _BLOCK_STATES = {"pending", "active", "completed", "skipped", "failed"}
+_STRATEGY_SELECTION_SOURCE_KINDS = {
+    "course",
+    "passo",
+    "trilha",
+    "ls",
+    "andrety",
+    "tec",
+    "manual",
+}
+_STRATEGY_CONTENT_ROLES = {
+    "primary_theory",
+    "review_support",
+    "question_practice",
+    "schedule_advice",
+    "incidence_signal",
+}
 
 
 def _text(value: str, label: str) -> str:
@@ -300,6 +319,65 @@ class ScoreBreakdown:
             raise ValueError("final score must be an integer")
         if not -1_000_000_000 <= self.final_score <= 1_000_000_000:
             raise ValueError("final score is outside supported bounds")
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerSourceSelection:
+    choice_run_id: int
+    choice_row_id: int
+    source_item_id: int
+    source_kind: StrategySelectionSourceKind
+    display_name: str
+    content_role: str
+    source_target_slug: str
+    lesson_id: int | None
+    material_id: int | None
+    external_url: str | None
+    external_id: str | None
+    final_score: int
+    evidence: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        _positive(self.choice_run_id, "source choice run id")
+        _positive(self.choice_row_id, "source choice row id")
+        _positive(self.source_item_id, "source item id")
+        if self.source_kind not in _STRATEGY_SELECTION_SOURCE_KINDS:
+            raise ValueError("invalid strategy selection source kind")
+        object.__setattr__(
+            self, "display_name", _text(self.display_name, "source display name")
+        )
+        if self.content_role not in _STRATEGY_CONTENT_ROLES:
+            raise ValueError("invalid strategy content role")
+        object.__setattr__(
+            self,
+            "source_target_slug",
+            _text(self.source_target_slug, "source target"),
+        )
+        for value, label in (
+            (self.lesson_id, "lesson id"),
+            (self.material_id, "material id"),
+        ):
+            if value is not None:
+                _positive(value, label)
+        if self.material_id is not None and self.lesson_id is None:
+            raise ValueError("source material requires a lesson")
+        if self.external_url is not None:
+            object.__setattr__(
+                self,
+                "external_url",
+                _url(self.external_url, "source external URL"),
+            )
+        if self.external_id is not None:
+            object.__setattr__(
+                self,
+                "external_id",
+                _text(self.external_id, "source external id"),
+            )
+        if isinstance(self.final_score, bool) or not isinstance(self.final_score, int):
+            raise ValueError("source final score must be an integer")
+        if not isinstance(self.evidence, Mapping):
+            raise ValueError("source evidence must be a mapping")
+        object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
 
 @dataclass(frozen=True, slots=True)

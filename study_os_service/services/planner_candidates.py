@@ -11,6 +11,7 @@ from typing import Any, Literal, Mapping
 
 from study_os_service.domain.planner import (
     PlannerBlockKind,
+    PlannerSourceSelection,
     PlannerSourceKind,
     TargetTopic,
 )
@@ -255,6 +256,7 @@ class CandidateDraft:
     stop_reason: CandidateStopReason | None
     evidence: Mapping[str, Any]
     adaptation_reason: str
+    source_choice: PlannerSourceSelection | None = None
 
     @property
     def executable(self) -> bool:
@@ -389,6 +391,7 @@ def _candidate(
         stop_reason=stop_reason,
         evidence=MappingProxyType(evidence),
         adaptation_reason=adaptation_reason,
+        source_choice=None,
     )
 
 

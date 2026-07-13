@@ -125,13 +125,13 @@ For each target topic/block kind, score candidate sources using:
 
 Store `source_fit`, `freshness`, `order_readiness`, `strategy_alignment`, `material_availability`, `primary_trust`, penalties, final score, chosen flag, and `displaced_by`.
 
-- [ ] Original current course beats summary-only theory.
-- [ ] A bounded review may prefer Passo/Trilha or TEC when evidence supports it.
-- [ ] High-incidence TEC metadata can reorder question practice without replacing theory authority.
-- [ ] A stale PDF loses to a current edition; missing current material remains an explicit shortfall.
-- [ ] BACEN cannot silently inherit RFB-specific law; shared economics transfers with reduced confidence.
-- [ ] Manual overrides remain editable, versioned, and visible in the explanation.
-- [ ] Commit `feat: choose Study OS sources per topic`.
+- [x] Original current course beats summary-only theory.
+- [x] A bounded review may prefer Passo/Trilha or TEC when evidence supports it.
+- [x] High-incidence TEC metadata can reorder question practice without replacing theory authority.
+- [x] A stale PDF loses to a current edition; missing current material remains an explicit shortfall.
+- [x] BACEN cannot silently inherit RFB-specific law; shared economics transfers with reduced confidence.
+- [x] Manual overrides remain editable, versioned, and visible in the explanation.
+- [x] Commit `feat: choose Study OS sources per topic`.
 
 ## Task 6: Integrate Source Choice Into Day and Week Planning
 

@@ -277,6 +277,12 @@ class StrategyRepository:
         ).fetchone()
         return _item(row) if row is not None else None
 
+    def get_source_item(self, source_item_id: int) -> StrategySourceItem | None:
+        row = self.connection.execute(
+            "SELECT * FROM strategy_source_items WHERE id=?", (source_item_id,)
+        ).fetchone()
+        return _item(row) if row is not None else None
+
     def upsert_source_item(
         self,
         *,
