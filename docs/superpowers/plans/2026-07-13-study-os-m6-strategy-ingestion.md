@@ -164,13 +164,13 @@ Every candidate receives the immutable chosen source and alternatives snapshot. 
 
 Keep today's execution first. Add a compact source label and “why this source” disclosure to each block. Put the mapping workbench under configuration: unresolved mappings first, side-by-side source alternatives, manual target/topic assignment, primary eligibility, trust, and notes.
 
-- [ ] Show fresh package/manifest status before mappings can be applied.
-- [ ] Show course vs Passo/Trilha/LS/Andréty/TEC alternatives without nested cards.
-- [ ] Make ambiguous rows editable in a dense table with save/conflict states.
-- [ ] Show source choice and displaced alternative in day/week explanations.
-- [ ] Empty BACEN source coverage gives actionable gaps without borrowing RFB-specific content.
-- [ ] Run frontend tests, TypeScript, build, desktop, and 390 px gates.
-- [ ] Commit `feat: manage Study OS strategy mappings`.
+- [x] Show fresh package/manifest status before mappings can be applied.
+- [x] Show course vs Passo/Trilha/LS/Andréty/TEC alternatives without nested cards.
+- [x] Make ambiguous rows editable in a dense table with save/conflict states.
+- [x] Show source choice and displaced alternative in day/week explanations.
+- [x] Empty BACEN source coverage gives actionable gaps without borrowing RFB-specific content.
+- [x] Run frontend tests, TypeScript, build, desktop, and 390 px gates.
+- [x] Commit `feat: manage Study OS strategy mappings`.
 
 ## Task 8: M6 Production Gate
 

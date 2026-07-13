@@ -20,6 +20,7 @@ import {
   buildAdaptiveWeekColumns,
   getPlannerWeekStart,
 } from '../domain/adaptiveView';
+import { buildSourceChoiceView } from '../domain/strategyView';
 
 interface AdaptiveWeekProps {
   targetSlug: string;
@@ -155,8 +156,9 @@ export const AdaptiveWeek: React.FC<AdaptiveWeekProps> = ({
                   <span className="text-gray-600">{column.slots.length}</span>
                 </button>
                 <div className="min-h-44">
-                  {column.slots.length ? column.slots.map((slot) => (
-                    <button
+                  {column.slots.length ? column.slots.map((slot) => {
+                    const sourceView = buildSourceChoiceView(slot.sourceChoice);
+                    return <button
                       key={slot.id}
                       type="button"
                       onClick={() => onDateChange(column.date)}
@@ -169,11 +171,13 @@ export const AdaptiveWeek: React.FC<AdaptiveWeekProps> = ({
                       <span className="mt-1 block truncate text-[11px] font-black text-white">{slot.evidence.discipline}</span>
                       <span className="block truncate text-[10px] font-semibold text-gray-500">{slot.evidence.topic}</span>
                       <span className="mt-1 block text-[9px] font-bold text-gray-600">{slot.durationMinutes} min{slot.plannedQuestions ? ` · ${slot.plannedQuestions} q.` : ''}</span>
+                      <span className="mt-1 block truncate text-[9px] font-black text-sky-300">{sourceView.label} · {sourceView.displayName}</span>
+                      {sourceView.alternatives[0] ? <span className="block truncate text-[9px] font-semibold text-gray-600">vs. {sourceView.alternatives[0].label} · {sourceView.alternatives[0].decision}</span> : null}
                       <span className={slot.evidence.adaptationReason === 'weekly_diverged_current_evidence' ? 'mt-1 block text-[9px] font-black text-amber-200' : 'mt-1 block text-[9px] font-bold text-gray-600'}>
                         {adaptationReasonLabel(slot.evidence.adaptationReason)}
                       </span>
-                    </button>
-                  )) : <p className="px-3 py-4 text-[10px] font-bold text-gray-700">Sem bloco executável</p>}
+                    </button>;
+                  }) : <p className="px-3 py-4 text-[10px] font-bold text-gray-700">Sem bloco executável</p>}
                 </div>
               </div>
             ))}

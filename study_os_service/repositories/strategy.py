@@ -16,6 +16,14 @@ from study_os_service.domain.strategy import (
 )
 
 
+class StrategyMappingVersionConflictError(RuntimeError):
+    """Raised when a manual mapping write uses stale evidence."""
+
+
+class StrategySourceVersionConflictError(RuntimeError):
+    """Raised when source settings are saved from a stale workbench row."""
+
+
 def _timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
@@ -214,6 +222,27 @@ class StrategyRepository:
             )
         )
 
+    def update_source_trust(
+        self, source_id: int, *, trust_tier: int, expected_version: int
+    ) -> StrategySource:
+        cursor = self.connection.execute(
+            """
+            UPDATE strategy_sources
+            SET trust_tier=?, version=version+1,
+                updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            WHERE id=? AND version=?
+            """,
+            (trust_tier, source_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise StrategySourceVersionConflictError(
+                "strategy source has changed"
+            )
+        saved = self.get_source(source_id)
+        if saved is None:
+            raise RuntimeError("strategy source update was not visible")
+        return saved
+
     def insert_source_item(
         self,
         *,
@@ -366,6 +395,27 @@ class StrategyRepository:
             )
         )
 
+    def list_workbench_source_items(
+        self, target_slug: str
+    ) -> tuple[StrategySourceItem, ...]:
+        return tuple(
+            _item(row)
+            for row in self.connection.execute(
+                """
+                SELECT DISTINCT items.*
+                FROM strategy_source_items AS items
+                JOIN strategy_sources AS sources ON sources.id=items.source_id
+                LEFT JOIN topic_source_mappings AS mappings
+                  ON mappings.source_item_id=items.id
+                 AND mappings.target_slug=?
+                WHERE items.active=1 AND sources.active=1
+                  AND (sources.target_slug=? OR mappings.id IS NOT NULL)
+                ORDER BY items.source_order, items.id
+                """,
+                (target_slug, target_slug),
+            )
+        )
+
     def insert_mapping(
         self,
         *,
@@ -511,6 +561,111 @@ class StrategyRepository:
                 values,
             )
         )
+
+    def list_mappings_for_source_item(
+        self, target_slug: str, source_item_id: int
+    ) -> tuple[TopicSourceMapping, ...]:
+        return tuple(
+            _mapping(row)
+            for row in self.connection.execute(
+                """
+                SELECT * FROM topic_source_mappings
+                WHERE target_slug=? AND source_item_id=?
+                ORDER BY manual_override DESC,
+                         CASE mapping_status
+                           WHEN 'approved' THEN 0
+                           WHEN 'proposed' THEN 1
+                           ELSE 2
+                         END,
+                         confidence_bp DESC, id
+                """,
+                (target_slug, source_item_id),
+            )
+        )
+
+    def save_manual_mapping(
+        self,
+        *,
+        target_slug: str,
+        target_topic_id: int,
+        source_item_id: int,
+        source_target_slug: str,
+        transfer_kind: str,
+        mapping_status: str,
+        confidence_bp: int,
+        primary_eligible: bool,
+        notes: str,
+        expected_version: int,
+    ) -> TopicSourceMapping:
+        row = self.connection.execute(
+            """
+            SELECT * FROM topic_source_mappings
+            WHERE target_slug=? AND target_topic_id=? AND source_item_id=?
+            """,
+            (target_slug, target_topic_id, source_item_id),
+        ).fetchone()
+        if row is None:
+            if expected_version != 0:
+                raise StrategyMappingVersionConflictError(
+                    "strategy mapping has changed"
+                )
+            saved = self.insert_mapping(
+                target_slug=target_slug,
+                target_topic_id=target_topic_id,
+                source_item_id=source_item_id,
+                source_target_slug=source_target_slug,
+                transfer_kind=transfer_kind,
+                mapping_status=mapping_status,
+                confidence_bp=confidence_bp,
+                primary_eligible=primary_eligible,
+                manual_override=True,
+                notes=notes,
+            )
+        else:
+            current = _mapping(row)
+            cursor = self.connection.execute(
+                """
+                UPDATE topic_source_mappings
+                SET source_target_slug=?, transfer_kind=?, mapping_status=?,
+                    confidence_bp=?, primary_eligible=?, manual_override=1,
+                    notes=?, version=version+1,
+                    updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+                WHERE id=? AND version=?
+                """,
+                (
+                    source_target_slug,
+                    transfer_kind,
+                    mapping_status,
+                    confidence_bp,
+                    int(primary_eligible),
+                    notes,
+                    current.id,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StrategyMappingVersionConflictError(
+                    "strategy mapping has changed"
+                )
+            refreshed = self.connection.execute(
+                "SELECT * FROM topic_source_mappings WHERE id=?", (current.id,)
+            ).fetchone()
+            if refreshed is None:
+                raise RuntimeError("strategy mapping update was not visible")
+            saved = _mapping(refreshed)
+
+        self.connection.execute(
+            """
+            UPDATE topic_source_mappings
+            SET mapping_status='rejected', primary_eligible=0,
+                version=version+1,
+                updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            WHERE target_slug=? AND source_item_id=? AND id<>?
+              AND mapping_status<>'rejected'
+            """,
+            (target_slug, source_item_id, saved.id),
+        )
+        return saved
 
     def insert_ingestion_run(
         self,

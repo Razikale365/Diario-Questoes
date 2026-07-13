@@ -36,10 +36,12 @@ import {
   type TargetTopic,
 } from '../api/planner';
 import { buildBlockView, buildShortfallGuidance } from '../domain/dayView';
+import { buildSourceChoiceView } from '../domain/strategyView';
 import { AdaptiveWeek } from './AdaptiveWeek';
 import { LegacyEvidenceImport } from './LegacyEvidenceImport';
 import { ReviewQueue } from './ReviewQueue';
 import { StudySessionPanel } from './StudySessionPanel';
+import { StrategyWorkbench } from './StrategyWorkbench';
 
 
 interface LegacyTaskSummary {
@@ -594,6 +596,13 @@ export const AutonomousDay: React.FC<AutonomousDayProps> = ({
               </div>
             ) : null}
 
+            <StrategyWorkbench
+              targetSlug={targetSlug}
+              topics={topics}
+              onError={setError}
+              showToast={showToast}
+            />
+
             <div className="overflow-x-auto border border-white/10">
               <table className="w-full min-w-[1050px] border-collapse text-left text-xs">
                 <thead className="bg-[#0d0d0d] text-[9px] font-black uppercase tracking-widest text-gray-500"><tr><th className="px-2 py-2">Disciplina / tópico</th><th>Status</th><th>Peso</th><th>Incid.</th><th>Tier</th><th>Dívida</th><th>Notas</th><th></th></tr></thead>
@@ -644,12 +653,13 @@ const AutonomousBlockRow: React.FC<{
   const terminal = ['completed', 'skipped', 'failed'].includes(block.state);
   const material = block.blockKind === 'theory' ? materialForBlock(block) : null;
   const tecUrl = block.evidence?.candidateEvidence.tecSourceUrl;
+  const sourceView = buildSourceChoiceView(block.sourceChoice);
   return (
     <article className={`border-l-4 py-3 pl-3 pr-1 ${blockTone[block.blockKind]}`}>
       <div className="grid min-w-0 gap-3 lg:grid-cols-[44px_minmax(0,1fr)_auto] lg:items-center">
         <div className="flex h-10 w-10 items-center justify-center rounded bg-white/5 text-gray-200"><Icon className="h-5 w-5" /></div>
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">#{block.position} · {view.kindLabel}</span><span className="text-[9px] font-black uppercase tracking-widest text-[#bef264]">{view.statusLabel}</span><span className="text-[9px] font-black uppercase tracking-widest text-gray-600">{view.sourceLabel}</span></div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">#{block.position} · {view.kindLabel}</span><span className="text-[9px] font-black uppercase tracking-widest text-[#bef264]">{view.statusLabel}</span><span className="text-[9px] font-black uppercase tracking-widest text-sky-300">{sourceView.label}</span></div>
           <p className="mt-1 text-sm font-black text-white sm:text-base">{block.discipline} <span className="font-semibold text-gray-400">· {block.topic}</span></p>
           <p className="mt-1 text-[11px] font-semibold text-gray-500">{block.durationMinutes} min{block.plannedQuestions ? ` · ${block.plannedQuestions} questões` : ''} · {view.whyNow}</p>
         </div>
@@ -660,6 +670,13 @@ const AutonomousBlockRow: React.FC<{
           {!terminal && block.blockKind !== 'theory' ? <button type="button" title="Pular bloco" aria-label="Pular bloco" onClick={() => onSubmitResult('skipped')} disabled={busy} className="flex h-8 w-8 items-center justify-center rounded border border-amber-300/20 text-amber-100 hover:bg-amber-300/10 disabled:opacity-40"><SkipForward className="h-3.5 w-3.5" /></button> : null}
         </div>
       </div>
+      <details className="ml-0 mt-2 border-t border-white/5 pt-2 lg:ml-14">
+        <summary className="cursor-pointer list-none text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-300">Por que esta fonte</summary>
+        <div className="mt-1 grid gap-1 text-[10px] font-semibold text-gray-500 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
+          <p><span className="font-black text-gray-300">{sourceView.displayName}</span> · {sourceView.reason}</p>
+          {sourceView.alternatives.length ? <p className="lg:text-right">Alternativas: {sourceView.alternatives.slice(0, 3).map((item) => `${item.label} (${item.decision})`).join(' · ')}</p> : <p className="lg:text-right">Nenhuma alternativa executável disputou este bloco.</p>}
+        </div>
+      </details>
       {!terminal && material && block.lessonId ? <div className="mt-3"><StudySessionPanel targetSlug={block.targetSlug} lessonId={block.lessonId} material={material} materialLabel="PDF original" plannerBlockId={block.id} onPlannerStateChange={onPlannerStateChange} /></div> : null}
       {resultOpen && resultDraft && !terminal ? <ResultEditor draft={resultDraft} busy={busy} onChange={onResultDraft} onSubmit={() => onSubmitResult()} /> : null}
     </article>

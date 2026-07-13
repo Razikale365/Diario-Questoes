@@ -6,6 +6,82 @@ export type TransferKind = 'target_specific' | 'shared' | 'partial';
 export type PlannerSourceKind = 'course' | 'tec' | 'ls' | 'trilha' | 'manual' | 'bizu';
 export type PlannerBlockKind = 'theory' | 'questions' | 'review';
 export type PlannerBlockState = 'pending' | 'active' | 'completed' | 'skipped' | 'failed';
+export type PlannerStrategySourceKind = 'course' | 'passo' | 'trilha' | 'ls' | 'andrety' | 'tec' | 'manual';
+export type PlannerSourceContentRole = 'primary_theory' | 'review_support' | 'question_practice' | 'schedule_advice' | 'incidence_signal';
+
+export interface PlannerSourceChoiceEvidence {
+  algorithmVersion: string;
+  sourceId: number;
+  sourceItemId: number;
+  sourceKind: PlannerStrategySourceKind;
+  displayName: string;
+  contentRole: PlannerSourceContentRole;
+  sourceTargetSlug: string;
+  targetFitBp: number;
+  transferConfidenceBp: number;
+  trustBp: number;
+  freshnessBp: number;
+  orderReadinessBp: number;
+  strategyAlignmentBp: number;
+  materialAvailabilityBp: number;
+  lowTrustPenaltyBp: number;
+  mismatchPenaltyBp: number;
+  incidenceBp: number;
+  banca: string;
+  targetBanca: string;
+  bancaFitBp: number;
+  choiceContext: Record<string, unknown>;
+  edition: string;
+  lessonId: number | null;
+  materialId: number | null;
+  materialKind: string | null;
+  externalUrl: string | null;
+  externalId: string | null;
+  mappingStatus: 'proposed' | 'approved' | 'rejected';
+  mappingConfidenceBp: number;
+  primaryEligible: boolean;
+  manualOverride: boolean;
+  transferKind: TransferKind;
+  stopReason: string | null;
+  finalScore: number;
+}
+
+export interface PlannerSourceAlternative {
+  choiceRowId: number;
+  sourceItemId: number;
+  chosen: boolean;
+  displacedByRowId: number | null;
+  stopReason: string | null;
+  finalScore: number;
+  evidence: PlannerSourceChoiceEvidence;
+}
+
+export interface PlannerChosenSource {
+  status: 'chosen';
+  choiceRunId: number;
+  choiceRowId: number;
+  sourceItemId: number;
+  sourceKind: PlannerStrategySourceKind;
+  displayName: string;
+  contentRole: PlannerSourceContentRole;
+  sourceTargetSlug: string;
+  lessonId: number | null;
+  materialId: number | null;
+  externalUrl: string | null;
+  externalId: string | null;
+  finalScore: number;
+  evidence: PlannerSourceChoiceEvidence;
+  alternatives: PlannerSourceAlternative[];
+}
+
+export interface PlannerSourceShortfall {
+  status: 'shortfall';
+  choiceRunId: number;
+  shortfallReason: string | null;
+  alternatives: PlannerSourceAlternative[];
+}
+
+export type PlannerSourceChoice = PlannerChosenSource | PlannerSourceShortfall;
 
 export interface PlannerTarget {
   targetSlug: string;
@@ -164,6 +240,7 @@ export interface PlannerCandidate {
   displacedBy: string | null;
   stopReason: string | null;
   evidence: PlannerEvidence;
+  sourceChoice?: PlannerSourceChoice | null;
   adaptationReason: string;
 }
 
@@ -193,6 +270,7 @@ export interface PlannerBlock {
   materialId?: number | null;
   scoreBreakdown?: PlannerScoreBreakdown;
   evidence?: PlannerEvidence;
+  sourceChoice?: PlannerSourceChoice | null;
   adaptationReason?: string;
 }
 
@@ -223,6 +301,7 @@ export interface PlannerWeekSlot {
   plannedQuestions: number;
   score: PlannerScoreBreakdown;
   evidence: PlannerWeekSlotEvidence;
+  sourceChoice?: PlannerSourceChoice | null;
   state: 'forecast' | 'materialized' | 'skipped';
   dayRunId: number | null;
   dayBlockId: number | null;
@@ -286,6 +365,9 @@ const sourceKinds = ['course', 'tec', 'ls', 'trilha', 'manual', 'bizu'] as const
 const blockKinds = ['theory', 'questions', 'review'] as const;
 const blockStates = ['pending', 'active', 'completed', 'skipped', 'failed'] as const;
 const weekSlotStates = ['forecast', 'materialized', 'skipped'] as const;
+const strategySourceKinds = ['course', 'passo', 'trilha', 'ls', 'andrety', 'tec', 'manual'] as const;
+const sourceContentRoles = ['primary_theory', 'review_support', 'question_practice', 'schedule_advice', 'incidence_signal'] as const;
+const mappingStatuses = ['proposed', 'approved', 'rejected'] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -473,6 +555,85 @@ export function parsePlannerEvidence(value: unknown): PlannerEvidence {
   };
 }
 
+function parseSourceChoiceEvidence(value: unknown): PlannerSourceChoiceEvidence {
+  const record = isRecord(value) ? value : invalid('source choice evidence');
+  const basisPointKeys = [
+    'targetFitBp', 'transferConfidenceBp', 'trustBp', 'freshnessBp',
+    'orderReadinessBp', 'strategyAlignmentBp', 'materialAvailabilityBp',
+    'lowTrustPenaltyBp', 'mismatchPenaltyBp', 'incidenceBp', 'bancaFitBp',
+    'mappingConfidenceBp',
+  ];
+  if (!isNonEmptyString(record.algorithmVersion)
+    || !isPositiveInteger(record.sourceId)
+    || !isPositiveInteger(record.sourceItemId)
+    || !oneOf(record.sourceKind, strategySourceKinds)
+    || !isNonEmptyString(record.displayName)
+    || !oneOf(record.contentRole, sourceContentRoles)
+    || !isNonEmptyString(record.sourceTargetSlug)
+    || !basisPointKeys.every((key) => isInteger(record[key]) && Number(record[key]) >= 0 && Number(record[key]) <= 10000)
+    || !isString(record.banca)
+    || !isString(record.targetBanca)
+    || !isRecord(record.choiceContext)
+    || !isString(record.edition)
+    || !isNullablePositiveInteger(record.lessonId)
+    || !isNullablePositiveInteger(record.materialId)
+    || !isNullableString(record.materialKind)
+    || !isNullableString(record.externalUrl)
+    || !isNullableString(record.externalId)
+    || !oneOf(record.mappingStatus, mappingStatuses)
+    || typeof record.primaryEligible !== 'boolean'
+    || typeof record.manualOverride !== 'boolean'
+    || !oneOf(record.transferKind, transferKinds)
+    || !isNullableString(record.stopReason)
+    || !isInteger(record.finalScore)) invalid('source choice evidence');
+  return record as unknown as PlannerSourceChoiceEvidence;
+}
+
+function parseSourceAlternative(value: unknown): PlannerSourceAlternative {
+  const record = isRecord(value) ? value : invalid('source alternative');
+  if (!isPositiveInteger(record.choiceRowId)
+    || !isPositiveInteger(record.sourceItemId)
+    || typeof record.chosen !== 'boolean'
+    || !isNullablePositiveInteger(record.displacedByRowId)
+    || !isNullableString(record.stopReason)
+    || !isInteger(record.finalScore)) invalid('source alternative');
+  const evidence = parseSourceChoiceEvidence(record.evidence);
+  if (evidence.sourceItemId !== record.sourceItemId || evidence.finalScore !== record.finalScore) {
+    invalid('source alternative');
+  }
+  return { ...record, evidence } as unknown as PlannerSourceAlternative;
+}
+
+export function parsePlannerSourceChoice(value: unknown): PlannerSourceChoice | null {
+  if (value === null) return null;
+  const record = isRecord(value) ? value : invalid('source choice');
+  if (!isPositiveInteger(record.choiceRunId) || !Array.isArray(record.alternatives)) {
+    invalid('source choice');
+  }
+  const alternatives = (record.alternatives as unknown[]).map(parseSourceAlternative);
+  if (record.status === 'shortfall') {
+    if (!isNullableString(record.shortfallReason)) invalid('source choice');
+    return { ...record, alternatives } as unknown as PlannerSourceShortfall;
+  }
+  if (record.status !== 'chosen'
+    || !isPositiveInteger(record.choiceRowId)
+    || !isPositiveInteger(record.sourceItemId)
+    || !oneOf(record.sourceKind, strategySourceKinds)
+    || !isNonEmptyString(record.displayName)
+    || !oneOf(record.contentRole, sourceContentRoles)
+    || !isNonEmptyString(record.sourceTargetSlug)
+    || !isNullablePositiveInteger(record.lessonId)
+    || !isNullablePositiveInteger(record.materialId)
+    || !isNullableString(record.externalUrl)
+    || !isNullableString(record.externalId)
+    || !isInteger(record.finalScore)) invalid('source choice');
+  const evidence = parseSourceChoiceEvidence(record.evidence);
+  if (evidence.sourceItemId !== record.sourceItemId || evidence.finalScore !== record.finalScore) {
+    invalid('source choice');
+  }
+  return { ...record, evidence, alternatives } as unknown as PlannerChosenSource;
+}
+
 export function parsePlannerCandidate(value: unknown): PlannerCandidate {
   const record = isRecord(value) ? value : invalid('candidate');
   if (!isPositiveInteger(record.id)
@@ -501,7 +662,15 @@ export function parsePlannerCandidate(value: unknown): PlannerCandidate {
   const evidence = parsePlannerEvidence(record.evidence);
   if (evidence.scoreEvidence.candidateKey !== record.candidateKey
     || evidence.scoreEvidence.components.finalScore !== score.finalScore) invalid('evidence');
-  return { ...record, scoreBreakdown: score, evidence } as unknown as PlannerCandidate;
+  const sourceChoice = record.sourceChoice === undefined
+    ? undefined
+    : parsePlannerSourceChoice(record.sourceChoice);
+  return {
+    ...record,
+    scoreBreakdown: score,
+    evidence,
+    ...(sourceChoice === undefined ? {} : { sourceChoice }),
+  } as unknown as PlannerCandidate;
 }
 
 export function parsePlannerBlock(value: unknown, requireCandidate = false): PlannerBlock {
@@ -535,6 +704,7 @@ export function parsePlannerBlock(value: unknown, requireCandidate = false): Pla
   if (requireCandidate) {
     parsed.scoreBreakdown = parsePlannerScore(record.scoreBreakdown);
     parsed.evidence = parsePlannerEvidence(record.evidence);
+    if (record.sourceChoice !== undefined) parsed.sourceChoice = parsePlannerSourceChoice(record.sourceChoice);
   }
   return parsed as unknown as PlannerBlock;
 }
@@ -611,6 +781,7 @@ function parsePlannerWeekSlot(value: unknown): PlannerWeekSlot {
     ...record,
     score: parsePlannerScore(record.score),
     evidence: evidence as unknown as PlannerWeekSlotEvidence,
+    ...(record.sourceChoice === undefined ? {} : { sourceChoice: parsePlannerSourceChoice(record.sourceChoice) }),
   } as unknown as PlannerWeekSlot;
 }
 

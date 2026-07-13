@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import Any, Callable
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse
 
 from study_os_service.domain.strategy import StrategySource, TopicSourceMapping
-from study_os_service.repositories.strategy import StrategyRepository
+from study_os_service.repositories.strategy import (
+    StrategyMappingVersionConflictError,
+    StrategyRepository,
+    StrategySourceVersionConflictError,
+)
 from study_os_service.services.adapters.andrety import adapt_andrety
 from study_os_service.services.adapters.estrategia_steps import (
     adapt_estrategia_steps,
@@ -18,6 +23,10 @@ from study_os_service.services.strategy_ingestion import (
     StrategyIngestionResult,
     StrategyIngestionService,
     StrategyInputBatch,
+)
+from study_os_service.services.strategy_workbench import (
+    StrategyWorkbench,
+    StrategyWorkbenchService,
 )
 
 
@@ -87,6 +96,62 @@ def _result_payload(result: StrategyIngestionResult) -> dict[str, Any]:
         "mappedCount": result.mapped_count,
         "unresolvedCount": result.unresolved_count,
         "unresolved": [dict(item) for item in result.unresolved],
+    }
+
+
+def _workbench_payload(workbench: StrategyWorkbench) -> dict[str, Any]:
+    root = workbench.package.root
+    return {
+        "targetSlug": workbench.target_slug,
+        "packageStatus": {
+            "state": workbench.package.state,
+            "rootId": root.id if root else None,
+            "packageName": root.package_name if root else None,
+            "packageId": root.package_id if root else None,
+            "downloadStatus": root.download_status if root else None,
+            "manifestPath": (
+                str(root.acquisition_manifest_path)
+                if root and root.acquisition_manifest_path
+                else None
+            ),
+            "expectedFileCount": root.expected_file_count if root else None,
+            "observedFileCount": root.observed_file_count if root else None,
+            "failedItemCount": root.failed_item_count if root else None,
+            "validated": workbench.package.validated,
+        },
+        "items": [
+            {
+                "sourceItemId": row.item.id,
+                "sourceId": row.source.id,
+                "sourceTargetSlug": row.source.target_slug,
+                "sourceKind": row.source.source_kind,
+                "sourceDisplayName": row.source.display_name,
+                "trustTier": row.source.trust_tier,
+                "edition": row.source.edition,
+                "sourceVersion": row.source.version,
+                "discipline": row.item.discipline,
+                "topicHint": row.item.topic_hint,
+                "sourceOrder": row.item.source_order,
+                "contentRole": row.item.content_role,
+                "lessonId": row.item.lesson_id,
+                "materialId": row.item.material_id,
+                "externalUrl": row.item.external_url,
+                "externalId": row.item.external_id,
+                "incidenceBp": row.item.incidence_bp,
+                "banca": row.item.banca,
+                "itemVersion": row.item.version,
+                "resolutionState": row.resolution_state,
+                "mappings": [
+                    {
+                        **_mapping_payload(mapping.mapping),
+                        "targetDiscipline": mapping.topic.discipline,
+                        "targetTopic": mapping.topic.topic,
+                    }
+                    for mapping in row.mappings
+                ],
+            }
+            for row in workbench.items
+        ],
     }
 
 
@@ -189,3 +254,68 @@ async def list_mappings(
         target_slug.strip(), status
     )
     return {"items": [_mapping_payload(item) for item in items]}
+
+
+@router.get("/strategy/workbench")
+async def get_workbench(
+    request: Request,
+    target_slug: str = Query(alias="targetSlug", min_length=1),
+) -> dict[str, Any]:
+    try:
+        workbench = StrategyWorkbenchService(
+            request.app.state.connection
+        ).get(target_slug.strip())
+    except KeyError as exc:
+        raise StrategyApiError(
+            404, "strategy_target_not_found", str(exc).strip("'")
+        ) from exc
+    except ValueError as exc:
+        raise StrategyApiError(
+            422, "invalid_strategy_workbench", str(exc)
+        ) from exc
+    return _workbench_payload(workbench)
+
+
+@router.put("/strategy/source-items/{source_item_id}/mapping")
+async def save_source_item_mapping(
+    request: Request,
+    source_item_id: int,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        mapping = StrategyWorkbenchService(
+            request.app.state.connection
+        ).save_mapping(
+            source_item_id=source_item_id,
+            target_slug=payload.get("targetSlug"),
+            target_topic_id=payload.get("targetTopicId"),
+            expected_version=payload.get("expectedVersion"),
+            expected_source_version=payload.get("expectedSourceVersion"),
+            source_trust_tier=payload.get("sourceTrustTier"),
+            mapping_status=payload.get("mappingStatus"),
+            transfer_kind=payload.get("transferKind"),
+            confidence_bp=payload.get("confidenceBp"),
+            primary_eligible=payload.get("primaryEligible"),
+            notes=payload.get("notes"),
+        )
+    except StrategyMappingVersionConflictError as exc:
+        raise StrategyApiError(
+            409, "stale_strategy_mapping", str(exc)
+        ) from exc
+    except StrategySourceVersionConflictError as exc:
+        raise StrategyApiError(
+            409, "stale_strategy_source", str(exc)
+        ) from exc
+    except KeyError as exc:
+        raise StrategyApiError(
+            404, "strategy_mapping_not_found", str(exc).strip("'")
+        ) from exc
+    except sqlite3.IntegrityError as exc:
+        raise StrategyApiError(
+            409, "strategy_mapping_conflict", "strategy mapping conflicts with current data"
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise StrategyApiError(
+            422, "invalid_strategy_mapping", str(exc)
+        ) from exc
+    return _mapping_payload(mapping)

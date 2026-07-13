@@ -10,6 +10,7 @@ import {
   generatePlannerDay,
   parsePlannerDay,
   parsePlannerScoreboard,
+  parsePlannerSourceChoice,
   parsePlannerTargetList,
   parseTargetTopicList,
   refreshPlannerDay,
@@ -231,6 +232,69 @@ const run = {
 
 const day = { run, blocks: [block], scoreboard: [candidate] } as const;
 
+const sourceChoiceEvidence = {
+  algorithmVersion: 'm6-source-choice-v2',
+  sourceId: 81,
+  sourceItemId: 82,
+  sourceKind: 'course',
+  displayName: 'Curso regular 2026',
+  contentRole: 'primary_theory',
+  sourceTargetSlug: 'bacen_economia_financas',
+  targetFitBp: 10000,
+  transferConfidenceBp: 10000,
+  trustBp: 10000,
+  freshnessBp: 10000,
+  orderReadinessBp: 7500,
+  strategyAlignmentBp: 10000,
+  materialAvailabilityBp: 10000,
+  lowTrustPenaltyBp: 0,
+  mismatchPenaltyBp: 0,
+  incidenceBp: 9200,
+  banca: 'CEBRASPE',
+  targetBanca: 'CEBRASPE',
+  bancaFitBp: 10000,
+  choiceContext: { coverageStatus: 'weak' },
+  edition: '2026',
+  lessonId: 7,
+  materialId: 13,
+  materialKind: 'original',
+  externalUrl: null,
+  externalId: null,
+  mappingStatus: 'approved',
+  mappingConfidenceBp: 10000,
+  primaryEligible: true,
+  manualOverride: false,
+  transferKind: 'target_specific',
+  stopReason: null,
+  finalScore: 111200,
+} as const;
+
+const sourceChoice = {
+  status: 'chosen',
+  choiceRunId: 91,
+  choiceRowId: 92,
+  sourceItemId: 82,
+  sourceKind: 'course',
+  displayName: 'Curso regular 2026',
+  contentRole: 'primary_theory',
+  sourceTargetSlug: 'bacen_economia_financas',
+  lessonId: 7,
+  materialId: 13,
+  externalUrl: null,
+  externalId: null,
+  finalScore: 111200,
+  evidence: sourceChoiceEvidence,
+  alternatives: [{
+    choiceRowId: 92,
+    sourceItemId: 82,
+    chosen: true,
+    displacedByRowId: null,
+    stopReason: null,
+    finalScore: 111200,
+    evidence: sourceChoiceEvidence,
+  }],
+} as const;
+
 const jsonResponse = (value: unknown, status = 200) => new Response(
   JSON.stringify(value),
   { status, headers: { 'Content-Type': 'application/json' } },
@@ -242,6 +306,17 @@ test('planner parsers accept complete target, topic, day, and scoreboard DTOs', 
   assert.deepEqual(parsePlannerDay(day), day);
   assert.deepEqual(parsePlannerScoreboard({ items: [candidate] }).items[0], candidate);
   assert.deepEqual(parsePlannerWeek(week), week);
+});
+
+test('planner parser preserves auditable source choice evidence', () => {
+  assert.deepEqual(parsePlannerSourceChoice(sourceChoice), sourceChoice);
+  assert.throws(
+    () => parsePlannerSourceChoice({
+      ...sourceChoice,
+      evidence: { ...sourceChoiceEvidence, trustBp: 10001 },
+    }),
+    /source choice evidence/i,
+  );
 });
 
 test('week generation, lookup, and refresh requests are exact', async (context) => {
