@@ -2,6 +2,8 @@
 
 Decision date: 2026-07-11
 
+Last acquisition review: 2026-07-13
+
 ## Decision
 
 Select the currently owned **Receita Federal (Auditor Fiscal) Pacotaco - Pacote Teorico + Pacote Passo Estrategico** as the first production course source for Study OS.
@@ -24,9 +26,11 @@ The package has not yet been recorded as downloaded or validated. The downloader
 
 The previous Fiscal Brain integration expected an external `Estrategia Downloader Pro` project at `C:\Docker\Cursos Estratégia`.
 
-An auditable downloader source is checked out separately at `C:\Docker\Cursos Estratégia\AutoDownloadEstrategiaConcurso`, upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`. Its reviewed code uses Selenium with manual login and does not request or persist credentials. A package-scoped PDF-only adapter was added and tested in that separate repository at commit `bb2c490`; it uses current package/course/lesson URL contracts, validates `%PDF-`, records failures, and emits the canonical acquisition manifest.
+An auditable downloader source is checked out separately at `C:\Docker\Cursos Estratégia\AutoDownloadEstrategiaConcurso`, upstream commit `2af5b839cbcc48a466bed615931ef11a9f7290b0`. Its reviewed code uses Selenium with manual login and does not request or persist credentials. A package-scoped PDF-only adapter was added and tested in that separate repository at commit `bb2c490`; its current checkpoint is `d8b6f8b`. It uses current package/course/lesson URL contracts, tolerates transient Edge login URLs, validates `%PDF-`, records failures, and emits the canonical acquisition manifest. The separate downloader regression has 21 passing tests.
 
-The first authenticated run was launched toward `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-11`. This is execution evidence only, not download completion: status remains `selected` until the process finishes and the root contains a consistent manifest and observed PDF count.
+The latest completed attempt (`run3`) targeted `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-13-run3`. It timed out after 1,800 seconds waiting for the authenticated dashboard, downloaded zero PDFs, and emitted no manifest. This is explicit failure evidence, not a completed acquisition.
+
+A new clean attempt (`run4`) was launched on 2026-07-13 toward `C:\Docker\Cursos Estratégia\Downloads\RFB-Auditor-249654-2026-07-13-run4` with a one-hour manual-login window. Its stdout/stderr logs are `package-249654-run4.stdout.log` and `package-249654-run4.stderr.log` in the parent Downloads directory. Status remains `selected` unless that process finishes with a consistent manifest, nonzero observed PDF count, and zero unresolved failures.
 
 ## Why This Package
 
@@ -66,8 +70,8 @@ The downloader run also leaves `.study-os-download.json` inside the fresh packag
 
 ## Acquisition Gate
 
-1. Finish the package-scoped PDF-only adapter in the dedicated downloader directory and test its selectors without storing credentials.
-2. Record the adapter/upstream versions and verify authenticated access to package `249654`.
+1. Package-scoped PDF-only adapter is implemented and covered by 21 tests without storing credentials.
+2. Adapter/upstream versions are recorded; complete a fresh authenticated session for package `249654`.
 3. Start a new acquisition id and create a previously nonexistent stable destination root.
 4. Download all available PDFs from package `249654` into that root.
 5. Count PDFs independently and record download failures.

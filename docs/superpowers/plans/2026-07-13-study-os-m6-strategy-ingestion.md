@@ -179,13 +179,13 @@ Keep today's execution first. Add a compact source label and “why this source�
 - Update: `docs/study-os/course-package-decision.md`
 - Create: next milestone plan only after real-package evidence reveals remaining work
 
-- [ ] Run all Python and frontend regressions, compileall, TypeScript, build, and diff checks.
+- [x] Run all Python and frontend regressions, compileall, TypeScript, build, and diff checks.
 - [ ] Restart and compare inventory/mapping/source-choice/week/day hashes.
 - [ ] Backup/restore the production database and replay mapping ingestion idempotently.
 - [ ] Run offline desktop/390 px execution from a real mapped regular PDF and a metadata-only TEC block.
 - [ ] Confirm no proprietary TEC content appears in API payloads, SQLite, logs, or browser state.
 - [ ] Compare at least one topic where course order, Passo advice, LS/trilha, Andréty, and TEC incidence disagree; preserve the full explanation table.
-- [ ] Keep BACEN gaps explicit and show transfer from fiscal preparation only where approved.
+- [x] Keep BACEN gaps explicit and show transfer from fiscal preparation only where approved.
 - [ ] Commit `docs: close Study OS strategy ingestion gate`.
 
 ## M6 Acceptance

@@ -109,3 +109,27 @@ Plan: `docs/superpowers/plans/2026-07-12-study-os-m5-adaptive-review-tec.md`
 - The Home gate rendered a persisted BACEN shortfall day plus a 15-slot weekly shell at 1440px and 390px. The document had no horizontal overflow, external request, console error, or proprietary fixture content; the mobile week used contained horizontal scrolling.
 - Full current regression: 326 Python tests passed with 1 intentional skip, 163 frontend tests passed, Python compileall and TypeScript passed, and the production build completed. The remaining Vite large-chunk warning is pre-existing and non-fatal.
 - M2 fresh-package Tasks 1, 8, and 9 remain open. M5 fixture, seed, and browser evidence does not validate package `249654` or any old fiscal directory.
+
+## M6: Strategy Ingestion and Source Choice
+
+Plan: `docs/superpowers/plans/2026-07-13-study-os-m6-strategy-ingestion.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Fresh package 249654 acquisition | in progress | external `bb2c490` | external `d8b6f8b` | 21 downloader tests; run3 login timeout; clean run4 active | no credentials stored; real manifest still absent |
+| 2. Strategy source schema v8 | complete | `ca8ba23` | `f94b7d5` | migration/domain/repository tests; v1-v7 preservation | metadata-only and immutable-choice constraints approved |
+| 3. Course lesson to edital mapping | complete | `f94b7d5` | `46a8667` | exact/alias/token/transfer/idempotency fixtures | ambiguous and target-specific mappings remain non-executable |
+| 4. Strategy metadata ingestion | complete | `46a8667` | `3edcc67` | Estratégia/LS/Trilha/Andréty/TEC API and adapter tests | proprietary TEC fields rejected recursively |
+| 5. Deterministic source choice | complete | `3edcc67` | `58b2fc2` | trust/freshness/order/target/banca/availability tests | current course, Passo review, TEC practice, and displacement evidence approved |
+| 6. Day/week source integration | complete | `58b2fc2` | `261f755` | full no-LS day, named shortfall, refresh and immutable divergence tests | source choices frozen into day/week evidence |
+| 7. Home strategy workbench | complete | `261f755` | `d47bcd2` | 170 frontend tests; tsc; build; desktop/390px; console clean | today-first UI, optimistic mapping/source trust, and target-specific gaps approved |
+| 8. M6 production gate | in progress | `d47bcd2` | pending | 365 pytest, 1 skipped; 170 frontend; compileall, tsc, build; schema-v8 restart/backup and fixture restore | blocked only on authenticated real-package evidence and real-PDF/offline comparison |
+
+### M6 Current Evidence
+
+- Schema-v8 live service was backed up to `data/study-os/backups/study-os-20260713T140528Z.sqlite3`, restarted on port 4317, and returned healthy database/backup status.
+- The permanent strategy durability regression hashes sources, source items, mappings, ingestion runs, source-choice runs/rows, week slots, day candidates, and blocks; it verifies restart equality, idempotent LS replay, backup integrity, and restore equality.
+- The source mapping workbench exposes package state, unresolved mappings, competing mappings, target/topic assignment, editable trust, transfer type, status, primary eligibility, and notes. Mapping and shared source versions save atomically and stale source evidence rolls back the mapping write.
+- Desktop at 1280x720 and mobile at 390x844 had no page-level horizontal overflow or console errors. Dense tables retain their own horizontal scrolling; the mobile command center still starts with today's target and blocks.
+- BACEN with no package/source rows displays a BACEN-specific acquisition gap. Cross-target API tests reject labeling an RFB source as BACEN-specific.
+- Package `249654` is still `selected`, not `downloaded` or `validated`. Run3 produced zero PDFs/no manifest after login timeout; run4 is the active clean retry. No fixture or empty production table is being presented as real-package acceptance.
