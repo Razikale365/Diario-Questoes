@@ -32,7 +32,7 @@ def test_cutover_status_is_safe_when_command_layer_is_empty(tmp_path: Path):
 
     assert response.status_code == 200
     assert response.json() == {
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "ownership": "sqlite",
         "activeTarget": None,
         "migrations": [],

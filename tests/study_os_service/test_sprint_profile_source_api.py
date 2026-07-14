@@ -37,9 +37,9 @@ def test_sprint_config_bootstraps_official_sefaz_profile(tmp_path: Path):
     assert payload["goals"] == {
         "p1Floor": 48,
         "p1Low": 48,
-        "p1High": 52,
+        "p1High": 64,
         "p2Low": 63,
-        "p2High": 67,
+        "p2High": 70,
         "discursiveLow": 75,
         "discursiveHigh": 82,
     }

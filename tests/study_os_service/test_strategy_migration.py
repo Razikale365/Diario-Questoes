@@ -75,7 +75,7 @@ def test_version_seven_upgrades_to_strategy_schema_without_row_loss(tmp_path: Pa
         connection.commit()
 
         assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
-        assert CURRENT_SCHEMA_VERSION == 10
+        assert CURRENT_SCHEMA_VERSION == 11
         assert STRATEGY_TABLES <= table_names(connection)
         assert connection.execute(
             "SELECT COUNT(*) FROM target_topics"

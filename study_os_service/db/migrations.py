@@ -1221,6 +1221,194 @@ CREATE TABLE planner_blocks (
             "CREATE INDEX idx_sprint_receipts_target_kind ON sprint_mutation_receipts(target_slug, mutation_kind, created_at);",
         ),
     ),
+    (
+        11,
+        (
+            """
+            CREATE TABLE sprint_evidence_import_batches (
+              batch_id TEXT PRIMARY KEY CHECK (length(trim(batch_id)) > 0),
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              origin TEXT NOT NULL CHECK (length(trim(origin)) > 0),
+              payload_hash TEXT NOT NULL CHECK (
+                length(payload_hash)=64
+                AND payload_hash=lower(payload_hash)
+                AND payload_hash NOT GLOB '*[^0-9a-f]*'
+              ),
+              item_count INTEGER NOT NULL CHECK (item_count >= 0),
+              inserted_count INTEGER NOT NULL CHECK (inserted_count >= 0),
+              duplicate_count INTEGER NOT NULL CHECK (duplicate_count >= 0),
+              conflict_count INTEGER NOT NULL CHECK (conflict_count >= 0),
+              report_json TEXT NOT NULL CHECK (
+                json_valid(report_json) AND json_type(report_json)='object'
+              ),
+              imported_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            );
+            """,
+            """
+            CREATE TABLE sprint_performance_observations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              batch_id TEXT NOT NULL
+                REFERENCES sprint_evidence_import_batches(batch_id) ON DELETE RESTRICT,
+              subject_profile_id INTEGER
+                REFERENCES exam_subject_profiles(id) ON DELETE RESTRICT,
+              subject_key TEXT,
+              discipline TEXT NOT NULL CHECK (length(trim(discipline)) > 0),
+              topic_hint TEXT NOT NULL DEFAULT '',
+              observed_on TEXT NOT NULL CHECK (
+                length(observed_on)=10 AND date(observed_on)=observed_on
+              ),
+              origin TEXT NOT NULL CHECK (length(trim(origin)) > 0),
+              source_record_id TEXT NOT NULL
+                CHECK (length(trim(source_record_id)) > 0),
+              source_revision TEXT NOT NULL
+                CHECK (length(trim(source_revision)) > 0),
+              source_updated_at TEXT NOT NULL CHECK (length(source_updated_at) >= 20),
+              measurement_type TEXT NOT NULL CHECK (measurement_type IN (
+                'full_exam','sectional_mock','unseen_set','mixed_set',
+                'error_review','ls_percentage','sprint_action','baseline'
+              )),
+              exam_board TEXT NOT NULL DEFAULT '',
+              correct_count INTEGER
+                CHECK (correct_count IS NULL OR correct_count >= 0),
+              wrong_count INTEGER
+                CHECK (wrong_count IS NULL OR wrong_count >= 0),
+              doubt_count INTEGER NOT NULL DEFAULT 0 CHECK (doubt_count >= 0),
+              percentage_bp INTEGER NOT NULL CHECK (percentage_bp BETWEEN 0 AND 10000),
+              transfer_scope TEXT NOT NULL DEFAULT 'content' CHECK (
+                transfer_scope IN ('content','method','trap_pattern')
+              ),
+              transferability_bp INTEGER NOT NULL DEFAULT 10000
+                CHECK (transferability_bp BETWEEN 0 AND 10000),
+              content_hash TEXT NOT NULL CHECK (
+                length(content_hash)=64
+                AND content_hash=lower(content_hash)
+                AND content_hash NOT GLOB '*[^0-9a-f]*'
+              ),
+              provenance_json TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(provenance_json) AND json_type(provenance_json)='object'
+              ),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (target_slug, origin, source_record_id, source_revision),
+              CHECK ((correct_count IS NULL) = (wrong_count IS NULL)),
+              CHECK (correct_count IS NULL OR correct_count + wrong_count > 0),
+              CHECK (
+                correct_count IS NULL OR
+                percentage_bp = ROUND(
+                  10000.0 * correct_count / (correct_count + wrong_count)
+                )
+              ),
+              CHECK (
+                correct_count IS NULL OR
+                doubt_count <= correct_count + wrong_count
+              ),
+              CHECK (subject_key IS NULL OR length(trim(subject_key)) > 0)
+            );
+            """,
+            """
+            CREATE TABLE source_plan_cycles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              source_kind TEXT NOT NULL CHECK (source_kind IN ('ls','trilha','manual')),
+              plan_label TEXT NOT NULL CHECK (length(trim(plan_label)) > 0),
+              meta_number INTEGER CHECK (meta_number IS NULL OR meta_number >= 0),
+              released_at TEXT NOT NULL CHECK (length(released_at) >= 20),
+              starts_on TEXT NOT NULL CHECK (
+                length(starts_on)=10 AND date(starts_on)=starts_on
+              ),
+              ends_on TEXT NOT NULL CHECK (
+                length(ends_on)=10 AND date(ends_on)=ends_on
+              ),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              imported_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (target_slug, source_kind, plan_label),
+              CHECK (starts_on <= ends_on),
+              CHECK (date(released_at) <= ends_on)
+            );
+            """,
+            """
+            ALTER TABLE source_plan_tasks ADD COLUMN source_cycle_id INTEGER
+              REFERENCES source_plan_cycles(id) ON DELETE RESTRICT;
+            """,
+            """
+            CREATE TABLE source_plan_backlog_candidates (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              source_cycle_id INTEGER NOT NULL
+                REFERENCES source_plan_cycles(id) ON DELETE RESTRICT,
+              source_plan_task_id INTEGER NOT NULL UNIQUE
+                REFERENCES source_plan_tasks(id) ON DELETE RESTRICT,
+              reason TEXT NOT NULL CHECK (reason='cycle_closed_pending'),
+              return_score_milli INTEGER NOT NULL CHECK (return_score_milli >= 0),
+              state TEXT NOT NULL DEFAULT 'candidate' CHECK (
+                state IN ('candidate','recovered','dismissed')
+              ),
+              discovered_on TEXT NOT NULL CHECK (
+                length(discovered_on)=10 AND date(discovered_on)=discovered_on
+              ),
+              recovered_on TEXT CHECK (
+                recovered_on IS NULL OR
+                (length(recovered_on)=10 AND date(recovered_on)=recovered_on)
+              ),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              CHECK (
+                (state='recovered' AND recovered_on IS NOT NULL) OR
+                (state!='recovered' AND recovered_on IS NULL)
+              )
+            );
+            """,
+            """
+            UPDATE exam_sprint_configs
+            SET p1_goal_high=64,
+                p2_goal_high=70,
+                version=version+1,
+                updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+            WHERE target_slug='sefaz_ce'
+              AND p1_floor_questions=48
+              AND p1_goal_low=48
+              AND p1_goal_high=52
+              AND p2_goal_low=63
+              AND p2_goal_high=67;
+            """,
+            """
+            CREATE INDEX idx_sprint_evidence_latest
+              ON sprint_performance_observations(
+                target_slug, origin, source_record_id,
+                source_updated_at DESC, id DESC
+              );
+            """,
+            """
+            CREATE INDEX idx_sprint_evidence_subject_date
+              ON sprint_performance_observations(
+                target_slug, subject_key, observed_on DESC, id DESC
+              );
+            """,
+            """
+            CREATE INDEX idx_source_plan_cycle_date
+              ON source_plan_cycles(target_slug, starts_on, ends_on, id);
+            """,
+            """
+            CREATE INDEX idx_source_plan_tasks_cycle
+              ON source_plan_tasks(source_cycle_id, status, source_order);
+            """,
+            """
+            CREATE INDEX idx_source_plan_backlog_state
+              ON source_plan_backlog_candidates(target_slug, state, return_score_milli DESC, id);
+            """,
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
