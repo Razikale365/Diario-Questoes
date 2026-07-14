@@ -239,7 +239,7 @@ async def import_source_plan(
 @router.post("/sprints/evidence/import", status_code=201)
 async def import_sprint_evidence(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: Any = Body(default=None),
 ) -> dict[str, Any]:
     try:
         return SprintEvidenceService(request.app.state.connection).import_batch(

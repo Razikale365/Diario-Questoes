@@ -152,6 +152,42 @@ def test_dry_run_uses_real_validation_but_rolls_back_every_write(
     assert _stored_counts(client) == (0, 0)
 
 
+def test_dry_run_rolls_back_profile_bootstrap_for_a_seed_only_target(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as test_client:
+        seeded = test_client.post(
+            "/api/v1/planner/targets/seed",
+            json={"targetSlugs": ["sefaz_ce"]},
+        )
+        assert seeded.status_code == 201
+
+        preview = _import(
+            test_client,
+            _batch(batch_id="seed-only-preview", dry_run=True),
+        )
+
+        connection = connect_database(
+            test_client.app.state.settings.database_path
+        )
+        try:
+            durable_counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "exam_subject_profiles",
+                    "exam_sprint_configs",
+                    "sprint_evidence_import_batches",
+                    "sprint_performance_observations",
+                )
+            )
+        finally:
+            connection.close()
+
+    assert preview.status_code == 201, preview.text
+    assert preview.json()["insertedCount"] == 1
+    assert durable_counts == (0, 0, 0, 0)
+
+
 def test_dry_run_flag_is_not_part_of_the_batch_hash(
     client: TestClient,
 ):
@@ -471,6 +507,18 @@ def test_batch_rejects_non_allowlisted_top_level_keys(client: TestClient):
     payload["note"] = "must not enter the aggregate ledger"
 
     response = _import(client, payload)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_sprint_evidence"
+    assert _stored_counts(client) == (0, 0)
+
+
+@pytest.mark.parametrize("invalid_root", [[], "not-an-object", None])
+def test_invalid_json_root_uses_the_stable_422_contract(
+    client: TestClient,
+    invalid_root: Any,
+):
+    response = client.post(EVIDENCE_IMPORT_PATH, json=invalid_root)
 
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_sprint_evidence"

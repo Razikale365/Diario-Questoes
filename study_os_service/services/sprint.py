@@ -227,17 +227,25 @@ class SprintProfileService:
         self.repository = SprintRepository(connection)
 
     def bootstrap(self, target_slug: str) -> tuple[ExamSprintConfig, tuple[Any, ...]]:
-        if not self.repository.target_exists(target_slug):
-            raise SprintTargetNotFoundError(target_slug)
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            if target_slug == "sefaz_ce":
-                self.repository.ensure_subjects(OFFICIAL_SEFAZ_SUBJECTS)
-                self.repository.ensure_config(DEFAULT_SEFAZ_CONFIG)
+            result = self.bootstrap_in_transaction(target_slug)
             self.connection.commit()
+            return result
         except Exception:
             self.connection.rollback()
             raise
+
+    def bootstrap_in_transaction(
+        self, target_slug: str
+    ) -> tuple[ExamSprintConfig, tuple[Any, ...]]:
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active profile transaction")
+        if not self.repository.target_exists(target_slug):
+            raise SprintTargetNotFoundError(target_slug)
+        if target_slug == "sefaz_ce":
+            self.repository.ensure_subjects(OFFICIAL_SEFAZ_SUBJECTS)
+            self.repository.ensure_config(DEFAULT_SEFAZ_CONFIG)
         config = self.repository.get_config(target_slug)
         if config is None:
             raise ValueError(f"target {target_slug} has no sprint configuration")

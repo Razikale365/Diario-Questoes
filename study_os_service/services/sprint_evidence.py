@@ -332,14 +332,19 @@ class SprintEvidenceService:
             for item in raw_observations
         )
 
-        _, subjects = SprintProfileService(self.connection).bootstrap(target_slug)
-        mapped = tuple(_map_observation(item, subjects) for item in observations)
-        observations = tuple(item for item, _match in mapped)
-        matches = tuple(match for _item, match in mapped)
-        payload_hash = _batch_hash(target_slug, batch_id, origin, observations)
-
         self.connection.execute("BEGIN IMMEDIATE")
         try:
+            _, subjects = SprintProfileService(
+                self.connection
+            ).bootstrap_in_transaction(target_slug)
+            mapped = tuple(
+                _map_observation(item, subjects) for item in observations
+            )
+            observations = tuple(item for item, _match in mapped)
+            matches = tuple(match for _item, match in mapped)
+            payload_hash = _batch_hash(
+                target_slug, batch_id, origin, observations
+            )
             existing_batch = self.repository.get_batch(batch_id)
             if existing_batch is not None:
                 if existing_batch["payload_hash"] != payload_hash:
