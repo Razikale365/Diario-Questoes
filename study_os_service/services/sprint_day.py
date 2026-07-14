@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import sqlite3
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from study_os_service.domain.sprint import ExamSprintConfig, ExamSubjectProfile
@@ -24,6 +25,11 @@ from study_os_service.services.sprint_evidence import SprintEvidenceService
 from study_os_service.services.sprint_projection import (
     SprintProjectionService,
     projection_document,
+)
+from study_os_service.services.source_plan_cycles import (
+    SourcePlanCycleService,
+    backlog_document,
+    cycle_document,
 )
 
 
@@ -204,15 +210,6 @@ class SprintDayService:
             completed_source_ids = self.repository.resolved_source_task_ids_for_day(
                 target_slug, prepared["plan_date"]
             )
-        source_tasks = tuple(
-            task
-            for task in self.repository.list_source_tasks(
-                target_slug,
-                scheduled_date=prepared["plan_date"],
-                include_inactive=False,
-            )
-            if task.id not in completed_source_ids
-        )
         projection = SprintProjectionService(self.connection).project(
             target_slug,
             prepared["plan_date"],
@@ -227,6 +224,19 @@ class SprintDayService:
             projection_origin = "manual"
         subject_projections = {
             subject.subject_key: subject for subject in projection.subjects
+        }
+        eligibility = SourcePlanCycleService(self.connection).eligible_tasks(
+            target_slug,
+            prepared["plan_date"],
+            subject_projections,
+        )
+        source_tasks = tuple(
+            item.task
+            for item in eligibility
+            if item.task.id not in completed_source_ids
+        )
+        eligibility_by_task = {
+            item.task.id: item for item in eligibility
         }
         draft = self.engine.generate(
             config=effective_config,
@@ -272,6 +282,22 @@ class SprintDayService:
                 score_snapshot=score_snapshot,
             )
             for position, action in enumerate(draft.actions, start=1):
+                context = (
+                    eligibility_by_task.get(action.source_plan_task_id)
+                    if action.source_plan_task_id is not None
+                    else None
+                )
+                if context is not None:
+                    action = replace(
+                        action,
+                        evidence=MappingProxyType(
+                            dict(action.evidence)
+                            | {
+                                "cycle": cycle_document(context.cycle),
+                                "backlog": backlog_document(context.backlog),
+                            }
+                        ),
+                    )
                 saved_action = self.repository.insert_action(
                     run_id=run["id"],
                     target_slug=target_slug,
@@ -337,6 +363,13 @@ class SprintDayService:
             SprintEvidenceService(
                 self.connection
             ).append_action_result_in_transaction(saved)
+            if saved["source_plan_task_id"] is not None and saved["state"] == "completed":
+                SourcePlanCycleService(
+                    self.connection
+                ).mark_recovered_in_transaction(
+                    saved["source_plan_task_id"],
+                    date.fromisoformat(saved["plan_date"]),
+                )
             response = self._action_document(saved) | {"replayed": False}
             self.repository.save_receipt(
                 idempotency_key=receipt_key,

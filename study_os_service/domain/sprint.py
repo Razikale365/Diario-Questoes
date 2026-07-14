@@ -154,6 +154,7 @@ class SourcePlanTask:
     linked_study_task_id: str | None
     provenance: dict[str, object]
     version: int
+    source_cycle_id: int | None = None
 
     @property
     def mapping_status(self) -> str:

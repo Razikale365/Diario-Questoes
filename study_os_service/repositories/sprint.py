@@ -89,6 +89,7 @@ def _source_task(row: sqlite3.Row) -> SourcePlanTask:
         linked_study_task_id=row["linked_study_task_id"],
         provenance=json.loads(row["provenance_json"]),
         version=row["version"],
+        source_cycle_id=row["source_cycle_id"],
     )
 
 
@@ -295,8 +296,9 @@ class SprintRepository:
                   meta_number, scheduled_date, source_order, discipline,
                   subject_key, topic_hint, task_kind, description, details,
                   material_hint, estimated_minutes, spent_minutes, relevance,
-                  status, performance_bp, linked_study_task_id, provenance_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  status, performance_bp, linked_study_task_id, provenance_json,
+                  source_cycle_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._source_values(values),
             )
@@ -314,8 +316,9 @@ class SprintRepository:
               discipline=?, subject_key=?, topic_hint=?, task_kind=?,
               description=?, details=?, material_hint=?, estimated_minutes=?,
               spent_minutes=?, relevance=?, status=?, performance_bp=?,
-              linked_study_task_id=?, provenance_json=?, version=version+1,
-              updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+               linked_study_task_id=?, provenance_json=?, version=version+1,
+               source_cycle_id=?,
+               updated_at=(STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
             WHERE id=?
             """,
             (
@@ -337,6 +340,7 @@ class SprintRepository:
                 values["performance_bp"],
                 values["linked_study_task_id"],
                 json.dumps(values["provenance"], ensure_ascii=True, sort_keys=True),
+                values["source_cycle_id"],
                 existing.id,
             ),
         )
@@ -373,6 +377,7 @@ class SprintRepository:
             values["performance_bp"],
             values["linked_study_task_id"],
             json.dumps(values["provenance"], ensure_ascii=True, sort_keys=True),
+            values["source_cycle_id"],
         )
 
     def list_source_tasks(

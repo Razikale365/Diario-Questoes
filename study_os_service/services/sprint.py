@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 import hashlib
 import json
 import sqlite3
@@ -9,6 +9,10 @@ from typing import Any, Mapping
 from study_os_service.domain.sprint import ExamSprintConfig, SourcePlanTask
 from study_os_service.repositories.sprint import SprintRepository
 from study_os_service.services.subject_matching import match_subject
+from study_os_service.services.source_plan_cycles import (
+    SourcePlanCycleService,
+    cycle_document,
+)
 
 
 OFFICIAL_EDITAL_URL = (
@@ -280,10 +284,31 @@ class SourcePlanService:
         updated_count = 0
         unresolved_count = 0
         saved_ids: list[int] = []
+        cycle_overrun_count = 0
 
         self.connection.execute("BEGIN IMMEDIATE")
         try:
+            cycle = None
+            if prepared["cycle"] is not None:
+                cycle = SourcePlanCycleService(self.connection).upsert_in_transaction(
+                    target_slug=target_slug,
+                    source_kind=prepared["source_kind"],
+                    plan_label=prepared["plan_label"],
+                    meta_number=prepared["meta_number"],
+                    **prepared["cycle"],
+                )
             for task in prepared["tasks"]:
+                task["source_cycle_id"] = cycle.id if cycle else None
+                if (
+                    cycle is not None
+                    and task["scheduled_date"] is not None
+                    and date.fromisoformat(task["scheduled_date"]) > cycle.ends_on
+                ):
+                    task["provenance"] = dict(task["provenance"]) | {
+                        "originalScheduledDate": task["scheduled_date"]
+                    }
+                    task["scheduled_date"] = None
+                    cycle_overrun_count += 1
                 subject_key = match_subject(task["discipline"], subjects).subject_key
                 task["subject_key"] = subject_key
                 unresolved_count += int(
@@ -308,6 +333,8 @@ class SourcePlanService:
                 "createdCount": created_count,
                 "updatedCount": updated_count,
                 "unresolvedCount": unresolved_count,
+                "cycleOverrunCount": cycle_overrun_count,
+                "cycle": cycle_document(cycle),
                 "taskIds": saved_ids,
                 "replayed": False,
             }
@@ -367,6 +394,8 @@ class SourcePlanService:
             task["topic_hint"] = existing.topic_hint
         if task["linked_study_task_id"] is None:
             task["linked_study_task_id"] = existing.linked_study_task_id
+        if task["source_cycle_id"] is None:
+            task["source_cycle_id"] = existing.source_cycle_id
 
         merged_provenance = dict(existing.provenance)
         for key, value in incoming_provenance.items():
@@ -389,6 +418,33 @@ class SourcePlanService:
         meta_number = payload.get("metaNumber")
         if meta_number is not None:
             meta_number = _integer(meta_number, "meta number")
+        cycle_payload = payload.get("cycle")
+        cycle = None
+        if cycle_payload is not None:
+            if not isinstance(cycle_payload, Mapping):
+                raise ValueError("cycle must be an object")
+            try:
+                released_at = datetime.fromisoformat(
+                    str(cycle_payload.get("releasedAt", "")).replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise ValueError("cycle releasedAt must be an ISO timestamp") from exc
+            if released_at.tzinfo is None or released_at.utcoffset() is None:
+                raise ValueError("cycle releasedAt must be timezone-aware")
+            try:
+                starts_on = date.fromisoformat(str(cycle_payload.get("startsOn", "")))
+                ends_on = date.fromisoformat(str(cycle_payload.get("endsOn", "")))
+            except ValueError as exc:
+                raise ValueError("cycle dates must use YYYY-MM-DD") from exc
+            if starts_on > ends_on:
+                raise ValueError("cycle dates must be ordered")
+            if released_at.date() > ends_on:
+                raise ValueError("cycle release cannot be after its end")
+            cycle = {
+                "released_at": released_at.astimezone(UTC),
+                "starts_on": starts_on,
+                "ends_on": ends_on,
+            }
         tasks = payload.get("tasks")
         if not isinstance(tasks, list) or not tasks:
             raise ValueError("tasks must be a non-empty array")
@@ -460,11 +516,14 @@ class SourcePlanService:
                         else None
                     ),
                     "provenance": provenance,
+                    "source_cycle_id": None,
                 }
             )
         return {
             "target_slug": target_slug,
             "source_kind": source_kind,
             "plan_label": plan_label,
+            "meta_number": meta_number,
+            "cycle": cycle,
             "tasks": prepared_tasks,
         }

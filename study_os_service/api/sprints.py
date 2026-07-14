@@ -34,6 +34,12 @@ from study_os_service.services.sprint_projection import (
     SprintProjectionService,
     projection_document,
 )
+from study_os_service.services.source_plan_cycles import (
+    SourcePlanCycleConflictError,
+    SourcePlanCycleService,
+    backlog_document,
+    cycle_document,
+)
 
 
 router = APIRouter()
@@ -105,7 +111,12 @@ def _config_payload(
     }
 
 
-def _source_task_payload(task: SourcePlanTask) -> dict[str, Any]:
+def _source_task_payload(
+    task: SourcePlanTask,
+    *,
+    cycle: object = None,
+    backlog: object = None,
+) -> dict[str, Any]:
     return {
         "id": task.id,
         "targetSlug": task.target_slug,
@@ -132,6 +143,8 @@ def _source_task_payload(task: SourcePlanTask) -> dict[str, Any]:
         "performanceBp": task.performance_bp,
         "linkedStudyTaskId": task.linked_study_task_id,
         "provenance": task.provenance,
+        "cycle": cycle_document(cycle),
+        "backlog": backlog_document(backlog),
         "version": task.version,
     }
 
@@ -232,6 +245,8 @@ async def import_source_plan(
         raise _not_found(exc) from exc
     except IdempotencyConflictError as exc:
         raise SprintApiError(409, "idempotency_conflict", str(exc)) from exc
+    except SourcePlanCycleConflictError as exc:
+        raise SprintApiError(409, "source_plan_cycle_conflict", str(exc)) from exc
     except sqlite3.IntegrityError as exc:
         raise SprintApiError(
             409, "source_plan_conflict", "source plan conflicts with stored data"
@@ -323,13 +338,32 @@ async def list_source_plan_tasks(
         )
     except SprintTargetNotFoundError as exc:
         raise _not_found(exc) from exc
+    cycle_service = SourcePlanCycleService(request.app.state.connection)
+    items = []
+    for task in tasks:
+        cycle, backlog = cycle_service.context_for_task(task)
+        items.append(_source_task_payload(task, cycle=cycle, backlog=backlog))
     return {
         "targetSlug": target_slug.strip(),
         "date": scheduled_date.isoformat() if scheduled_date else None,
-        "items": [_source_task_payload(task) for task in tasks],
+        "items": items,
         "unresolvedCount": sum(
             task.mapping_status == "unresolved" for task in tasks
         ),
+    }
+
+
+@router.get("/source-plans/backlog")
+async def list_source_plan_backlog(
+    request: Request,
+    target_slug: str = Query(alias="targetSlug", min_length=1),
+    include_all: bool = Query(default=False, alias="includeAll"),
+) -> dict[str, Any]:
+    service = SourcePlanCycleService(request.app.state.connection)
+    items = service.list_backlog(target_slug.strip(), include_all=include_all)
+    return {
+        "targetSlug": target_slug.strip(),
+        "items": [backlog_document(item) for item in items],
     }
 
 
