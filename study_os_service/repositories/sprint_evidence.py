@@ -261,3 +261,27 @@ class SprintEvidenceRepository:
             (target_slug,),
         )
         return tuple(_observation(row) for row in rows)
+
+    def list_latest_observations(
+        self,
+        target_slug: str,
+        as_of: date,
+    ) -> tuple[SprintPerformanceObservation, ...]:
+        rows = self.connection.execute(
+            """
+            WITH ranked AS (
+              SELECT sprint_performance_observations.*,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY target_slug, origin, source_record_id
+                       ORDER BY source_updated_at DESC, id DESC
+                     ) AS revision_rank
+              FROM sprint_performance_observations
+              WHERE target_slug=? AND observed_on<=?
+            )
+            SELECT * FROM ranked
+            WHERE revision_rank=1
+            ORDER BY subject_key, observed_on DESC, source_updated_at DESC, id DESC
+            """,
+            (target_slug, as_of.isoformat()),
+        )
+        return tuple(_observation(row) for row in rows)

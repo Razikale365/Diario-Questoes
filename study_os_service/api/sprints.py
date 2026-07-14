@@ -30,6 +30,10 @@ from study_os_service.services.sprint_evidence import (
     EvidenceBatchConflictError,
     SprintEvidenceService,
 )
+from study_os_service.services.sprint_projection import (
+    SprintProjectionService,
+    projection_document,
+)
 
 
 router = APIRouter()
@@ -283,6 +287,25 @@ async def list_sprint_evidence(
         "items": [_observation_payload(item) for item in items],
         "unresolvedCount": sum(item.subject_key is None for item in items),
     }
+
+
+@router.get("/sprints/projection")
+async def get_sprint_projection(
+    request: Request,
+    target_slug: str = Query(alias="targetSlug", min_length=1),
+    as_of: date | None = Query(default=None, alias="asOf"),
+) -> dict[str, Any]:
+    try:
+        projection = SprintProjectionService(
+            request.app.state.connection
+        ).project(target_slug.strip(), as_of or date.today())
+    except SprintTargetNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except (TypeError, ValueError) as exc:
+        raise SprintApiError(
+            422, "invalid_sprint_projection", str(exc)
+        ) from exc
+    return projection_document(projection)
 
 
 @router.get("/source-plans/tasks")
