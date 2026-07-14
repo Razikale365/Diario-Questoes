@@ -1,7 +1,15 @@
 from dataclasses import replace
 from datetime import date
+from typing import Mapping
+
+import pytest
 
 from study_os_service.domain.sprint import SourcePlanTask
+from study_os_service.domain.sprint_evidence import (
+    PaperProjection,
+    SprintProjection,
+    SubjectProjection,
+)
 from study_os_service.services.sprint import DEFAULT_SEFAZ_CONFIG
 from study_os_service.services.sprint_engine import SprintEngine
 
@@ -70,6 +78,140 @@ def _subjects():
     )
 
 
+def _subject_projections(
+    overrides: Mapping[str, Mapping[str, object]] | None = None,
+    *,
+    subjects=None,
+) -> dict[str, SubjectProjection]:
+    overrides = overrides or {}
+    projections: dict[str, SubjectProjection] = {}
+    for subject in subjects or _subjects():
+        estimate = subject.baseline_accuracy_bp or 5000
+        projection = SubjectProjection(
+            subject_profile_id=subject.id,
+            subject_key=subject.subject_key,
+            display_name=subject.display_name,
+            paper=subject.paper,
+            question_count=subject.question_count,
+            question_weight=float(subject.question_weight),
+            estimate_bp=estimate,
+            low_bp=max(0, estimate - 1000),
+            high_bp=min(10000, estimate + 1000),
+            effective_sample=0,
+            confidence_bp=0,
+            fragility_bp=0,
+            representative_set_count=0,
+            demotion_eligible=False,
+            dominant_origin="baseline",
+            warnings=("sample_limited",),
+        )
+        if subject.subject_key in overrides:
+            projection = replace(
+                projection,
+                **dict(overrides[subject.subject_key]),
+            )
+        projections[subject.subject_key] = projection
+    return projections
+
+
+def _projection(
+    subjects: Mapping[str, SubjectProjection],
+    *,
+    as_of: date = date(2026, 7, 14),
+) -> SprintProjection:
+    rows = tuple(subjects.values())
+
+    def paper(kind: str, floor: int, stretch: int) -> PaperProjection:
+        selected = [row for row in rows if row.paper == kind]
+        return PaperProjection(
+            projected=sum(
+                row.question_count * row.estimate_bp / 10000
+                for row in selected
+            ),
+            low=sum(
+                row.question_count * row.low_bp / 10000
+                for row in selected
+            ),
+            high=sum(
+                row.question_count * row.high_bp / 10000
+                for row in selected
+            ),
+            floor=floor,
+            stretch=stretch,
+        )
+
+    return SprintProjection(
+        target_slug="sefaz_ce",
+        as_of=as_of,
+        formula_version="sefaz-ce-projection-v2",
+        score_kind="raw_weighted_equivalent_not_fcc_standardized",
+        p1=paper("P1", 48, 64),
+        p2=paper("P2", 63, 70),
+        confidence_bp=max(row.confidence_bp for row in rows),
+        dominant_origin="calibrated_test",
+        subjects=rows,
+        warnings=tuple(
+            sorted({warning for row in rows for warning in row.warnings})
+        ),
+    )
+
+
+def _generate(**kwargs):
+    subject_rows = kwargs["subjects"]
+    plan_date = kwargs["plan_date"]
+    subject_projections = kwargs.pop("subject_projections", None)
+    projection = kwargs.pop("projection", None)
+    p1_projection = kwargs.pop("p1_projection", None)
+    p2_projection = kwargs.pop("p2_projection", None)
+    recent = kwargs.pop("recent_accuracy_bp", {})
+    if subject_projections is None:
+        overrides: dict[str, dict[str, object]] = {}
+        for subject in subject_rows:
+            scores = recent.get(subject.subject_key, ())
+            if not scores:
+                continue
+            sample = scores[-3:]
+            estimate = round(sum(sample) / len(sample))
+            overrides[subject.subject_key] = {
+                "estimate_bp": estimate,
+                "low_bp": max(0, estimate - 1000),
+                "high_bp": min(10000, estimate + 1000),
+                "confidence_bp": min(
+                    9000,
+                    subject.baseline_confidence_bp + len(sample) * 2500,
+                ),
+                "representative_set_count": len(scores),
+                "demotion_eligible": len(scores) >= 2,
+            }
+        subject_projections = _subject_projections(
+            overrides,
+            subjects=subject_rows,
+        )
+    if projection is None:
+        projection = _projection(subject_projections, as_of=plan_date)
+        if p1_projection is not None:
+            projection = replace(
+                projection,
+                p1=replace(
+                    projection.p1,
+                    projected=p1_projection,
+                    low=min(projection.p1.low, p1_projection),
+                    high=max(projection.p1.high, p1_projection),
+                ),
+                p2=replace(
+                    projection.p2,
+                    projected=p2_projection,
+                    low=min(projection.p2.low, p2_projection),
+                    high=max(projection.p2.high, p2_projection),
+                ),
+            )
+    return SprintEngine().generate(
+        **kwargs,
+        subject_projections=subject_projections,
+        projection=projection,
+    )
+
+
 def test_all_ls_tasks_are_kept_and_reordered_when_they_fit_the_budget():
     tasks = (
         _source_task(1, "p1_portugues", relevance=3),
@@ -78,7 +220,7 @@ def test_all_ls_tasks_are_kept_and_reordered_when_they_fit_the_budget():
         _source_task(4, "p1_auditoria", relevance=4),
     )
 
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=tasks,
@@ -113,7 +255,7 @@ def test_over_budget_ls_is_compressed_then_deferred_without_changing_source_stat
         )
     )
 
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=tasks,
@@ -135,7 +277,7 @@ def test_over_budget_ls_is_compressed_then_deferred_without_changing_source_stat
 
 
 def test_initial_extra_budget_uses_lte_finances_and_advanced_costs_ratio():
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(),
@@ -158,7 +300,7 @@ def test_initial_extra_budget_uses_lte_finances_and_advanced_costs_ratio():
 
 
 def test_two_sets_at_goal_demote_a_focus_subject_and_p1_floor_is_protected():
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(),
@@ -191,7 +333,7 @@ def test_afo_rescue_is_limited_to_twice_per_week():
         for subject in _subjects()
     )
 
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=subjects,
         source_tasks=(),
@@ -208,7 +350,7 @@ def test_afo_rescue_is_limited_to_twice_per_week():
 
 
 def test_d2_consolidates_and_d1_reduces_load():
-    d2 = SprintEngine().generate(
+    d2 = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(_source_task(1, "p2_lte", task_kind="theory"),),
@@ -217,7 +359,7 @@ def test_d2_consolidates_and_d1_reduces_load():
         p1_projection=49,
         p2_projection=64,
     )
-    d1 = SprintEngine().generate(
+    d1 = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(_source_task(1, "p2_lte", task_kind="questions"),),
@@ -234,7 +376,7 @@ def test_d2_consolidates_and_d1_reduces_load():
 
 
 def test_last_full_weekend_adds_simulation_only_when_ls_has_none():
-    without_ls_simulation = SprintEngine().generate(
+    without_ls_simulation = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(),
@@ -244,7 +386,7 @@ def test_last_full_weekend_adds_simulation_only_when_ls_has_none():
         p2_projection=60,
         has_scheduled_simulation=False,
     )
-    with_ls_simulation = SprintEngine().generate(
+    with_ls_simulation = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(_source_task(1, "p1_portugues", task_kind="simulation"),),
@@ -261,7 +403,7 @@ def test_last_full_weekend_adds_simulation_only_when_ls_has_none():
 
 
 def test_unmapped_ls_simulation_and_discursive_tasks_are_still_protected():
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(
@@ -303,7 +445,7 @@ def test_protected_simulation_never_pushes_executable_ls_over_budget():
         ),
     )
 
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=tasks,
@@ -334,7 +476,7 @@ def test_d2_consolidation_respects_the_combined_capacity():
         ls_budget_minutes=15,
         extra_budget_minutes=0,
     )
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=config,
         subjects=_subjects(),
         source_tasks=(_source_task(1, "p2_lte", task_kind="review"),),
@@ -348,7 +490,7 @@ def test_d2_consolidation_respects_the_combined_capacity():
 
 
 def test_ls_action_keeps_the_exact_tec_caderno_url_in_auditable_evidence():
-    plan = SprintEngine().generate(
+    plan = _generate(
         config=DEFAULT_SEFAZ_CONFIG,
         subjects=_subjects(),
         source_tasks=(
@@ -368,7 +510,7 @@ def test_ls_action_keeps_the_exact_tec_caderno_url_in_auditable_evidence():
 
 
 def test_ls_action_normalizes_valid_source_durations_to_persistable_blocks():
-    short = SprintEngine().generate(
+    short = _generate(
         config=replace(DEFAULT_SEFAZ_CONFIG, ls_budget_minutes=15, extra_budget_minutes=0),
         subjects=_subjects(),
         source_tasks=(_source_task(1, "p2_lte", minutes=1),),
@@ -377,7 +519,7 @@ def test_ls_action_normalizes_valid_source_durations_to_persistable_blocks():
         p1_projection=49,
         p2_projection=60,
     )
-    long = SprintEngine().generate(
+    long = _generate(
         config=replace(DEFAULT_SEFAZ_CONFIG, ls_budget_minutes=300, extra_budget_minutes=0),
         subjects=_subjects(),
         source_tasks=(_source_task(2, "p2_lte", minutes=300),),
@@ -394,7 +536,7 @@ def test_ls_action_normalizes_valid_source_durations_to_persistable_blocks():
 
 def test_long_protected_simulation_remains_a_simulation_when_compressed():
     task = _source_task(1, "p1_portugues", minutes=300, task_kind="simulation")
-    fits_clamped_limit = SprintEngine().generate(
+    fits_clamped_limit = _generate(
         config=replace(DEFAULT_SEFAZ_CONFIG, ls_budget_minutes=300, extra_budget_minutes=0),
         subjects=_subjects(),
         source_tasks=(task,),
@@ -403,7 +545,7 @@ def test_long_protected_simulation_remains_a_simulation_when_compressed():
         p1_projection=49,
         p2_projection=60,
     )
-    constrained = SprintEngine().generate(
+    constrained = _generate(
         config=replace(DEFAULT_SEFAZ_CONFIG, ls_budget_minutes=200, extra_budget_minutes=0),
         subjects=_subjects(),
         source_tasks=(task,),
@@ -419,3 +561,142 @@ def test_long_protected_simulation_remains_a_simulation_when_compressed():
         assert action.recommendation == "compress"
         assert action.duration_minutes == expected_minutes
         assert action.evidence["sourceTaskKind"] == "simulation"
+
+
+def test_projection_doubt_fragility_raises_priority_without_reducing_estimate():
+    tasks = (
+        _source_task(1, "p2_contabilidade_avancada_custos", relevance=5),
+        _source_task(2, "p2_lte", relevance=5),
+    )
+    base_overrides = {
+        "p2_lte": {
+            "estimate_bp": 7000,
+            "low_bp": 6200,
+            "high_bp": 7800,
+            "confidence_bp": 5000,
+        },
+        "p2_contabilidade_avancada_custos": {
+            "estimate_bp": 7000,
+            "low_bp": 6200,
+            "high_bp": 7800,
+            "confidence_bp": 5000,
+        },
+    }
+    stable = _subject_projections(base_overrides)
+    fragile = dict(stable)
+    fragile["p2_lte"] = replace(
+        fragile["p2_lte"],
+        fragility_bp=7000,
+    )
+    config = replace(
+        DEFAULT_SEFAZ_CONFIG,
+        ls_budget_minutes=120,
+        extra_budget_minutes=0,
+    )
+
+    stable_plan = SprintEngine().generate(
+        config=config,
+        subjects=_subjects(),
+        source_tasks=tasks,
+        plan_date=date(2026, 7, 14),
+        energy_level=3,
+        subject_projections=stable,
+        projection=_projection(stable),
+    )
+    fragile_plan = SprintEngine().generate(
+        config=config,
+        subjects=_subjects(),
+        source_tasks=tasks,
+        plan_date=date(2026, 7, 14),
+        energy_level=3,
+        subject_projections=fragile,
+        projection=_projection(fragile),
+    )
+
+    assert stable_plan.actions[0].subject_key == (
+        "p2_contabilidade_avancada_custos"
+    )
+    assert fragile_plan.actions[0].subject_key == "p2_lte"
+    stable_lte = next(
+        action for action in stable_plan.actions if action.subject_key == "p2_lte"
+    )
+    fragile_lte = next(
+        action for action in fragile_plan.actions if action.subject_key == "p2_lte"
+    )
+    assert fragile_lte.expected_gain_milli > stable_lte.expected_gain_milli
+    assert fragile_lte.evidence["estimateBp"] == 7000
+    assert fragile_lte.evidence["fragilityBp"] == 7000
+
+
+def test_calibrated_projection_governs_gain_and_deficit_instead_of_profile_prior():
+    tasks = (
+        _source_task(1, "p2_lte", relevance=5),
+        _source_task(2, "p2_contabilidade_avancada_custos", relevance=5),
+    )
+    calibrated = _subject_projections(
+        {
+            "p2_lte": {
+                "estimate_bp": 7800,
+                "low_bp": 7200,
+                "high_bp": 8400,
+                "confidence_bp": 6000,
+            },
+            "p2_contabilidade_avancada_custos": {
+                "estimate_bp": 5000,
+                "low_bp": 4400,
+                "high_bp": 5600,
+                "confidence_bp": 6000,
+            },
+        }
+    )
+
+    plan = SprintEngine().generate(
+        config=replace(
+            DEFAULT_SEFAZ_CONFIG,
+            ls_budget_minutes=120,
+            extra_budget_minutes=0,
+        ),
+        subjects=_subjects(),
+        source_tasks=tasks,
+        plan_date=date(2026, 7, 14),
+        energy_level=3,
+        subject_projections=calibrated,
+        projection=_projection(calibrated),
+    )
+
+    assert plan.actions[0].subject_key == "p2_contabilidade_avancada_custos"
+    costs, lte = sorted(
+        plan.actions,
+        key=lambda action: action.subject_key != (
+            "p2_contabilidade_avancada_custos"
+        ),
+    )
+    assert costs.expected_gain_milli > lte.expected_gain_milli
+    assert costs.evidence["estimateBp"] == 5000
+    assert lte.evidence["estimateBp"] == 7800
+
+
+def test_projection_owned_engine_uses_v2_algorithm_version():
+    assert SprintEngine.algorithm_version == "sefaz-ce-sprint-v2"
+
+
+def test_engine_rejects_projection_inputs_that_cannot_share_one_snapshot():
+    subjects = _subject_projections()
+    frozen = _projection(subjects)
+    divergent = dict(subjects)
+    divergent["p2_lte"] = replace(
+        divergent["p2_lte"],
+        estimate_bp=7100,
+        high_bp=max(7100, divergent["p2_lte"].high_bp),
+    )
+
+    with pytest.raises(ValueError, match="frozen projection"):
+        SprintEngine().generate(
+            config=DEFAULT_SEFAZ_CONFIG,
+            subjects=_subjects(),
+            source_tasks=(),
+            plan_date=date(2026, 7, 14),
+            energy_level=3,
+            subject_projections=divergent,
+            projection=frozen,
+        )

@@ -4,10 +4,12 @@ from dataclasses import replace
 from datetime import date
 import hashlib
 import json
+import math
 import sqlite3
 from typing import Any, Mapping
 
 from study_os_service.domain.sprint import ExamSprintConfig, ExamSubjectProfile
+from study_os_service.domain.sprint_evidence import PaperProjection, SprintProjection
 from study_os_service.repositories.sprint import (
     SprintRepository,
     SprintVersionConflictError,
@@ -18,6 +20,10 @@ from study_os_service.services.sprint import (
     SprintTargetNotFoundError,
 )
 from study_os_service.services.sprint_engine import SprintActionDraft, SprintEngine
+from study_os_service.services.sprint_projection import (
+    SprintProjectionService,
+    projection_document,
+)
 
 
 class SprintDayNotFoundError(KeyError):
@@ -69,6 +75,33 @@ def _date(value: Any, label: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ValueError(f"{label} must use YYYY-MM-DD") from exc
+
+
+def _manual_paper_projection(
+    paper: PaperProjection,
+    projected: float,
+) -> PaperProjection:
+    if paper.variance is None:
+        low = min(paper.low, projected)
+        high = max(paper.high, projected)
+    else:
+        margin = 1.645 * math.sqrt(paper.variance)
+        low = max(0.0, projected - margin)
+        high = min(80.0, projected + margin)
+    return replace(paper, projected=projected, low=low, high=high)
+
+
+def _manual_projection(
+    projection: SprintProjection,
+    *,
+    p1: float,
+    p2: float,
+) -> SprintProjection:
+    return replace(
+        projection,
+        p1=_manual_paper_projection(projection.p1, p1),
+        p2=_manual_paper_projection(projection.p2, p2),
+    )
 
 
 def _subject_document(subject: ExamSubjectProfile) -> dict[str, Any]:
@@ -179,29 +212,38 @@ class SprintDayService:
             )
             if task.id not in completed_source_ids
         )
-        latest_snapshot = json.loads(latest["score_snapshot_json"]) if latest else {}
-        p1_projection = prepared["p1_projection"]
-        p2_projection = prepared["p2_projection"]
-        if p1_projection is None:
-            p1_projection = float(latest_snapshot.get("p1Projection", 42))
-        if p2_projection is None:
-            p2_projection = float(latest_snapshot.get("p2Projection", 55))
-
-        recent = self.repository.recent_accuracy(target_slug)
+        projection = SprintProjectionService(self.connection).project(
+            target_slug,
+            prepared["plan_date"],
+        )
+        projection_origin = "derived"
+        if prepared["p1_projection"] is not None:
+            projection = _manual_projection(
+                projection,
+                p1=prepared["p1_projection"],
+                p2=prepared["p2_projection"],
+            )
+            projection_origin = "manual"
+        subject_projections = {
+            subject.subject_key: subject for subject in projection.subjects
+        }
         draft = self.engine.generate(
             config=effective_config,
             subjects=subjects,
             source_tasks=source_tasks,
             plan_date=prepared["plan_date"],
             energy_level=prepared["energy_level"],
-            p1_projection=p1_projection,
-            p2_projection=p2_projection,
-            recent_accuracy_bp=recent,
+            subject_projections=subject_projections,
+            projection=projection,
             afo_rescues_this_week=self.repository.afo_rescues_this_week(
                 target_slug, prepared["plan_date"]
             ),
         )
-        score_snapshot = dict(draft.score_snapshot) | {"modeLabel": draft.mode_label}
+        score_snapshot = dict(draft.score_snapshot) | {
+            "modeLabel": draft.mode_label,
+            "projection": projection_document(projection),
+            "projectionOrigin": projection_origin,
+        }
         status = "generated" if draft.actions else "shortfall"
 
         self.connection.execute("BEGIN IMMEDIATE")
@@ -313,12 +355,23 @@ class SprintDayService:
         documents = []
         for run in runs:
             snapshot = json.loads(run["score_snapshot_json"])
+            projection = snapshot.get("projection")
+            p1 = (
+                projection["p1"]["projected"]
+                if isinstance(projection, Mapping)
+                else snapshot.get("p1Projection", 0)
+            )
+            p2 = (
+                projection["p2"]["projected"]
+                if isinstance(projection, Mapping)
+                else snapshot.get("p2Projection", 0)
+            )
             documents.append(
                 {
                     "runId": run["id"],
                     "date": run["plan_date"],
-                    "p1": snapshot.get("p1Projection", 0),
-                    "p2": snapshot.get("p2Projection", 0),
+                    "p1": p1,
+                    "p2": p2,
                     "generatedAt": run["generated_at"],
                 }
             )
@@ -327,6 +380,17 @@ class SprintDayService:
 
     def _run_document(self, run: sqlite3.Row, *, replayed: bool) -> dict[str, Any]:
         snapshot = json.loads(run["score_snapshot_json"])
+        projection = snapshot.get("projection")
+        p1_projection = (
+            projection["p1"]["projected"]
+            if isinstance(projection, Mapping)
+            else snapshot.get("p1Projection", 0)
+        )
+        p2_projection = (
+            projection["p2"]["projected"]
+            if isinstance(projection, Mapping)
+            else snapshot.get("p2Projection", 0)
+        )
         actions = [
             self._action_document(action)
             for action in self.repository.list_run_actions(run["id"])
@@ -373,9 +437,11 @@ class SprintDayService:
                 "energyLevel": run["energy_level"],
             },
             "projections": {
-                "p1": snapshot.get("p1Projection", 0),
-                "p2": snapshot.get("p2Projection", 0),
+                "p1": p1_projection,
+                "p2": p2_projection,
             },
+            "projection": projection,
+            "projectionOrigin": snapshot.get("projectionOrigin", "legacy"),
             "actions": actions,
             "minimumViable": {
                 "actionIds": [action["id"] for action in viable],
@@ -465,6 +531,8 @@ class SprintDayService:
             raise ValueError("sprint day payload must be an object")
         p1 = payload.get("p1Projection")
         p2 = payload.get("p2Projection")
+        if (p1 is None) != (p2 is None):
+            raise ValueError("P1 and P2 projections must be supplied together")
         ls_budget = payload.get("lsBudgetMinutes")
         extra_budget = payload.get("extraBudgetMinutes")
         return {

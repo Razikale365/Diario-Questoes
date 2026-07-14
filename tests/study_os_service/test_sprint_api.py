@@ -1,9 +1,12 @@
+import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from study_os_service.app import create_app
 from study_os_service.config import StudyOsSettings
+from study_os_service.db.connection import connect_database
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -49,6 +52,60 @@ def _prepare(client: TestClient, *, task_count: int = 5) -> None:
         },
     )
     assert imported.status_code == 201, imported.text
+
+
+def _projection_observation(
+    *,
+    record_id: str,
+    discipline: str,
+    measurement_type: str,
+    correct_count: int | None,
+    wrong_count: int | None,
+    percentage_bp: int | None,
+    doubt_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "discipline": discipline,
+        "topicHint": "Aggregate-only projection evidence",
+        "observedOn": "2026-07-14",
+        "sourceRecordId": record_id,
+        "sourceRevision": "v1",
+        "sourceUpdatedAt": "2026-07-14T12:00:00Z",
+        "measurementType": measurement_type,
+        "examBoard": "FCC",
+        "correctCount": correct_count,
+        "wrongCount": wrong_count,
+        "doubtCount": doubt_count,
+        "percentageBp": percentage_bp,
+        "transferScope": "content",
+        "transferabilityBp": 10000,
+        "provenance": {
+            "provider": "sprint-day-integration-test",
+            "sourceTaskId": record_id,
+        },
+    }
+
+
+def _import_projection_evidence(
+    client: TestClient,
+    *,
+    batch_id: str,
+    origin: str,
+    observations: list[dict[str, object]],
+) -> dict[str, object]:
+    response = client.post(
+        "/api/v1/sprints/evidence/import",
+        json={
+            "targetSlug": "sefaz_ce",
+            "batchId": batch_id,
+            "origin": origin,
+            "dryRun": False,
+            "observations": observations,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["insertedCount"] == len(observations)
+    return response.json()
 
 
 def test_generate_get_and_replay_sprint_day_are_auditable(tmp_path: Path):
@@ -637,44 +694,26 @@ def test_generate_day_excludes_completed_and_ignored_source_tasks(tmp_path: Path
     assert "meta-47-ignored" not in external_ids
 
 
-def test_completed_ls_evidence_demotes_a_subject_after_two_sets_at_goal(
+def test_two_recent_representative_sets_demote_a_subject_at_goal(
     tmp_path: Path,
 ):
     with _client(tmp_path) as client:
         _prepare(client, task_count=1)
-        evidence = client.post(
-            "/api/v1/source-plans/import",
-            headers={"Idempotency-Key": "lte-evidence-meta-46"},
-            json={
-                "targetSlug": "sefaz_ce",
-                "sourceKind": "ls",
-                "planLabel": "Meta 46",
-                "metaNumber": 46,
-                "tasks": [
-                    {
-                        "externalTaskId": "meta-46-lte-1",
-                        "scheduledDate": "2026-07-11",
-                        "sourceOrder": 29,
-                        "discipline": "Legis. Tribut. Estadual (ICMS)",
-                        "taskKind": "review",
-                        "description": "Bateria LTE 1",
-                        "estimatedMinutes": 60,
-                        "status": "completed",
-                        "performanceBp": 9000,
-                    },
-                    {
-                        "externalTaskId": "meta-46-lte-2",
-                        "scheduledDate": "2026-07-12",
-                        "sourceOrder": 31,
-                        "discipline": "Legis. Tribut. Estadual (ICMS)",
-                        "taskKind": "review",
-                        "description": "Bateria LTE 2",
-                        "estimatedMinutes": 60,
-                        "status": "completed",
-                        "performanceBp": 8800,
-                    },
-                ],
-            },
+        evidence = _import_projection_evidence(
+            client,
+            batch_id="lte-representative-sets",
+            origin="diario_backup",
+            observations=[
+                _projection_observation(
+                    record_id=f"lte-representative-{index}",
+                    discipline="Legis. Tribut. Estadual (ICMS)",
+                    measurement_type="unseen_set",
+                    correct_count=20,
+                    wrong_count=0,
+                    percentage_bp=None,
+                )
+                for index in (1, 2)
+            ],
         )
         generated = client.post(
             "/api/v1/sprints/generate-day",
@@ -688,7 +727,7 @@ def test_completed_ls_evidence_demotes_a_subject_after_two_sets_at_goal(
             },
         )
 
-    assert evidence.status_code == 201, evidence.text
+    assert evidence["insertedCount"] == 2
     assert generated.status_code == 201, generated.text
     assert not any(
         row["recommendation"] == "extra" and row["subjectKey"] == "p2_lte"
@@ -736,3 +775,276 @@ def test_day_capacity_override_is_explicit_and_does_not_change_default_config(
     ) <= 30
     assert config.json()["lsBudgetMinutes"] == 240
     assert config.json()["extraBudgetMinutes"] == 60
+
+
+def test_projection_is_derived_when_day_generation_omits_manual_values(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        live = client.get(
+            "/api/v1/sprints/projection",
+            params={"targetSlug": "sefaz_ce", "asOf": "2026-07-14"},
+        )
+        generated = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "derived-projection-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        )
+
+    assert live.status_code == 200, live.text
+    assert generated.status_code == 201, generated.text
+    live_projection = live.json()
+    day = generated.json()
+    assert day["projectionOrigin"] == "derived"
+    assert day["algorithmVersion"] == "sefaz-ce-sprint-v2"
+    assert day["projections"] == {
+        "p1": pytest.approx(live_projection["p1"]["projected"]),
+        "p2": pytest.approx(live_projection["p2"]["projected"]),
+    }
+    assert (day["projections"]["p1"], day["projections"]["p2"]) != (
+        42,
+        55,
+    )
+    assert day["projection"] == live_projection
+
+
+def test_partial_projection_override_is_rejected_instead_of_mixing_origins(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        response = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "partial-projection-override"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+                "p1Projection": 50,
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_sprint_day"
+    assert "supplied together" in response.json()["message"]
+
+
+def test_complete_projection_override_is_visibly_marked_manual(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        response = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "complete-projection-override"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+                "p1Projection": 50,
+                "p2Projection": 65,
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    day = response.json()
+    assert day["projectionOrigin"] == "manual"
+    assert day["projections"] == {"p1": 50, "p2": 65}
+    assert day["projection"]["p1"]["projected"] == 50
+    assert day["projection"]["p2"]["projected"] == 65
+    assert day["projection"]["weighted"]["projected"] == 180
+    assert day["projection"]["weighted"]["distanceToTarget"] == 24
+    assert day["projection"]["formulaVersion"] == "sefaz-ce-projection-v2"
+    assert day["projection"]["scoreKind"] == (
+        "raw_weighted_equivalent_not_fcc_standardized"
+    )
+
+
+def test_two_ls_percentage_projections_cannot_demote_a_focus_subject(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        _import_projection_evidence(
+            client,
+            batch_id="two-ls-percentages",
+            origin="ls_history",
+            observations=[
+                _projection_observation(
+                    record_id=f"lte-ls-percentage-{index}",
+                    discipline="Legis. Tribut. Estadual (ICMS)",
+                    measurement_type="ls_percentage",
+                    correct_count=None,
+                    wrong_count=None,
+                    percentage_bp=10000,
+                )
+                for index in (1, 2)
+            ],
+        )
+        projection_response = client.get(
+            "/api/v1/sprints/projection",
+            params={"targetSlug": "sefaz_ce", "asOf": "2026-07-14"},
+        )
+        generated = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "day-after-two-ls-percentages"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        )
+
+    assert projection_response.status_code == 200, projection_response.text
+    lte = next(
+        subject
+        for subject in projection_response.json()["subjects"]
+        if subject["subjectKey"] == "p2_lte"
+    )
+    assert lte["representativeSetCount"] == 0
+    assert lte["demotionEligible"] is False
+    assert generated.status_code == 201, generated.text
+    day = generated.json()
+    assert day["projectionOrigin"] == "derived"
+    assert any(
+        action["recommendation"] == "extra"
+        and action["subjectKey"] == "p2_lte"
+        for action in day["actions"]
+    )
+
+
+def test_projection_snapshot_is_complete_and_immutable_after_generation(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        generated_response = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "immutable-projection-snapshot"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        )
+        assert generated_response.status_code == 201, generated_response.text
+        generated = generated_response.json()
+        frozen = generated["projection"]
+
+        _import_projection_evidence(
+            client,
+            batch_id="post-snapshot-perfect-exam",
+            origin="diario_backup",
+            observations=[
+                _projection_observation(
+                    record_id="economia-perfect-full-exam",
+                    discipline="Economia",
+                    measurement_type="full_exam",
+                    correct_count=80,
+                    wrong_count=0,
+                    percentage_bp=None,
+                )
+            ],
+        )
+        live = client.get(
+            "/api/v1/sprints/projection",
+            params={"targetSlug": "sefaz_ce", "asOf": "2026-07-14"},
+        ).json()
+        stored_day = client.get(
+            "/api/v1/sprints/day",
+            params={"targetSlug": "sefaz_ce", "date": "2026-07-14"},
+        ).json()
+        database = connect_database(client.app.state.settings.database_path)
+        try:
+            snapshot_row = database.execute(
+                "SELECT score_snapshot_json FROM sprint_day_runs WHERE id=?",
+                (generated["runId"],),
+            ).fetchone()
+        finally:
+            database.close()
+        assert snapshot_row is not None
+        stored_snapshot = json.loads(snapshot_row["score_snapshot_json"])
+
+    assert live["p1"]["projected"] != frozen["p1"]["projected"]
+    assert stored_day["projection"] == frozen
+    assert stored_day["projectionOrigin"] == "derived"
+    assert stored_snapshot["projection"] == frozen
+    assert stored_snapshot["projectionOrigin"] == "derived"
+    assert frozen["formulaVersion"] == "sefaz-ce-projection-v2"
+    assert frozen["scoreKind"] == "raw_weighted_equivalent_not_fcc_standardized"
+    assert frozen["interval"] == {
+        "confidenceBp": 9000,
+        "kind": "normal_approximation_raw_equivalent",
+    }
+    assert frozen["weighted"]["target"] == 204
+    assert frozen["weighted"]["distanceToTarget"] == pytest.approx(
+        204 - frozen["weighted"]["projected"]
+    )
+    assert isinstance(frozen["confidenceBp"], int)
+    assert frozen["dominantOrigin"]
+    assert len(frozen["subjects"]) == 13
+    assert all(
+        {
+            "estimateBp",
+            "lowBp",
+            "highBp",
+            "confidenceBp",
+            "fragilityBp",
+            "dominantOrigin",
+        }
+        <= subject.keys()
+        for subject in frozen["subjects"]
+    )
+    assert generated["algorithmVersion"] == "sefaz-ce-sprint-v2"
+
+
+def test_legacy_v1_score_snapshot_remains_readable(tmp_path: Path):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        generated = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "legacy-readable-seed"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        ).json()
+        database = connect_database(client.app.state.settings.database_path)
+        try:
+            database.execute(
+                """
+                UPDATE sprint_day_runs
+                SET algorithm_version='sefaz-ce-sprint-v1',
+                    score_snapshot_json=?
+                WHERE id=?
+                """,
+                (
+                    json.dumps(
+                        {
+                            "p1Projection": 42,
+                            "p2Projection": 55,
+                            "modeLabel": "Legacy V1",
+                        }
+                    ),
+                    generated["runId"],
+                ),
+            )
+            database.commit()
+        finally:
+            database.close()
+        stored = client.get(
+            "/api/v1/sprints/day",
+            params={"targetSlug": "sefaz_ce", "date": "2026-07-14"},
+        )
+
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["projections"] == {"p1": 42, "p2": 55}
+    assert stored.json()["projection"] is None
+    assert stored.json()["projectionOrigin"] == "legacy"
+    assert stored.json()["algorithmVersion"] == "sefaz-ce-sprint-v1"

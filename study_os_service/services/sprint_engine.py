@@ -10,6 +10,10 @@ from study_os_service.domain.sprint import (
     ExamSubjectProfile,
     SourcePlanTask,
 )
+from study_os_service.domain.sprint_evidence import (
+    SprintProjection,
+    SubjectProjection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +43,7 @@ class SprintDayDraft:
 
 
 class SprintEngine:
-    algorithm_version = "sefaz-ce-sprint-v1"
+    algorithm_version = "sefaz-ce-sprint-v2"
     MIN_ACTION_MINUTES = 5
     MAX_ACTION_MINUTES = 240
 
@@ -51,9 +55,8 @@ class SprintEngine:
         source_tasks: tuple[SourcePlanTask, ...],
         plan_date: date,
         energy_level: int,
-        p1_projection: float,
-        p2_projection: float,
-        recent_accuracy_bp: Mapping[str, tuple[int, ...]] | None = None,
+        subject_projections: Mapping[str, SubjectProjection],
+        projection: SprintProjection,
         afo_rescues_this_week: int = 0,
         has_scheduled_simulation: bool | None = None,
     ) -> SprintDayDraft:
@@ -63,8 +66,20 @@ class SprintEngine:
             raise ValueError("energy level must be between 1 and 5")
         if plan_date > config.exam_end_date:
             raise ValueError("plan date is after the exam")
-        recent = recent_accuracy_bp or {}
+        if projection.as_of != plan_date:
+            raise ValueError("projection date must match plan date")
         subject_by_key = {subject.subject_key: subject for subject in subjects if subject.active}
+        frozen_subject_projections = {
+            subject.subject_key: subject for subject in projection.subjects
+        }
+        if dict(subject_projections) != frozen_subject_projections:
+            raise ValueError("subject projections must match the frozen projection")
+        missing_projections = subject_by_key.keys() - subject_projections.keys()
+        if missing_projections:
+            missing = ", ".join(sorted(missing_projections))
+            raise ValueError(f"missing calibrated projections for: {missing}")
+        if projection.target_slug != config.target_slug:
+            raise ValueError("projection target must match sprint target")
         active_tasks = tuple(
             replace(task, subject_key=subject_key)
             for task in source_tasks
@@ -73,7 +88,7 @@ class SprintEngine:
                 subject_key := self._source_subject_key(
                     task,
                     subject_by_key,
-                    recent,
+                    subject_projections,
                 )
             ) is not None
         )
@@ -84,15 +99,14 @@ class SprintEngine:
                 active_tasks,
                 subject_by_key,
                 min(120, config.ls_budget_minutes + config.extra_budget_minutes),
-                recent,
+                subject_projections,
             )
             return self._day(
                 plan_date,
                 days_remaining,
                 "D-2: erros, excecoes e lei seca",
                 actions,
-                p1_projection,
-                p2_projection,
+                projection,
             )
 
         d1 = days_remaining == 1
@@ -101,7 +115,7 @@ class SprintEngine:
         ls_actions = self._triage_ls(
             active_tasks,
             subject_by_key,
-            recent,
+            subject_projections,
             ls_budget,
         )
 
@@ -116,8 +130,8 @@ class SprintEngine:
             subject_by_key=subject_by_key,
             plan_date=plan_date,
             budget=extra_budget,
-            recent=recent,
-            p1_projection=p1_projection,
+            subject_projections=subject_projections,
+            p1_projection=projection.p1.projected,
             afo_rescues_this_week=afo_rescues_this_week,
             has_scheduled_simulation=scheduled_simulation,
         )
@@ -128,15 +142,14 @@ class SprintEngine:
             days_remaining,
             mode_label,
             actions,
-            p1_projection,
-            p2_projection,
+            projection,
         )
 
     def _source_subject_key(
         self,
         task: SourcePlanTask,
         subject_by_key: Mapping[str, ExamSubjectProfile],
-        recent: Mapping[str, tuple[int, ...]],
+        subject_projections: Mapping[str, SubjectProjection],
     ) -> str | None:
         if task.subject_key in subject_by_key:
             return task.subject_key
@@ -155,7 +168,7 @@ class SprintEngine:
             eligible,
             key=lambda subject: self._deficit(
                 subject,
-                recent.get(subject.subject_key, ()),
+                subject_projections[subject.subject_key],
             ),
         ).subject_key
 
@@ -163,13 +176,17 @@ class SprintEngine:
         self,
         tasks: tuple[SourcePlanTask, ...],
         subject_by_key: Mapping[str, ExamSubjectProfile],
-        recent: Mapping[str, tuple[int, ...]],
+        subject_projections: Mapping[str, SubjectProjection],
         budget: int,
     ) -> tuple[SprintActionDraft, ...]:
         scored = sorted(
             (
                 (
-                    self._task_gain(task, subject_by_key[task.subject_key], recent),
+                    self._task_gain(
+                        task,
+                        subject_by_key[task.subject_key],
+                        subject_projections[task.subject_key],
+                    ),
                     task,
                     subject_by_key[task.subject_key],
                 )
@@ -282,11 +299,11 @@ class SprintEngine:
         self,
         task: SourcePlanTask,
         subject: ExamSubjectProfile,
-        gain: tuple[int, int, int],
+        gain: tuple[int, int, int, int],
         recommendation: str,
         duration: int,
     ) -> SprintActionDraft:
-        expected_gain, estimate, confidence = gain
+        expected_gain, estimate, confidence, fragility = gain
         if task.task_kind == "simulation" and recommendation == "execute":
             action_kind = "simulation"
         else:
@@ -333,6 +350,8 @@ class SprintEngine:
                     "sourceOrder": task.source_order,
                     "performanceBp": task.performance_bp,
                     "tecUrl": task.provenance.get("tecUrl", ""),
+                    "estimateBp": estimate,
+                    "fragilityBp": fragility,
                 }
             ),
         )
@@ -341,10 +360,14 @@ class SprintEngine:
         self,
         task: SourcePlanTask,
         subject: ExamSubjectProfile,
-        recent: Mapping[str, tuple[int, ...]],
-    ) -> tuple[int, int, int]:
-        estimate, confidence = self._estimate(subject, recent.get(subject.subject_key, ()))
-        gap = max(250, subject.target_low_bp - estimate)
+        projection: SubjectProjection,
+    ) -> tuple[int, int, int, int]:
+        estimate = projection.estimate_bp
+        confidence = projection.confidence_bp
+        fragility = projection.fragility_bp
+        gap = max(250, subject.target_low_bp - estimate) + self._fragility_bonus(
+            fragility
+        )
         weighted_points = subject.question_count * subject.question_weight
         relevance_factor = 0.5 + task.relevance / 20
         confidence_factor = 0.5 + confidence / 20000
@@ -356,7 +379,7 @@ class SprintEngine:
             * confidence_factor
             / max(1, task.estimated_minutes)
         )
-        return max(0, round(raw * 1000)), estimate, confidence
+        return max(0, round(raw * 1000)), estimate, confidence, fragility
 
     def _extra_actions(
         self,
@@ -366,7 +389,7 @@ class SprintEngine:
         subject_by_key: Mapping[str, ExamSubjectProfile],
         plan_date: date,
         budget: int,
-        recent: Mapping[str, tuple[int, ...]],
+        subject_projections: Mapping[str, SubjectProjection],
         p1_projection: float,
         afo_rescues_this_week: int,
         has_scheduled_simulation: bool,
@@ -382,7 +405,7 @@ class SprintEngine:
                     budget,
                     "Simulacao seccional P1/P2 no ultimo fim de semana completo.",
                     planned_questions=max(10, min(40, budget // 2)),
-                    recent=recent,
+                    projection=subject_projections[subject.subject_key],
                 ),
             )
 
@@ -392,7 +415,9 @@ class SprintEngine:
             discursive_subjects = [subject for subject in subjects if subject.discursive_eligible]
             subject = max(
                 discursive_subjects,
-                key=lambda row: self._deficit(row, recent.get(row.subject_key, ())),
+                key=lambda row: self._deficit(
+                    row, subject_projections[row.subject_key]
+                ),
             )
             actions.append(
                 self._extra_action(
@@ -401,7 +426,7 @@ class SprintEngine:
                     10,
                     "Um dos tres esqueletos discursivos protegidos desta semana.",
                     planned_questions=0,
-                    recent=recent,
+                    projection=subject_projections[subject.subject_key],
                 )
             )
             remaining -= 10
@@ -418,7 +443,9 @@ class SprintEngine:
             ]
             subject = max(
                 p1_candidates,
-                key=lambda row: self._deficit(row, recent.get(row.subject_key, ())),
+                key=lambda row: self._deficit(
+                    row, subject_projections[row.subject_key]
+                ),
             )
             duration = min(15, remaining)
             actions.append(
@@ -428,7 +455,7 @@ class SprintEngine:
                     duration,
                     "Piso da P1 abaixo de 48: resgate curto de ponto recuperavel.",
                     planned_questions=max(5, min(10, duration // 2)),
-                    recent=recent,
+                    projection=subject_projections[subject.subject_key],
                 )
             )
             remaining -= duration
@@ -442,7 +469,9 @@ class SprintEngine:
             (key, weight)
             for key, weight in focus_weights
             if key in subject_by_key
-            and not self._at_goal_twice(subject_by_key[key], recent.get(key, ()))
+            and not self._at_goal_twice(
+                subject_by_key[key], subject_projections[key]
+            )
         ]
         if remaining >= 10 and active_focus:
             allocations = self._allocate_minutes(remaining, active_focus)
@@ -456,7 +485,7 @@ class SprintEngine:
                             chunk,
                             "Debito confirmado em materia de peso 2; corrigir e provar com conjunto curto.",
                             planned_questions=max(5, min(10, round(chunk / 3))),
-                            recent=recent,
+                            projection=subject_projections[key],
                         )
                     )
         return tuple(actions)
@@ -466,7 +495,7 @@ class SprintEngine:
         tasks: tuple[SourcePlanTask, ...],
         subject_by_key: Mapping[str, ExamSubjectProfile],
         budget: int,
-        recent: Mapping[str, tuple[int, ...]],
+        subject_projections: Mapping[str, SubjectProjection],
     ) -> tuple[SprintActionDraft, ...]:
         actions: list[SprintActionDraft] = []
         remaining = min(120, budget)
@@ -483,7 +512,7 @@ class SprintEngine:
                         duration,
                         "D-2: somente erros, excecoes e lei seca; sem conteudo novo.",
                         planned_questions=max(5, min(10, duration // 3)),
-                        recent=recent,
+                        projection=subject_projections[subject.subject_key],
                     ),
                     source_plan_task_id=task.id,
                     topic_hint=task.topic_hint,
@@ -500,7 +529,7 @@ class SprintEngine:
                     min(30, budget),
                     "D-2: erros, excecoes e lei seca de LTE.",
                     planned_questions=8,
-                    recent=recent,
+                    projection=subject_projections[subject.subject_key],
                 )
             )
         return self._positioned(tuple(actions))
@@ -513,14 +542,16 @@ class SprintEngine:
         reason: str,
         *,
         planned_questions: int,
-        recent: Mapping[str, tuple[int, ...]],
+        projection: SubjectProjection,
     ) -> SprintActionDraft:
-        estimate, confidence = self._estimate(subject, recent.get(subject.subject_key, ()))
+        estimate = projection.estimate_bp
+        confidence = projection.confidence_bp
+        fragility = projection.fragility_bp
         deficit = max(0, subject.target_low_bp - estimate)
         expected = round(
             subject.question_count
             * subject.question_weight
-            * max(250, deficit)
+            * (max(250, deficit) + self._fragility_bonus(fragility))
             / 10000
             * 1000
             / max(1, duration)
@@ -549,38 +580,33 @@ class SprintEngine:
                     "targetLowBp": subject.target_low_bp,
                     "questionWeight": subject.question_weight,
                     "baselineSource": subject.baseline_source,
+                    "fragilityBp": fragility,
+                    "projectionOrigin": projection.dominant_origin,
                 }
             ),
         )
 
     @staticmethod
-    def _estimate(
-        subject: ExamSubjectProfile, recent: tuple[int, ...]
-    ) -> tuple[int, int]:
-        if recent:
-            sample = recent[-3:]
-            estimate = round(sum(sample) / len(sample))
-            confidence = min(9000, subject.baseline_confidence_bp + len(sample) * 2500)
-            return estimate, confidence
-        return (
-            subject.baseline_accuracy_bp
-            if subject.baseline_accuracy_bp is not None
-            else 4000,
-            subject.baseline_confidence_bp,
-        )
+    def _fragility_bonus(fragility_bp: int) -> int:
+        return min(1000, max(0, fragility_bp) // 10)
 
+    @staticmethod
     def _deficit(
-        self, subject: ExamSubjectProfile, recent: tuple[int, ...]
+        subject: ExamSubjectProfile, projection: SubjectProjection
     ) -> int:
-        estimate, _ = self._estimate(subject, recent)
-        return subject.target_low_bp - estimate
+        return (
+            subject.target_low_bp
+            - projection.estimate_bp
+            + SprintEngine._fragility_bonus(projection.fragility_bp)
+        )
 
     @staticmethod
     def _at_goal_twice(
-        subject: ExamSubjectProfile, recent: tuple[int, ...]
+        subject: ExamSubjectProfile, projection: SubjectProjection
     ) -> bool:
-        return len(recent) >= 2 and all(
-            score >= subject.target_low_bp for score in recent[-2:]
+        return (
+            projection.demotion_eligible
+            and projection.estimate_bp >= subject.target_low_bp
         )
 
     @staticmethod
@@ -644,8 +670,7 @@ class SprintEngine:
         days_remaining: int,
         mode_label: str,
         actions: tuple[SprintActionDraft, ...],
-        p1_projection: float,
-        p2_projection: float,
+        projection: SprintProjection,
     ) -> SprintDayDraft:
         return SprintDayDraft(
             plan_date=plan_date,
@@ -654,8 +679,8 @@ class SprintEngine:
             actions=actions,
             score_snapshot=MappingProxyType(
                 {
-                    "p1Projection": p1_projection,
-                    "p2Projection": p2_projection,
+                    "p1Projection": projection.p1.projected,
+                    "p2Projection": projection.p2.projected,
                     "lsPlannedMinutes": sum(
                         action.duration_minutes
                         for action in actions
