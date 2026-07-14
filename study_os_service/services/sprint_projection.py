@@ -110,7 +110,7 @@ def _subject_projection(
     observations: Iterable[SprintPerformanceObservation],
     *,
     as_of: date,
-) -> tuple[SubjectProjection, dict[str, float]]:
+) -> tuple[SubjectProjection, dict[str, float], float]:
     records = tuple(observations)
     explicit_baseline = any(
         item.measurement_type == "baseline" for item in records
@@ -197,31 +197,26 @@ def _subject_projection(
         dominant_origin=_dominant_origin(dict(origin_weights)),
         warnings=tuple(warnings),
     )
-    return projection, dict(origin_weights)
+    return projection, dict(origin_weights), standard_error**2
 
 
 def _paper_projection(
-    subjects: Iterable[SubjectProjection],
+    subjects: Iterable[tuple[SubjectProjection, float]],
     *,
     floor: int,
     stretch: int,
 ) -> PaperProjection:
     rows = tuple(subjects)
+    projected = sum(item.question_count * item.estimate_bp / 10000 for item, _ in rows)
+    variance = sum((item.question_count**2) * item_variance for item, item_variance in rows)
+    margin = INTERVAL_Z * math.sqrt(variance)
     return PaperProjection(
-        projected=round(
-            sum(item.question_count * item.estimate_bp / 10000 for item in rows),
-            4,
-        ),
-        low=round(
-            sum(item.question_count * item.low_bp / 10000 for item in rows),
-            4,
-        ),
-        high=round(
-            sum(item.question_count * item.high_bp / 10000 for item in rows),
-            4,
-        ),
+        projected=round(projected, 4),
+        low=round(max(0.0, projected - margin), 4),
+        high=round(min(80.0, projected + margin), 4),
         floor=floor,
         stretch=stretch,
+        variance=variance,
     )
 
 
@@ -240,29 +235,37 @@ class SprintProjectionService:
             if observation.subject_key is not None:
                 by_subject[observation.subject_key].append(observation)
 
-        subjects: list[SubjectProjection] = []
+        subject_rows: list[tuple[SubjectProjection, float]] = []
         overall_origins: dict[str, float] = defaultdict(float)
         for profile in profiles:
-            projection, origins = _subject_projection(
+            projection, origins, variance = _subject_projection(
                 profile,
                 by_subject.get(profile.subject_key, ()),
                 as_of=as_of,
             )
-            subjects.append(projection)
+            subject_rows.append((projection, variance))
             for origin, weight in origins.items():
                 overall_origins[origin] += weight
 
         p1 = _paper_projection(
-            (item for item in subjects if item.paper == "P1"),
+            (row for row in subject_rows if row[0].paper == "P1"),
             floor=config.p1_floor_questions,
             stretch=config.p1_goal_high,
         )
         p2 = _paper_projection(
-            (item for item in subjects if item.paper == "P2"),
+            (row for row in subject_rows if row[0].paper == "P2"),
             floor=config.p2_goal_low,
             stretch=config.p2_goal_high,
         )
-        effective_total = sum(item.effective_sample for item in subjects)
+        subjects = [row[0] for row in subject_rows]
+        total_points = sum(item.question_count * item.question_weight for item in subjects)
+        confidence_bp = round(
+            sum(
+                item.confidence_bp * item.question_count * item.question_weight
+                for item in subjects
+            )
+            / total_points
+        )
         warnings = tuple(
             sorted({warning for item in subjects for warning in item.warnings})
         )
@@ -273,7 +276,7 @@ class SprintProjectionService:
             score_kind="raw_weighted_equivalent_not_fcc_standardized",
             p1=p1,
             p2=p2,
-            confidence_bp=_confidence(effective_total),
+            confidence_bp=confidence_bp,
             dominant_origin=_dominant_origin(dict(overall_origins)),
             subjects=tuple(subjects),
             warnings=warnings,
@@ -296,6 +299,7 @@ def projection_document(projection: SprintProjection) -> dict[str, Any]:
             "high": projection.p1.high,
             "floor": projection.p1.floor,
             "stretch": projection.p1.stretch,
+            "variance": projection.p1.variance,
         },
         "p2": {
             "projected": projection.p2.projected,
@@ -303,6 +307,7 @@ def projection_document(projection: SprintProjection) -> dict[str, Any]:
             "high": projection.p2.high,
             "floor": projection.p2.floor,
             "stretch": projection.p2.stretch,
+            "variance": projection.p2.variance,
         },
         "weighted": {
             "projected": projection.weighted_projected,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 import json
 import sqlite3
 from typing import Any, Mapping, TypedDict, cast
@@ -267,6 +267,7 @@ class SprintEvidenceRepository:
         target_slug: str,
         as_of: date,
     ) -> tuple[SprintPerformanceObservation, ...]:
+        learned_before = f"{(as_of + timedelta(days=1)).isoformat()}T00:00:00.000000Z"
         rows = self.connection.execute(
             """
             WITH ranked AS (
@@ -276,12 +277,12 @@ class SprintEvidenceRepository:
                        ORDER BY source_updated_at DESC, id DESC
                      ) AS revision_rank
               FROM sprint_performance_observations
-              WHERE target_slug=? AND observed_on<=?
+              WHERE target_slug=? AND observed_on<=? AND source_updated_at<?
             )
             SELECT * FROM ranked
             WHERE revision_rank=1
             ORDER BY subject_key, observed_on DESC, source_updated_at DESC, id DESC
             """,
-            (target_slug, as_of.isoformat()),
+            (target_slug, as_of.isoformat(), learned_before),
         )
         return tuple(_observation(row) for row in rows)

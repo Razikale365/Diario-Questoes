@@ -366,6 +366,31 @@ def test_latest_source_updated_at_wins_even_if_stale_revision_arrives_later(
     assert subject.estimate_bp < 4000
 
 
+def test_as_of_excludes_a_revision_learned_after_the_cutoff(
+    evidence: EvidenceHarness,
+    service,
+):
+    evidence.add_exact(
+        correct_count=10,
+        wrong_count=0,
+        source_record_id="time-travel-aggregate",
+        source_revision="known-on-cutoff",
+        source_updated_at=datetime(2026, 7, 14, 12, tzinfo=UTC),
+    )
+    evidence.add_exact(
+        correct_count=0,
+        wrong_count=10,
+        source_record_id="time-travel-aggregate",
+        source_revision="learned-later",
+        source_updated_at=datetime(2026, 7, 20, 12, tzinfo=UTC),
+    )
+
+    subject = service.project(TARGET, AS_OF).subject(KEY)
+
+    assert subject.effective_sample == pytest.approx(7.5)
+    assert subject.estimate_bp > 7000
+
+
 def test_profile_prior_is_replaced_not_double_counted_by_explicit_baseline(
     evidence: EvidenceHarness, service
 ):
@@ -431,13 +456,29 @@ def test_papers_intervals_and_weighted_distance_are_derived_from_subjects(
         sum(row.question_count * row.estimate_bp / 10000 for row in p2_subjects),
         abs=0.02,
     )
+    assert projection.p1.variance is not None
+    assert projection.p2.variance is not None
     assert projection.p1.low == pytest.approx(
-        sum(row.question_count * row.low_bp / 10000 for row in p1_subjects),
+        max(
+            0,
+            projection.p1.projected
+            - 1.645 * math.sqrt(projection.p1.variance),
+        ),
         abs=0.02,
     )
     assert projection.p2.high == pytest.approx(
-        sum(row.question_count * row.high_bp / 10000 for row in p2_subjects),
+        min(
+            80,
+            projection.p2.projected
+            + 1.645 * math.sqrt(projection.p2.variance),
+        ),
         abs=0.02,
+    )
+    assert projection.p1.low > sum(
+        row.question_count * row.low_bp / 10000 for row in p1_subjects
+    )
+    assert projection.p2.high < sum(
+        row.question_count * row.high_bp / 10000 for row in p2_subjects
     )
     assert projection.p1.floor == 48
     assert projection.p1.stretch == 64
@@ -446,11 +487,22 @@ def test_papers_intervals_and_weighted_distance_are_derived_from_subjects(
     assert projection.weighted_projected == pytest.approx(
         projection.p1.projected + 2 * projection.p2.projected
     )
+    weighted_standard_error = math.sqrt(
+        projection.p1.variance + 4 * projection.p2.variance
+    )
     assert projection.weighted_low == pytest.approx(
-        projection.p1.low + 2 * projection.p2.low
+        max(
+            0,
+            projection.weighted_projected
+            - 1.645 * weighted_standard_error,
+        )
     )
     assert projection.weighted_high == pytest.approx(
-        projection.p1.high + 2 * projection.p2.high
+        min(
+            240,
+            projection.weighted_projected
+            + 1.645 * weighted_standard_error,
+        )
     )
     assert projection.weighted_target == 204
     assert projection.distance_to_target == pytest.approx(
@@ -478,6 +530,22 @@ def test_confidence_uses_only_effective_evidence_and_reports_auditable_origin(
     assert subject.confidence_bp == expected_confidence
     assert subject.dominant_origin == "diario_backup"
     assert "sample_limited" in subject.warnings
+
+
+def test_global_confidence_is_coverage_weighted_across_the_whole_exam(
+    evidence: EvidenceHarness,
+    service,
+):
+    evidence.add_exact(
+        measurement_type="full_exam",
+        correct_count=80,
+        wrong_count=0,
+    )
+
+    projection = service.project(TARGET, AS_OF)
+
+    assert projection.subject(KEY).confidence_bp > 8000
+    assert projection.confidence_bp < 2000
 
 
 def test_projection_route_honors_as_of_and_serializes_the_audit_contract(

@@ -379,6 +379,7 @@ class PaperProjection:
     high: float
     floor: int
     stretch: int
+    variance: float | None = None
 
     def __post_init__(self) -> None:
         low = _finite_number(self.low, "paper low")
@@ -395,6 +396,11 @@ class PaperProjection:
         object.__setattr__(self, "high", high)
         object.__setattr__(self, "floor", floor)
         object.__setattr__(self, "stretch", stretch)
+        if self.variance is not None:
+            variance = _finite_number(self.variance, "paper variance")
+            if variance < 0:
+                raise ValueError("paper variance cannot be negative")
+            object.__setattr__(self, "variance", variance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,10 +445,16 @@ class SprintProjection:
 
     @property
     def weighted_low(self) -> float:
+        if self.p1.variance is not None and self.p2.variance is not None:
+            standard_error = math.sqrt(self.p1.variance + 4 * self.p2.variance)
+            return max(0.0, self.weighted_projected - 1.645 * standard_error)
         return self.p1.low + 2 * self.p2.low
 
     @property
     def weighted_high(self) -> float:
+        if self.p1.variance is not None and self.p2.variance is not None:
+            standard_error = math.sqrt(self.p1.variance + 4 * self.p2.variance)
+            return min(240.0, self.weighted_projected + 1.645 * standard_error)
         return self.p1.high + 2 * self.p2.high
 
     @property
