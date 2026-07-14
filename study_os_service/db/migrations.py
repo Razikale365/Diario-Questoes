@@ -1243,7 +1243,8 @@ CREATE TABLE planner_blocks (
                 json_valid(report_json) AND json_type(report_json)='object'
               ),
               imported_at TEXT NOT NULL DEFAULT
-                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (batch_id, target_slug, origin)
             );
             """,
             """
@@ -1251,8 +1252,7 @@ CREATE TABLE planner_blocks (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               target_slug TEXT NOT NULL
                 REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
-              batch_id TEXT NOT NULL
-                REFERENCES sprint_evidence_import_batches(batch_id) ON DELETE RESTRICT,
+              batch_id TEXT NOT NULL,
               subject_profile_id INTEGER
                 REFERENCES exam_subject_profiles(id) ON DELETE RESTRICT,
               subject_key TEXT,
@@ -1266,7 +1266,19 @@ CREATE TABLE planner_blocks (
                 CHECK (length(trim(source_record_id)) > 0),
               source_revision TEXT NOT NULL
                 CHECK (length(trim(source_revision)) > 0),
-              source_updated_at TEXT NOT NULL CHECK (length(source_updated_at) >= 20),
+              source_updated_at TEXT NOT NULL CHECK (
+                length(source_updated_at)=27
+                AND source_updated_at GLOB
+                  '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'
+                AND CAST(substr(source_updated_at, 1, 4) AS INTEGER)
+                  BETWEEN 1 AND 9999
+                AND CAST(substr(source_updated_at, 12, 2) AS INTEGER)
+                  BETWEEN 0 AND 23
+                AND date(source_updated_at) IS NOT NULL
+                AND date(source_updated_at)=substr(source_updated_at, 1, 10)
+                AND time(source_updated_at) IS NOT NULL
+                AND time(source_updated_at)=substr(source_updated_at, 12, 8)
+              ),
               measurement_type TEXT NOT NULL CHECK (measurement_type IN (
                 'full_exam','sectional_mock','unseen_set','mixed_set',
                 'error_review','ls_percentage','sprint_action','baseline'
@@ -1294,6 +1306,10 @@ CREATE TABLE planner_blocks (
               created_at TEXT NOT NULL DEFAULT
                 (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
               UNIQUE (target_slug, origin, source_record_id, source_revision),
+              FOREIGN KEY (batch_id, target_slug, origin)
+                REFERENCES sprint_evidence_import_batches(
+                  batch_id, target_slug, origin
+                ) ON DELETE RESTRICT,
               CHECK ((correct_count IS NULL) = (wrong_count IS NULL)),
               CHECK (correct_count IS NULL OR correct_count + wrong_count > 0),
               CHECK (
@@ -1317,7 +1333,19 @@ CREATE TABLE planner_blocks (
               source_kind TEXT NOT NULL CHECK (source_kind IN ('ls','trilha','manual')),
               plan_label TEXT NOT NULL CHECK (length(trim(plan_label)) > 0),
               meta_number INTEGER CHECK (meta_number IS NULL OR meta_number >= 0),
-              released_at TEXT NOT NULL CHECK (length(released_at) >= 20),
+              released_at TEXT NOT NULL CHECK (
+                length(released_at)=27
+                AND released_at GLOB
+                  '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'
+                AND CAST(substr(released_at, 1, 4) AS INTEGER)
+                  BETWEEN 1 AND 9999
+                AND CAST(substr(released_at, 12, 2) AS INTEGER)
+                  BETWEEN 0 AND 23
+                AND date(released_at) IS NOT NULL
+                AND date(released_at)=substr(released_at, 1, 10)
+                AND time(released_at) IS NOT NULL
+                AND time(released_at)=substr(released_at, 12, 8)
+              ),
               starts_on TEXT NOT NULL CHECK (
                 length(starts_on)=10 AND date(starts_on)=starts_on
               ),
@@ -1330,6 +1358,7 @@ CREATE TABLE planner_blocks (
               updated_at TEXT NOT NULL DEFAULT
                 (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
               UNIQUE (target_slug, source_kind, plan_label),
+              UNIQUE (id, target_slug),
               CHECK (starts_on <= ends_on),
               CHECK (date(released_at) <= ends_on)
             );
@@ -1339,14 +1368,54 @@ CREATE TABLE planner_blocks (
               REFERENCES source_plan_cycles(id) ON DELETE RESTRICT;
             """,
             """
+            CREATE UNIQUE INDEX uq_source_plan_tasks_cycle_target
+              ON source_plan_tasks(id, source_cycle_id, target_slug);
+            """,
+            """
+            CREATE TRIGGER trg_source_plan_tasks_cycle_target_insert
+            BEFORE INSERT ON source_plan_tasks
+            WHEN NEW.source_cycle_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM source_plan_cycles
+                WHERE id=NEW.source_cycle_id
+                  AND target_slug=NEW.target_slug
+              )
+            BEGIN
+              SELECT RAISE(ABORT, 'source plan cycle target mismatch');
+            END;
+            """,
+            """
+            CREATE TRIGGER trg_source_plan_tasks_cycle_target_update
+            BEFORE UPDATE OF source_cycle_id, target_slug ON source_plan_tasks
+            WHEN NEW.source_cycle_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM source_plan_cycles
+                WHERE id=NEW.source_cycle_id
+                  AND target_slug=NEW.target_slug
+              )
+            BEGIN
+              SELECT RAISE(ABORT, 'source plan cycle target mismatch');
+            END;
+            """,
+            """
+            CREATE TRIGGER trg_source_plan_cycles_target_update
+            BEFORE UPDATE OF target_slug ON source_plan_cycles
+            WHEN EXISTS (
+              SELECT 1 FROM source_plan_tasks
+              WHERE source_cycle_id=OLD.id
+                AND target_slug<>NEW.target_slug
+            )
+            BEGIN
+              SELECT RAISE(ABORT, 'source plan cycle target mismatch');
+            END;
+            """,
+            """
             CREATE TABLE source_plan_backlog_candidates (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               target_slug TEXT NOT NULL
                 REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
-              source_cycle_id INTEGER NOT NULL
-                REFERENCES source_plan_cycles(id) ON DELETE RESTRICT,
-              source_plan_task_id INTEGER NOT NULL UNIQUE
-                REFERENCES source_plan_tasks(id) ON DELETE RESTRICT,
+              source_cycle_id INTEGER NOT NULL,
+              source_plan_task_id INTEGER NOT NULL UNIQUE,
               reason TEXT NOT NULL CHECK (reason='cycle_closed_pending'),
               return_score_milli INTEGER NOT NULL CHECK (return_score_milli >= 0),
               state TEXT NOT NULL DEFAULT 'candidate' CHECK (
@@ -1363,6 +1432,14 @@ CREATE TABLE planner_blocks (
                 (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
               updated_at TEXT NOT NULL DEFAULT
                 (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              FOREIGN KEY (source_cycle_id, target_slug)
+                REFERENCES source_plan_cycles(id, target_slug)
+                ON DELETE RESTRICT,
+              FOREIGN KEY (
+                source_plan_task_id, source_cycle_id, target_slug
+              ) REFERENCES source_plan_tasks(
+                id, source_cycle_id, target_slug
+              ) ON DELETE RESTRICT,
               CHECK (
                 (state='recovered' AND recovered_on IS NOT NULL) OR
                 (state!='recovered' AND recovered_on IS NULL)
