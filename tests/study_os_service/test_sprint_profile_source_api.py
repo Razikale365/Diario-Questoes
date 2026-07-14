@@ -160,6 +160,71 @@ def test_fluencia_de_dados_maps_without_broad_ti_aliases(tmp_path: Path):
     assert generic_ti["mappingStatus"] == "unresolved"
 
 
+def _import_single_subject_source_task(
+    client: TestClient,
+    *,
+    external_task_id: str,
+    discipline: str,
+):
+    response = client.post(
+        "/api/v1/source-plans/import",
+        headers={"Idempotency-Key": f"subject-match-{external_task_id}"},
+        json={
+            "targetSlug": "sefaz_ce",
+            "sourceKind": "ls",
+            "planLabel": "Meta 47",
+            "metaNumber": 47,
+            "tasks": [
+                {
+                    "externalTaskId": external_task_id,
+                    "sourceOrder": 1,
+                    "discipline": discipline,
+                    "taskKind": "questions",
+                    "description": "Conjunto FCC",
+                    "estimatedMinutes": 45,
+                    "status": "pending",
+                }
+            ],
+        },
+    )
+    listed = client.get(
+        "/api/v1/source-plans/tasks?targetSlug=sefaz_ce"
+    ).json()["items"]
+    return response, listed[0]
+
+
+def test_source_plan_matching_prefers_an_exact_alias(tmp_path: Path):
+    with _client(tmp_path) as client:
+        _seed_sefaz(client)
+        client.get("/api/v1/sprints/config?targetSlug=sefaz_ce")
+        response, task = _import_single_subject_source_task(
+            client,
+            external_task_id="economia-exata",
+            discipline="Economia",
+        )
+
+    assert response.status_code == 201, response.text
+    assert task["subjectKey"] == "p1_economia"
+    assert task["mappingStatus"] == "matched"
+
+
+def test_source_plan_matching_leaves_an_ambiguous_alias_unresolved(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _seed_sefaz(client)
+        client.get("/api/v1/sprints/config?targetSlug=sefaz_ce")
+        response, task = _import_single_subject_source_task(
+            client,
+            external_task_id="contabilidade-ambigua",
+            discipline="Contabilidade",
+        )
+
+    assert response.status_code == 201, response.text
+    assert task["subjectKey"] is None
+    assert task["mappingStatus"] == "unresolved"
+
+
 def test_sprint_bootstrap_does_not_overwrite_user_edited_target_fields(tmp_path: Path):
     with _client(tmp_path) as client:
         _seed_sefaz(client)

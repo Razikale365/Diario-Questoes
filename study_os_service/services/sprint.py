@@ -4,11 +4,11 @@ from datetime import date
 import hashlib
 import json
 import sqlite3
-import unicodedata
 from typing import Any, Mapping
 
 from study_os_service.domain.sprint import ExamSprintConfig, SourcePlanTask
 from study_os_service.repositories.sprint import SprintRepository
+from study_os_service.services.subject_matching import match_subject
 
 
 OFFICIAL_EDITAL_URL = (
@@ -185,14 +185,6 @@ class IdempotencyConflictError(RuntimeError):
     pass
 
 
-def _normalized(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value)
-    ascii_value = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(
-        "".join(char if char.isalnum() else " " for char in ascii_value.lower()).split()
-    )
-
-
 def _canonical_hash(payload: object) -> str:
     document = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(document.encode("utf-8")).hexdigest()
@@ -276,7 +268,6 @@ class SourcePlanService:
             return response | {"replayed": True}
 
         subjects = self.repository.list_subjects(target_slug)
-        aliases = self._alias_index(subjects)
         created_count = 0
         updated_count = 0
         unresolved_count = 0
@@ -285,7 +276,7 @@ class SourcePlanService:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             for task in prepared["tasks"]:
-                subject_key = self._match_subject(task["discipline"], aliases)
+                subject_key = match_subject(task["discipline"], subjects).subject_key
                 task["subject_key"] = subject_key
                 unresolved_count += int(
                     subject_key is None
@@ -377,27 +368,6 @@ class SourcePlanService:
             merged_provenance["origin"] = "ls-visible-history"
             merged_provenance["lastSyncOrigin"] = "planner-local-sync"
         task["provenance"] = merged_provenance
-
-    @staticmethod
-    def _alias_index(subjects: tuple[Any, ...]) -> tuple[tuple[str, str], ...]:
-        aliases: list[tuple[str, str]] = []
-        for subject in subjects:
-            for alias in (subject.display_name, *subject.aliases):
-                aliases.append((_normalized(alias), subject.subject_key))
-        aliases.sort(key=lambda pair: len(pair[0]), reverse=True)
-        return tuple(aliases)
-
-    @staticmethod
-    def _match_subject(
-        discipline: str, aliases: tuple[tuple[str, str], ...]
-    ) -> str | None:
-        candidate = _normalized(discipline)
-        for alias, subject_key in aliases:
-            if candidate == alias or alias in candidate or (
-                len(candidate) >= 5 and candidate in alias
-            ):
-                return subject_key
-        return None
 
     @staticmethod
     def _prepare_import(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 import sqlite3
 from typing import Any
 
@@ -12,6 +12,7 @@ from study_os_service.domain.sprint import (
     ExamSubjectProfile,
     SourcePlanTask,
 )
+from study_os_service.domain.sprint_evidence import SprintPerformanceObservation
 from study_os_service.services.sprint import (
     IdempotencyConflictError,
     SourcePlanService,
@@ -24,6 +25,10 @@ from study_os_service.services.sprint_day import (
     SprintConfigMutationService,
     SprintDayNotFoundError,
     SprintDayService,
+)
+from study_os_service.services.sprint_evidence import (
+    EvidenceBatchConflictError,
+    SprintEvidenceService,
 )
 
 
@@ -127,6 +132,42 @@ def _source_task_payload(task: SourcePlanTask) -> dict[str, Any]:
     }
 
 
+def _utc_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat(timespec="microseconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def _observation_payload(
+    observation: SprintPerformanceObservation,
+) -> dict[str, Any]:
+    return {
+        "id": observation.id,
+        "targetSlug": observation.target_slug,
+        "batchId": observation.batch_id,
+        "subjectProfileId": observation.subject_profile_id,
+        "subjectKey": observation.subject_key,
+        "discipline": observation.discipline,
+        "topicHint": observation.topic_hint,
+        "observedOn": observation.observed_on.isoformat(),
+        "origin": observation.origin,
+        "sourceRecordId": observation.source_record_id,
+        "sourceRevision": observation.source_revision,
+        "sourceUpdatedAt": _utc_timestamp(observation.source_updated_at),
+        "measurementType": observation.measurement_type,
+        "examBoard": observation.exam_board,
+        "correctCount": observation.correct_count,
+        "wrongCount": observation.wrong_count,
+        "doubtCount": observation.doubt_count,
+        "percentageBp": observation.percentage_bp,
+        "sampleSize": observation.sample_size,
+        "transferScope": observation.transfer_scope,
+        "transferabilityBp": observation.transferability_bp,
+        "contentHash": observation.content_hash,
+        "provenance": dict(observation.provenance),
+    }
+
+
 def _not_found(exc: SprintTargetNotFoundError) -> SprintApiError:
     target_slug = str(exc.args[0])
     return SprintApiError(
@@ -193,6 +234,55 @@ async def import_source_plan(
         ) from exc
     except (TypeError, ValueError) as exc:
         raise SprintApiError(422, "invalid_source_plan", str(exc)) from exc
+
+
+@router.post("/sprints/evidence/import", status_code=201)
+async def import_sprint_evidence(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        return SprintEvidenceService(request.app.state.connection).import_batch(
+            payload
+        )
+    except SprintTargetNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except EvidenceBatchConflictError as exc:
+        raise SprintApiError(
+            409, "evidence_batch_conflict", str(exc)
+        ) from exc
+    except sqlite3.IntegrityError as exc:
+        raise SprintApiError(
+            409,
+            "evidence_storage_conflict",
+            "evidence conflicts with stored data",
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise SprintApiError(
+            422, "invalid_sprint_evidence", str(exc)
+        ) from exc
+
+
+@router.get("/sprints/evidence")
+async def list_sprint_evidence(
+    request: Request,
+    target_slug: str = Query(alias="targetSlug", min_length=1),
+) -> dict[str, Any]:
+    try:
+        items = SprintEvidenceService(
+            request.app.state.connection
+        ).list_observations(target_slug.strip())
+    except SprintTargetNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except (TypeError, ValueError) as exc:
+        raise SprintApiError(
+            422, "invalid_sprint_evidence", str(exc)
+        ) from exc
+    return {
+        "targetSlug": target_slug.strip(),
+        "items": [_observation_payload(item) for item in items],
+        "unresolvedCount": sum(item.subject_key is None for item in items),
+    }
 
 
 @router.get("/source-plans/tasks")
