@@ -20,6 +20,7 @@ from study_os_service.services.sprint import (
     SprintTargetNotFoundError,
 )
 from study_os_service.services.sprint_engine import SprintActionDraft, SprintEngine
+from study_os_service.services.sprint_evidence import SprintEvidenceService
 from study_os_service.services.sprint_projection import (
     SprintProjectionService,
     projection_document,
@@ -333,6 +334,9 @@ class SprintDayService:
                 values=values,
             )
             self.repository.insert_action_question_refs(action_id, refs)
+            SprintEvidenceService(
+                self.connection
+            ).append_action_result_in_transaction(saved)
             response = self._action_document(saved) | {"replayed": False}
             self.repository.save_receipt(
                 idempotency_key=receipt_key,
@@ -366,16 +370,55 @@ class SprintDayService:
                 if isinstance(projection, Mapping)
                 else snapshot.get("p2Projection", 0)
             )
+            is_v2 = isinstance(projection, Mapping)
+            weighted = (
+                projection["weighted"]["projected"]
+                if is_v2
+                else p1 + 2 * p2
+            )
             documents.append(
                 {
                     "runId": run["id"],
                     "date": run["plan_date"],
                     "p1": p1,
                     "p2": p2,
+                    "projection": projection if is_v2 else None,
+                    "projectionOrigin": (
+                        snapshot.get("projectionOrigin", "derived")
+                        if is_v2
+                        else "legacy_manual"
+                    ),
+                    "confidenceBp": projection["confidenceBp"] if is_v2 else None,
+                    "weightedProjected": weighted,
+                    "distanceToTarget": (
+                        projection["weighted"]["distanceToTarget"]
+                        if is_v2
+                        else 204 - weighted
+                    ),
+                    "dominantOrigin": (
+                        projection["dominantOrigin"] if is_v2 else None
+                    ),
+                    "formulaVersion": (
+                        projection["formulaVersion"] if is_v2 else None
+                    ),
                     "generatedAt": run["generated_at"],
                 }
             )
-        latest = documents[-1] if documents else {"p1": 0, "p2": 0}
+        latest = (
+            documents[-1]
+            if documents
+            else {
+                "p1": 0,
+                "p2": 0,
+                "projection": None,
+                "projectionOrigin": None,
+                "confidenceBp": None,
+                "weightedProjected": 0,
+                "distanceToTarget": 204,
+                "dominantOrigin": None,
+                "formulaVersion": None,
+            }
+        )
         return {"targetSlug": target_slug, "latest": latest, "runs": documents}
 
     def _run_document(self, run: sqlite3.Row, *, replayed: bool) -> dict[str, Any]:
@@ -441,7 +484,7 @@ class SprintDayService:
                 "p2": p2_projection,
             },
             "projection": projection,
-            "projectionOrigin": snapshot.get("projectionOrigin", "legacy"),
+            "projectionOrigin": snapshot.get("projectionOrigin", "legacy_manual"),
             "actions": actions,
             "minimumViable": {
                 "actionIds": [action["id"] for action in viable],
@@ -624,6 +667,10 @@ class SprintDayService:
         )
         if correct + wrong > questions_done:
             raise ValueError("correct and wrong counts exceed questions done")
+        if state == "completed" and questions_done > 0 and correct + wrong != questions_done:
+            raise ValueError(
+                "completed question actions require correct and wrong totals"
+            )
         actual = payload.get("actualMinutes")
         energy = payload.get("energyAfter")
         refs_payload = payload.get("questionRefs", [])

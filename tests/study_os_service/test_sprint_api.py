@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from study_os_service.app import create_app
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
+from study_os_service.repositories.sprint_evidence import SprintEvidenceRepository
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -1042,9 +1043,198 @@ def test_legacy_v1_score_snapshot_remains_readable(tmp_path: Path):
             "/api/v1/sprints/day",
             params={"targetSlug": "sefaz_ce", "date": "2026-07-14"},
         )
+        trajectory = client.get(
+            "/api/v1/sprints/trajectory",
+            params={"targetSlug": "sefaz_ce"},
+        )
 
     assert stored.status_code == 200, stored.text
     assert stored.json()["projections"] == {"p1": 42, "p2": 55}
     assert stored.json()["projection"] is None
-    assert stored.json()["projectionOrigin"] == "legacy"
+    assert stored.json()["projectionOrigin"] == "legacy_manual"
     assert stored.json()["algorithmVersion"] == "sefaz-ce-sprint-v1"
+    assert trajectory.status_code == 200, trajectory.text
+    legacy = trajectory.json()["latest"]
+    assert legacy["projectionOrigin"] == "legacy_manual"
+    assert legacy["projection"] is None
+    assert legacy["confidenceBp"] is None
+    assert legacy["formulaVersion"] is None
+    assert legacy["weightedProjected"] == 152
+    assert legacy["distanceToTarget"] == 52
+
+
+def test_completed_action_appends_aggregate_evidence_once_without_question_data(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        day = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "action-evidence-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        ).json()
+        action = next(
+            row
+            for row in day["actions"]
+            if row["sourcePlanTaskId"] is not None
+            and row["plannedQuestions"] > 0
+        )
+        payload = {
+            "expectedVersion": action["version"],
+            "decision": "accepted",
+            "state": "completed",
+            "actualMinutes": 40,
+            "questionsDone": 10,
+            "correctCount": 8,
+            "wrongCount": 2,
+            "doubtCount": 1,
+            "questionRefs": [
+                {
+                    "questionFingerprint": "never-copy-this-fingerprint",
+                    "sourceTaskId": "never-copy-this-answer",
+                    "reason": "doubt",
+                }
+            ],
+        }
+        completed = client.put(
+            f"/api/v1/sprints/actions/{action['id']}",
+            headers={"Idempotency-Key": "record-action-evidence"},
+            json=payload,
+        )
+        replay = client.put(
+            f"/api/v1/sprints/actions/{action['id']}",
+            headers={"Idempotency-Key": "record-action-evidence"},
+            json=payload,
+        )
+        database = connect_database(client.app.state.settings.database_path)
+        try:
+            batches = tuple(
+                database.execute(
+                    "SELECT * FROM sprint_evidence_import_batches WHERE batch_id LIKE ?",
+                    (f"sprint-action:{action['id']}:%",),
+                )
+            )
+            observations = tuple(
+                database.execute(
+                    "SELECT * FROM sprint_performance_observations WHERE source_record_id=?",
+                    (f"sprint-action:{action['id']}",),
+                )
+            )
+        finally:
+            database.close()
+
+    assert completed.status_code == 200, completed.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["replayed"] is True
+    expected_batch = f"sprint-action:{action['id']}:v{completed.json()['version']}"
+    assert [row["batch_id"] for row in batches] == [expected_batch]
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation["correct_count"] == 8
+    assert observation["wrong_count"] == 2
+    assert observation["doubt_count"] == 1
+    assert observation["measurement_type"] == "sprint_action"
+    encoded = json.dumps(dict(observation), ensure_ascii=True)
+    assert "never-copy-this" not in encoded
+
+
+def test_action_and_evidence_append_roll_back_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        day = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "rollback-evidence-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        ).json()
+        action = next(
+            row
+            for row in day["actions"]
+            if row["sourcePlanTaskId"] is not None
+            and row["plannedQuestions"] > 0
+        )
+
+        def fail_append(*_args, **_kwargs):
+            raise RuntimeError("forced evidence append failure")
+
+        monkeypatch.setattr(
+            SprintEvidenceRepository,
+            "append_observation_in_transaction",
+            fail_append,
+        )
+        with pytest.raises(RuntimeError, match="forced evidence append failure"):
+            client.put(
+                f"/api/v1/sprints/actions/{action['id']}",
+                headers={"Idempotency-Key": "rollback-action-evidence"},
+                json={
+                    "expectedVersion": action["version"],
+                    "decision": "accepted",
+                    "state": "completed",
+                    "questionsDone": 10,
+                    "correctCount": 7,
+                    "wrongCount": 3,
+                    "doubtCount": 1,
+                },
+            )
+        database = connect_database(client.app.state.settings.database_path)
+        try:
+            saved = database.execute(
+                "SELECT state, version FROM sprint_actions WHERE id=?",
+                (action["id"],),
+            ).fetchone()
+            batch_count = database.execute(
+                "SELECT COUNT(*) FROM sprint_evidence_import_batches WHERE batch_id LIKE ?",
+                (f"sprint-action:{action['id']}:%",),
+            ).fetchone()[0]
+        finally:
+            database.close()
+
+    assert (saved["state"], saved["version"]) == (
+        action["state"],
+        action["version"],
+    )
+    assert batch_count == 0
+
+
+def test_trajectory_exposes_the_frozen_v2_projection_audit(tmp_path: Path):
+    with _client(tmp_path) as client:
+        _prepare(client, task_count=1)
+        generated = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "trajectory-v2-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        ).json()
+        response = client.get(
+            "/api/v1/sprints/trajectory",
+            params={"targetSlug": "sefaz_ce"},
+        )
+
+    assert response.status_code == 200, response.text
+    latest = response.json()["latest"]
+    assert latest["projection"] == generated["projection"]
+    assert latest["projectionOrigin"] == "derived"
+    assert latest["confidenceBp"] == generated["projection"]["confidenceBp"]
+    assert latest["weightedProjected"] == pytest.approx(
+        generated["projection"]["weighted"]["projected"]
+    )
+    assert latest["distanceToTarget"] == pytest.approx(
+        generated["projection"]["weighted"]["distanceToTarget"]
+    )
+    assert latest["dominantOrigin"] == generated["projection"]["dominantOrigin"]
+    assert latest["formulaVersion"] == "sefaz-ce-projection-v2"
+    assert latest["projection"]["p1"]["low"] is not None
+    assert latest["projection"]["p2"]["high"] is not None

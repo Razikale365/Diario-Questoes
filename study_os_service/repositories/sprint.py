@@ -530,6 +530,7 @@ class SprintRepository:
             """
             SELECT actions.*, subjects.subject_key, subjects.display_name,
                    subjects.paper, subjects.question_weight,
+                   runs.plan_date,
                    source.external_task_id, source.plan_label,
                    source.discipline AS source_discipline,
                    source.material_hint AS source_material_hint,
@@ -537,6 +538,7 @@ class SprintRepository:
             FROM sprint_actions AS actions
             JOIN exam_subject_profiles AS subjects
               ON subjects.id=actions.subject_profile_id
+            JOIN sprint_day_runs AS runs ON runs.id=actions.run_id
             LEFT JOIN source_plan_tasks AS source
               ON source.id=actions.source_plan_task_id
             WHERE actions.id=?

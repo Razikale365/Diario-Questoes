@@ -427,6 +427,121 @@ class SprintEvidenceService:
                 self.connection.rollback()
             raise
 
+    def append_action_result_in_transaction(
+        self,
+        action: sqlite3.Row,
+    ) -> SprintPerformanceObservation | None:
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active evidence transaction")
+        if action["state"] != "completed" or action["questions_done"] <= 0:
+            return None
+        if action["correct_count"] + action["wrong_count"] != action["questions_done"]:
+            raise ValueError(
+                "completed question actions require correct and wrong totals"
+            )
+
+        action_evidence = json.loads(action["evidence_json"])
+        source_task_kind = action_evidence.get("sourceTaskKind", "")
+        if action["action_kind"] == "simulation" or source_task_kind == "simulation":
+            measurement_type = "sectional_mock"
+        elif action["action_kind"] == "review" or source_task_kind == "review":
+            measurement_type = "error_review"
+        else:
+            measurement_type = "sprint_action"
+
+        batch_id = f"sprint-action:{action['id']}:v{action['version']}"
+        source_record_id = f"sprint-action:{action['id']}"
+        updated_at = _timestamp(action["updated_at"], "action updated at")
+        provisional = SprintPerformanceObservation(
+            id=None,
+            target_slug=action["target_slug"],
+            batch_id=batch_id,
+            subject_profile_id=action["subject_profile_id"],
+            subject_key=action["subject_key"],
+            discipline=action["display_name"],
+            topic_hint="",
+            observed_on=date.fromisoformat(action["plan_date"]),
+            origin="sprint_action",
+            source_record_id=source_record_id,
+            source_revision=f"v{action['version']}",
+            source_updated_at=updated_at,
+            measurement_type=measurement_type,
+            exam_board="FCC",
+            correct_count=action["correct_count"],
+            wrong_count=action["wrong_count"],
+            doubt_count=action["doubt_count"],
+            percentage_bp=None,
+            transfer_scope="content",
+            transferability_bp=10000,
+            content_hash="0" * 64,
+            provenance={
+                "provider": "sprint_day",
+                "sourceTaskId": str(action["id"]),
+                "sourceKind": "internal_action",
+            },
+        )
+        observation = replace(
+            provisional,
+            content_hash=_sha256(_observation_hash_document(provisional)),
+        )
+        payload_hash = _batch_hash(
+            observation.target_slug,
+            batch_id,
+            observation.origin,
+            (observation,),
+        )
+        existing_batch = self.repository.get_batch(batch_id)
+        if existing_batch is not None:
+            if existing_batch["payload_hash"] != payload_hash:
+                raise EvidenceBatchConflictError(
+                    "action evidence batch conflicts with stored data"
+                )
+            return self.repository.find_revision(
+                observation.target_slug,
+                observation.origin,
+                observation.source_record_id,
+                observation.source_revision,
+            )
+
+        self.repository.create_batch_in_transaction(
+            batch_id=batch_id,
+            target_slug=observation.target_slug,
+            origin=observation.origin,
+            payload_hash=payload_hash,
+            item_count=1,
+            imported_at=updated_at,
+        )
+        saved = self.repository.append_observation_in_transaction(observation)
+        report = {
+            "batchId": batch_id,
+            "targetSlug": observation.target_slug,
+            "origin": observation.origin,
+            "dryRun": False,
+            "replayed": False,
+            "insertedCount": 1,
+            "duplicateCount": 0,
+            "conflictCount": 0,
+            "unresolvedCount": 0,
+            "items": [
+                {
+                    "sourceRecordId": observation.source_record_id,
+                    "sourceRevision": observation.source_revision,
+                    "outcome": "inserted",
+                    "subjectKey": observation.subject_key,
+                    "matchStatus": "exact",
+                    "contentHash": observation.content_hash,
+                }
+            ],
+        }
+        self.repository.finalize_batch_in_transaction(
+            batch_id=batch_id,
+            inserted_count=1,
+            duplicate_count=0,
+            conflict_count=0,
+            report=report,
+        )
+        return saved
+
     def list_observations(
         self, target_slug: str
     ) -> tuple[SprintPerformanceObservation, ...]:
