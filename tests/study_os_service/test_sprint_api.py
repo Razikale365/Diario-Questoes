@@ -1142,6 +1142,96 @@ def test_completed_action_appends_aggregate_evidence_once_without_question_data(
     assert "never-copy-this" not in encoded
 
 
+def test_cross_paper_simulation_result_does_not_calibrate_lte(
+    tmp_path: Path,
+):
+    with _client(tmp_path) as client:
+        assert client.post(
+            "/api/v1/planner/targets/seed",
+            json={"targetSlugs": ["sefaz_ce"]},
+        ).status_code == 201
+        assert client.get(
+            "/api/v1/sprints/config?targetSlug=sefaz_ce"
+        ).status_code == 200
+        imported = client.post(
+            "/api/v1/source-plans/import",
+            headers={"Idempotency-Key": "cross-paper-simulation-source"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "sourceKind": "ls",
+                "planLabel": "Meta simulada",
+                "metaNumber": 48,
+                "tasks": [{
+                    "externalTaskId": "cross-paper-simulation",
+                    "scheduledDate": "2026-07-14",
+                    "sourceOrder": 1,
+                    "discipline": "Simulados",
+                    "taskKind": "simulation",
+                    "description": "Simulado completo P1 e P2",
+                    "estimatedMinutes": 60,
+                }],
+            },
+        )
+        assert imported.status_code == 201, imported.text
+        before = client.get(
+            "/api/v1/sprints/projection",
+            params={"targetSlug": "sefaz_ce", "asOf": "2026-07-14"},
+        ).json()
+        generated = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "cross-paper-simulation-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-14",
+                "energyLevel": 3,
+            },
+        )
+        assert generated.status_code == 201, generated.text
+        action = next(
+            row
+            for row in generated.json()["actions"]
+            if row["externalTaskId"] == "cross-paper-simulation"
+        )
+        completed = client.put(
+            f"/api/v1/sprints/actions/{action['id']}",
+            headers={"Idempotency-Key": "cross-paper-simulation-result"},
+            json={
+                "expectedVersion": action["version"],
+                "decision": "accepted",
+                "state": "completed",
+                "questionsDone": 20,
+                "correctCount": 20,
+                "wrongCount": 0,
+                "doubtCount": 0,
+            },
+        )
+        after = client.get(
+            "/api/v1/sprints/projection",
+            params={"targetSlug": "sefaz_ce", "asOf": "2026-07-14"},
+        ).json()
+        evidence = client.get(
+            "/api/v1/sprints/evidence",
+            params={"targetSlug": "sefaz_ce"},
+        ).json()["items"]
+
+    assert completed.status_code == 200, completed.text
+    before_lte = next(
+        row for row in before["subjects"] if row["subjectKey"] == "p2_lte"
+    )
+    after_lte = next(
+        row for row in after["subjects"] if row["subjectKey"] == "p2_lte"
+    )
+    assert after_lte == before_lte
+    observation = next(
+        row for row in evidence if row["sourceRecordId"] == f"sprint-action:{action['id']}"
+    )
+    assert observation["measurementType"] == "sectional_mock"
+    assert observation["subjectProfileId"] is None
+    assert observation["subjectKey"] is None
+    assert observation["transferabilityBp"] == 0
+    assert observation["provenance"]["attributionScope"] == "cross_paper_aggregate"
+
+
 def test_action_and_evidence_append_roll_back_together(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

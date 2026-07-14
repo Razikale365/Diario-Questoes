@@ -442,7 +442,11 @@ class SprintEvidenceService:
 
         action_evidence = json.loads(action["evidence_json"])
         source_task_kind = action_evidence.get("sourceTaskKind", "")
-        if action["action_kind"] == "simulation" or source_task_kind == "simulation":
+        cross_paper_simulation = (
+            action["action_kind"] == "simulation"
+            or source_task_kind == "simulation"
+        )
+        if cross_paper_simulation:
             measurement_type = "sectional_mock"
         elif action["action_kind"] == "review" or source_task_kind == "review":
             measurement_type = "error_review"
@@ -456,9 +460,15 @@ class SprintEvidenceService:
             id=None,
             target_slug=action["target_slug"],
             batch_id=batch_id,
-            subject_profile_id=action["subject_profile_id"],
-            subject_key=action["subject_key"],
-            discipline=action["display_name"],
+            subject_profile_id=(
+                None if cross_paper_simulation else action["subject_profile_id"]
+            ),
+            subject_key=(None if cross_paper_simulation else action["subject_key"]),
+            discipline=(
+                "Simulado agregado P1/P2"
+                if cross_paper_simulation
+                else action["display_name"]
+            ),
             topic_hint="",
             observed_on=date.fromisoformat(action["plan_date"]),
             origin="sprint_action",
@@ -472,13 +482,18 @@ class SprintEvidenceService:
             doubt_count=action["doubt_count"],
             percentage_bp=None,
             transfer_scope="content",
-            transferability_bp=10000,
+            transferability_bp=(0 if cross_paper_simulation else 10000),
             content_hash="0" * 64,
             provenance={
                 "provider": "sprint_day",
                 "sourceTaskId": str(action["id"]),
                 "sourceKind": "internal_action",
-            },
+            }
+            | (
+                {"attributionScope": "cross_paper_aggregate"}
+                if cross_paper_simulation
+                else {}
+            ),
         )
         observation = replace(
             provisional,
