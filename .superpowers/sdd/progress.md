@@ -173,3 +173,40 @@ Plan: `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
 | 4. Shared import modal | pending | pending | pending | pending | pending |
 | 5. Existing-task entry points | pending | pending | pending | pending | pending |
 | 6. Browser acceptance and final gate | pending | pending | pending | pending | pending |
+
+## Sprint V2: Evidence and Real Calibration
+
+Plan: `docs/superpowers/plans/2026-07-14-sprint-v2-evidence-calibration.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Schema v11 and validated evidence/cycle domain | complete | `f38e618` | `142b58a` | migration/domain/profile tests; v10 preservation | spec and quality approved |
+| 2. Idempotent evidence import and exact-first subject mapping | complete | `142b58a` | `e56e003` | import/API/repository tests; dry-run side effects fixed | spec and quality approved |
+| 3. Calibrated projection service and API | complete | `e56e003` | `ba6286d` | 92 focused tests; historical cutoff and variance checks | spec and quality approved |
+| 4. Projection-owned sprint engine and frozen day snapshots | complete | `ba6286d` | `75ee662` | focused engine/API plus 543 Python passed, 1 skipped | spec and quality approved |
+| 5. Atomic action evidence and auditable trajectory | complete | `75ee662` | `e9a1aad` | 72 focused tests; replay and rollback covered | spec and quality approved |
+| 6. Source-plan cycles, eligibility, and explicit backlog | complete | `e9a1aad` | `e64ec56` | cycle regression plus high-return backlog policy | spec and quality approved |
+| 7. Local aggregate-only adapters and import CLI | complete | `7796fcd` | `10a2a4a` | 37 focused plus 6 real-backup regressions | spec and quality approved |
+| 8. Strict frontend contracts and auditable Command Center | complete | `4400148` | `ea89fab` | 25 focused plus audit-refresh regression; TypeScript; desktop/mobile smoke | spec and quality approved |
+| 9. Authorized live backfill, cycle repair, and full production gate | complete | `1219254` | current savepoint | 558 pytest, 1 skipped; 222 frontend; compileall; TypeScript; build; diff-check | spec and quality approved after three final findings fixed |
+
+### Sprint V2 Preflight Evidence
+
+- Baseline commit: `9355914`; implementation plan savepoint: `f38e618`.
+- Pre-migration online backup: `data/study-os/backups/study-os-20260714T174456Z.sqlite3`.
+- Backup SHA-256: `DE21B3FFCD84A21F21662BC5543C1339EA840F8F7E23A7204C6E723C5E554B67`; integrity `ok`; zero FK violations; schema 10.
+- Baseline gates: 453 Python passed, 1 skipped; 217 frontend passed; compileall, TypeScript lint, and production build passed.
+
+### Sprint V2 Live Acceptance Evidence
+
+- The protected live database migrated from schema 10 to 11 with `integrity_check=ok`, zero foreign-key violations, and no pre-v11 domain-count changes in a clone of the protected backup.
+- Meta 47 now owns the exact `2026-07-11..2026-07-17` cycle: 32 tasks attached, states preserved, 12 post-cycle dates nulled with `originalScheduledDate`, and zero live Meta 48/49 rows fabricated.
+- Diario batch `diario-backup:e230f386ff51b4c95e88cf841e16155b7a9d8553356085393b85a0585b0d7a16` committed 95 aggregate observations covering 1,150 answered questions; replay added no rows.
+- Authenticated read-only LS history exposed Metas 40-47 from `2026-05-22` onward. The ignored sanitized export committed 156 low-sample percentage observations under deterministic batch `ls-history:119790:0c3728091a10a7b1a792580b69e8a3cc15e81056a82096e6ee3b3135b6d7d945`; replay added no rows. Two `Simulados` rows remain explicitly unresolved.
+- The SEFAZ GO baseline committed 13 low-confidence rows; LTE content transferability is zero and did not replace the dominant Diario LTE estimate.
+- Live evidence totals 264 rows with nine explicitly unresolved mappings and zero recursive occurrences of `statement`, `alternatives`, `correctAnswer`, or `answer`.
+- Live V2 runs proved `derived` projection on 14/17/18 July, `manual` labeling on 15 July, exact `P1 + 2*P2` arithmetic, Meta 47 eligibility through 17 July, and five high-return backlog actions on 18 July.
+- The final backlog reconciliation retained five operational candidates (minimum return `4388` milli) and marked 17 expired low-return items `dismissed`, preserving audit history without mislabeling them as actionable backlog.
+- Final review neutralized cross-paper simulation evidence instead of attributing it to LTE, refreshed trajectory/evidence/source-task audit state after mutations, and enforced the high-return backlog boundary.
+- The real Command Center rendered at desktop and 390x844 with no page-level horizontal overflow, no console warning/error, no external asset request, and the executable queue before expanded trajectory/evidence detail on mobile. Screenshots and sanitized reports are retained under ignored `data/study-os/imports/`.
+- Final complete gate: 558 Python tests passed with one intentional skip, 222 frontend tests passed, and compileall, TypeScript, production build, and `git diff --check` all completed successfully. The existing non-fatal Vite chunk-size warning remains unchanged.

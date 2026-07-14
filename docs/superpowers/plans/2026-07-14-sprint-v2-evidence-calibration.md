@@ -1,6 +1,6 @@
 # Sprint V2 Evidence and Real Calibration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace manual and weakly sampled SEFAZ CE score guesses with an auditable post-edital evidence ledger, calibrated P1/P2 projections, bounded LS cycles, and a Command Center that pursues 204/240 weighted points without claiming certainty.
 
@@ -44,14 +44,19 @@
 **Files:**
 - Create: `study_os_service/domain/sprint_evidence.py`
 - Modify: `study_os_service/db/migrations.py`
+- Modify: `study_os_service/services/sprint.py`
 - Test: `tests/study_os_service/test_sprint_evidence_migration.py`
 - Test: `tests/study_os_service/test_sprint_evidence_domain.py`
+- Test: `tests/study_os_service/test_sprint_profile_source_api.py`
 
 **Interfaces:**
 - Produces: `SprintPerformanceObservation`, `SourcePlanCycle`, `SourcePlanBacklogCandidate`, `SubjectProjection`, `SprintProjection`.
 - Produces tables: `sprint_evidence_import_batches`, `sprint_performance_observations`, `source_plan_cycles`, `source_plan_backlog_candidates`; adds nullable `source_cycle_id` to `source_plan_tasks`.
+- `SprintPerformanceObservation` fields are `id`, `target_slug`, `batch_id`, `subject_profile_id`, `subject_key`, `discipline`, `topic_hint`, `observed_on`, `origin`, `source_record_id`, `source_revision`, timezone-aware UTC `source_updated_at`, `measurement_type`, `exam_board`, nullable exact `correct_count`/`wrong_count`, `doubt_count`, nullable/derived `percentage_bp`, `transfer_scope`, `transferability_bp`, `content_hash`, and immutable scalar `provenance`.
+- `SourcePlanCycle` fields are `id`, target/source/label/meta identity, timezone-aware UTC `released_at`, `starts_on`, `ends_on`, and `version`; `SourcePlanBacklogCandidate` carries task/cycle identity, fixed reason, return score, state, discovery date, and optional recovery date.
+- `SubjectProjection` carries subject/paper/question metadata, basis-point estimate/interval/confidence/fragility, effective sample, representative-set count, demotion flag, dominant origin, and warnings. `SprintProjection` owns `PaperProjection` P1/P2 values and calculates weighted projected/low/high, target 204, and distance as read-only properties; weighted values are never constructor inputs.
 
-- [ ] **Step 1: Write failing schema-preservation and domain tests**
+- [x] **Step 1: Write failing schema-preservation and domain tests**
 
 ```python
 def test_migration_11_preserves_v10_sprint_state_and_adds_evidence_cycle_tables(tmp_path):
@@ -89,17 +94,26 @@ def test_observation_requires_consistent_aggregate_and_ordered_source_time():
 def test_cycle_rejects_reversed_dates():
     with pytest.raises(ValueError, match="cycle dates"):
         SourcePlanCycle(**VALID_CYCLE, starts_on=date(2026, 7, 18), ends_on=date(2026, 7, 17))
+
+
+def test_fresh_sefaz_bootstrap_uses_floor_and_stretch_trajectory(client):
+    goals = client.get("/api/v1/sprints/config", params={"targetSlug": "sefaz_ce"}).json()["goals"]
+    assert goals == {
+        "p1Floor": 48, "p1Low": 48, "p1High": 64,
+        "p2Low": 63, "p2High": 70,
+        "discursiveLow": 75, "discursiveHigh": 82,
+    }
 ```
 
-- [ ] **Step 2: Run migration/domain tests and verify RED**
+- [x] **Step 2: Run migration/domain tests and verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_evidence_migration.py tests\study_os_service\test_sprint_evidence_domain.py`
 
 Expected: FAIL because schema version 11, the four tables, and the evidence/cycle value objects do not exist.
 
-- [ ] **Step 3: Implement the value objects, then add migration 11**
+- [x] **Step 3: Implement the value objects, then add migration 11**
 
-Implement frozen/slot dataclasses with exact enum/date/count validation before adding SQL. `SprintProjection` calculates its weighted total only as `p1.projected + 2 * p2.projected` and exposes score kind `raw_weighted_equivalent_not_fcc_standardized`; no constructor accepts an already-computed conflicting weighted value.
+Implement frozen/slot dataclasses with exact enum/date/count validation before adding SQL. `SprintProjection` calculates its weighted total only as `p1.projected + 2 * p2.projected` and exposes score kind `raw_weighted_equivalent_not_fcc_standardized`; no constructor accepts an already-computed conflicting weighted value. Update only `DEFAULT_SEFAZ_CONFIG.p1_goal_high` to 64 and `.p2_goal_high` to 70, keeping floors/lows 48/63; this makes a fresh bootstrap match the conditional v10 upgrade.
 
 ```sql
 CREATE TABLE sprint_evidence_import_batches (
@@ -184,7 +198,7 @@ ALTER TABLE source_plan_tasks ADD COLUMN source_cycle_id INTEGER REFERENCES sour
 
 Add indexes for latest observation, subject/date, cycle/date, and backlog state. A latest-revision query orders each `(target, origin, source_record_id)` by `source_updated_at DESC, id DESC`, so importing an older snapshot later cannot replace a known newer result. Conditionally update only the untouched original SEFAZ default tuple `(48,48,52,63,67)` to `(48,48,64,63,70)`.
 
-- [ ] **Step 4: Run domain and migration GREEN tests**
+- [x] **Step 4: Run domain and migration GREEN tests**
 
 The tests cover exact-count consistency, unknown-sample percentages, doubt bounds, transfer scope, source timestamp, date order, immutable tuples, weighted target 204, and rejection of invalid enums. Run:
 
@@ -192,10 +206,10 @@ The tests cover exact-count consistency, unknown-sample percentages, doubt bound
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the schema/domain savepoint**
+- [x] **Step 5: Commit the schema/domain savepoint**
 
 ```powershell
-git add study_os_service/domain/sprint_evidence.py study_os_service/db/migrations.py tests/study_os_service/test_sprint_evidence_domain.py tests/study_os_service/test_sprint_evidence_migration.py
+git add study_os_service/domain/sprint_evidence.py study_os_service/db/migrations.py study_os_service/services/sprint.py tests/study_os_service/test_sprint_evidence_domain.py tests/study_os_service/test_sprint_evidence_migration.py tests/study_os_service/test_sprint_profile_source_api.py
 git commit -m "feat: add sprint evidence and cycle schema"
 ```
 
@@ -217,7 +231,7 @@ git commit -m "feat: add sprint evidence and cycle schema"
 - Produces: `POST /api/v1/sprints/evidence/import`, `GET /api/v1/sprints/evidence?targetSlug=...`.
 - Produces report fields: `batchId`, `dryRun`, `replayed`, `insertedCount`, `duplicateCount`, `conflictCount`, `unresolvedCount`, `items`.
 
-- [ ] **Step 1: Write failing API/import behavior tests**
+- [x] **Step 1: Write failing API/import behavior tests**
 
 ```python
 def test_economia_exact_alias_never_maps_to_financas_publicas(client):
@@ -254,13 +268,13 @@ def test_same_batch_id_with_a_different_payload_is_409(client):
     assert response.json()["code"] == "evidence_batch_conflict"
 ```
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_evidence_api.py tests\study_os_service\test_sprint_profile_source_api.py -k "Economia or evidence"`
 
 Expected: FAIL because endpoints/modules are absent and the existing matcher uses substring-first behavior.
 
-- [ ] **Step 3: Implement exact-first, ambiguity-safe matching**
+- [x] **Step 3: Implement exact-first, ambiguity-safe matching**
 
 ```python
 def match_subject(discipline: str, subjects: Sequence[ExamSubjectProfile]) -> SubjectMatch:
@@ -281,7 +295,7 @@ def match_subject(discipline: str, subjects: Sequence[ExamSubjectProfile]) -> Su
 
 Use this function in both `SourcePlanService` and `SprintEvidenceService`; never resolve a multi-match by alias length.
 
-- [ ] **Step 4: Implement batch transaction and strict provenance filter**
+- [x] **Step 4: Implement batch transaction and strict provenance filter**
 
 Accepted observation JSON is aggregate-only:
 
@@ -307,7 +321,7 @@ Accepted observation JSON is aggregate-only:
 
 Accept only the top-level keys in the documented observation schema; reject extras. Bound `discipline` to one line/120 characters and `topicHint` to one line/200 characters. Provenance is a flat scalar-only object whose only allowed keys are `planningId`, `metaNumber`, `sourceTaskId`, `sourceOrder`, `provider`, `importFileSha256`, `timestampQuality`, `originalScheduledDate`, and `sourceKind`; reject every other key even when its name appears benign, all nested objects/arrays, line breaks, and scalar strings over 200 characters. Adapters construct this payload field-by-field and never forward arbitrary source dictionaries. Compute a canonical content hash after normalization. Begin the transaction before looking up the batch so concurrent replay is deterministic. Dry-run uses the same validation/matching/dedup queries but always rolls back and never stores a batch. Expose a repository-level `append_observation_in_transaction(...)` primitive that assumes the caller owns the transaction; `import_batch` wraps that primitive rather than nesting transactions.
 
-- [ ] **Step 5: Add routes/error contracts and run focused/full sprint tests**
+- [x] **Step 5: Add routes/error contracts and run focused/full sprint tests**
 
 Run:
 
@@ -318,7 +332,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the evidence-import savepoint**
+- [x] **Step 6: Commit the evidence-import savepoint**
 
 ```powershell
 git add study_os_service/services/subject_matching.py study_os_service/repositories/sprint_evidence.py study_os_service/services/sprint_evidence.py study_os_service/services/sprint.py study_os_service/api/sprints.py tests/study_os_service/test_sprint_evidence_api.py tests/study_os_service/test_sprint_profile_source_api.py
@@ -341,7 +355,7 @@ git commit -m "feat: import auditable sprint evidence"
 - Produces: `GET /api/v1/sprints/projection?targetSlug=sefaz_ce&asOf=YYYY-MM-DD`.
 - Formula version: `sefaz-ce-projection-v2`; interval is a labeled 90% raw-equivalent interval.
 
-- [ ] **Step 1: Write failing calibration acceptance tests**
+- [x] **Step 1: Write failing calibration acceptance tests**
 
 ```python
 def test_small_perfect_set_cannot_create_a_perfect_projection(service):
@@ -397,13 +411,13 @@ def test_old_representative_set_does_not_count_for_demotion(service):
     assert service.project(TARGET, date(2026, 7, 14)).subject(KEY).demotion_eligible is False
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_projection.py`
 
 Expected: FAIL because projection service is absent.
 
-- [ ] **Step 3: Implement the deterministic weighting formula**
+- [x] **Step 3: Implement the deterministic weighting formula**
 
 Use these exact constants:
 
@@ -431,7 +445,7 @@ Query only observations with `observed_on <= as_of`, select the greatest `source
 
 Aggregate paper points as `sum(subject.question_count * subject.mean)`, then `weighted = P1 + 2 * P2`, target `204`, and `distance = 204 - weighted`. Return subject estimates, interval, effective sample, confidence, representative-set count, demotion eligibility, doubt fragility, dominant origin, and warnings.
 
-- [ ] **Step 4: Add strict projection route and run tests**
+- [x] **Step 4: Add strict projection route and run tests**
 
 Expected response core:
 
@@ -454,7 +468,7 @@ Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\t
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the projection savepoint**
+- [x] **Step 5: Commit the projection savepoint**
 
 ```powershell
 git add study_os_service/services/sprint_projection.py study_os_service/repositories/sprint_evidence.py study_os_service/api/sprints.py tests/study_os_service/test_sprint_projection.py tests/study_os_service/test_sprint_evidence_api.py
@@ -476,17 +490,17 @@ git commit -m "feat: derive calibrated sprint projections"
 - `SprintEngine.generate(..., subject_projections: Mapping[str, SubjectProjection], projection: SprintProjection)` replaces recent-three-task averaging.
 - Day generation derives projection when both manual fields are absent. Both numeric fields together are a backward-compatible manual override and freeze `projectionOrigin="manual"`.
 
-- [ ] **Step 1: Write failing engine/snapshot integration tests**
+- [x] **Step 1: Write failing engine/snapshot integration tests**
 
 Cover: derived generation without 42/55; partial override returns 422; full manual override is visibly marked; high doubt increases action priority without reducing its score estimate; two LS percentages cannot demote focus; representative calibrated estimates determine gain/deficit; complete projection/interval/confidence/formula is frozen in the run snapshot.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_engine.py tests\study_os_service\test_sprint_api.py -k "projection or doubt or override or snapshot"`
 
 Expected: FAIL on old 42/55 fallback, partial override acceptance, and recent-three averaging.
 
-- [ ] **Step 3: Replace `_estimate` and `_at_goal_twice` inputs**
+- [x] **Step 3: Replace `_estimate` and `_at_goal_twice` inputs**
 
 ```python
 def _estimate(subject: ExamSubjectProfile, projections: Mapping[str, SubjectProjection]) -> tuple[int, int]:
@@ -501,7 +515,7 @@ def _at_goal_twice(subject: ExamSubjectProfile, projections: Mapping[str, Subjec
 
 Add a bounded fragility bonus to gain/deficit so doubts can raise priority without pretending the estimated score fell. Set `algorithm_version = "sefaz-ce-sprint-v2"`.
 
-- [ ] **Step 4: Derive or explicitly override and freeze the projection**
+- [x] **Step 4: Derive or explicitly override and freeze the projection**
 
 ```python
 derived = SprintProjectionService(connection).project(target_slug, plan_date)
@@ -518,7 +532,7 @@ else:
 
 Persist the complete projection document and origin in `score_snapshot_json`; never fall back to hidden 42/55 values. Existing v1 snapshots remain readable.
 
-- [ ] **Step 5: Run engine/API regression and commit**
+- [x] **Step 5: Run engine/API regression and commit**
 
 ```powershell
 .\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_engine.py tests\study_os_service\test_sprint_api.py tests\study_os_service\test_sprint_projection.py
@@ -543,25 +557,25 @@ git commit -m "feat: drive sprint with calibrated projections"
 - Finalized question-bearing actions create one internal batch plus one aggregate observation in the same caller-owned transaction.
 - Trajectory exposes v2 projection snapshots while preserving v1 run readability.
 
-- [ ] **Step 1: Write failing atomicity/replay/trajectory tests**
+- [x] **Step 1: Write failing atomicity/replay/trajectory tests**
 
 Cover: completed representative simulation changes projection more than an error review; internal batch ID is `sprint-action:{action_id}:v{resulting_version}`; replayed result creates neither a second batch nor observation; forced observation failure rolls back the action update; no question refs/answers enter provenance; trajectory exposes P1/P2 intervals, confidence, weighted total, distance, formula, and origin; old v1 snapshots return explicit `legacy_manual` metadata rather than crashing.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_api.py tests\study_os_service\test_sprint_projection.py -k "action_evidence or trajectory or rollback or replay"`
 
 Expected: FAIL because action results do not append ledger evidence and trajectory is v1-only.
 
-- [ ] **Step 3: Append through transaction-aware repository primitives**
+- [x] **Step 3: Append through transaction-aware repository primitives**
 
 Inside the existing `BEGIN IMMEDIATE` for an action result, create/reuse the internal batch and call `append_observation_in_transaction` directly; neither helper begins or commits. Stable source record is `sprint-action:{action_id}`, revision is `v{resulting_version}`, `source_updated_at` is the action update UTC timestamp, and measurement type is `sectional_mock` for simulations, `error_review` for reviews, otherwise `sprint_action`. Batch and observation failure roll back together with the action.
 
-- [ ] **Step 4: Extend trajectory without rewriting old runs**
+- [x] **Step 4: Extend trajectory without rewriting old runs**
 
 Return `latest` plus runs with `projection`, `projectionOrigin`, `confidenceBp`, `weightedProjected`, `distanceToTarget`, `dominantOrigin`, and `formulaVersion`. A snapshot lacking v2 fields receives `projectionOrigin="legacy_manual"`, null interval/confidence, and its stored P1/P2 only.
 
-- [ ] **Step 5: Run focused/backend regression and commit**
+- [x] **Step 5: Run focused/backend regression and commit**
 
 ```powershell
 .\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_sprint_api.py tests\study_os_service\test_sprint_projection.py tests\study_os_service\test_sprint_evidence_api.py
@@ -591,7 +605,7 @@ git commit -m "feat: record sprint outcomes as evidence"
 - Source-task payload adds `cycle` and nullable `backlog` documents.
 - `SourcePlanCycleService.eligible_tasks(target_slug, plan_date)` returns `SourcePlanEligibility(task, cycle, backlog)` records and is the only source-task selector used by day generation. `SprintDayService` passes each `.task` to the engine and freezes cycle/backlog audit metadata in action evidence; source-plan API serialization returns the same cycle/backlog context.
 
-- [ ] **Step 1: Write failing cycle acceptance tests**
+- [x] **Step 1: Write failing cycle acceptance tests**
 
 ```python
 def test_meta_47_never_yields_tasks_after_july_17(service):
@@ -614,21 +628,21 @@ def test_closed_pending_tasks_become_explicit_backlog_candidates(service):
     assert service.list_backlog(TARGET, include_all=True).count == 2
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_source_plan_cycles.py`
 
 Expected: FAIL because cycles/backlog are not implemented.
 
-- [ ] **Step 3: Implement cycle import and overrun normalization**
+- [x] **Step 3: Implement cycle import and overrun normalization**
 
 Validate `releasedAt`, `startsOn`, `endsOn`, and `startsOn <= endsOn`. Upsert by `(target, sourceKind, planLabel)` only when the exact cycle agrees; a conflicting reimport returns 409 rather than silently changing dates. Link every imported task. If its supplied `scheduledDate > endsOn`, store the original in aggregate-safe provenance as `originalScheduledDate`, set durable `scheduled_date=NULL`, and report `cycleOverrunCount`.
 
-- [ ] **Step 4: Implement eligibility/backlog policy**
+- [x] **Step 4: Implement eligibility/backlog policy**
 
 Before selection, insert one backlog row for each pending/started task whose cycle ended before `plan_date`. Normal tasks are eligible only while `starts_on <= plan_date <= ends_on` and when unscheduled/overrun or due on/before the day. Closed-cycle recovery requires `return_score_milli >= 1000`, computed deterministically from relevance, paper weight, calibrated deficit, and fragility; low-return rows remain visible backlog but are not selected. Mark a candidate `recovered` only when its generated action is accepted/completed, not merely when displayed. D-2/D-1 engine modes retain precedence over ordinary cycle ordering.
 
-- [ ] **Step 5: Run cycle and sprint regression**
+- [x] **Step 5: Run cycle and sprint regression**
 
 ```powershell
 .\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_source_plan_cycles.py tests\study_os_service\test_sprint_profile_source_api.py tests\study_os_service\test_sprint_api.py tests\study_os_service\test_sprint_engine.py
@@ -636,7 +650,7 @@ Before selection, insert one backlog row for each pending/started task whose cyc
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the cycle savepoint**
+- [x] **Step 6: Commit the cycle savepoint**
 
 ```powershell
 git add study_os_service/services/source_plan_cycles.py study_os_service/repositories/sprint_evidence.py study_os_service/repositories/sprint.py study_os_service/domain/sprint.py study_os_service/services/sprint.py study_os_service/services/sprint_day.py study_os_service/api/sprints.py tests/study_os_service/test_source_plan_cycles.py tests/study_os_service/test_sprint_profile_source_api.py tests/study_os_service/test_sprint_api.py
@@ -659,7 +673,7 @@ git commit -m "feat: bound LS cycles and preserve backlog"
 - `sefaz_go_baseline_observations(subjects)`.
 - CLI formats: `diario-backup`, `ls-history`, `sefaz-go-baseline`; flags `--input`, `--target-slug`, `--batch-id`, `--snapshot-at`, `--dry-run`.
 
-- [ ] **Step 1: Write failing sanitization/aggregation tests**
+- [x] **Step 1: Write failing sanitization/aggregation tests**
 
 ```python
 def test_diario_adapter_counts_results_but_never_emits_question_content():
@@ -691,19 +705,19 @@ def test_go_lte_baseline_content_is_nontransferable():
     assert lte.transferability_bp == 0
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `\.\.venv-study-os\Scripts\python.exe -m pytest -q tests\study_os_service\test_evidence_adapters.py tests\study_os_service\test_evidence_import_cli.py`
 
 Expected: FAIL because adapters/CLI are absent.
 
-- [ ] **Step 3: Implement local-only aggregation**
+- [x] **Step 3: Implement local-only aggregation**
 
 For Diario backup, produce one observation per task block with answered questions only: `correct_count = count(isCorrect is True)`, `wrong_count = count(isCorrect is False)`, `doubt_count = count(hasDoubt is True among answered)`. Construct a new allowlisted record from task/block IDs, dates, bounded one-line discipline, bounded one-line structural title/lesson, board label, and aggregate counts; never spread/copy source dictionaries or any nested question field. Stable record is `diario:{task.id}:{block.id}`; revision is `updatedAt` when present, otherwise the SHA-256 of the aggregate-only record. `sourceUpdatedAt` is the task timestamp when present and otherwise the required CLI `--snapshot-at` timestamp, so revisions remain chronologically ordered. Unknown target never defaults silently.
 
 For sanitized LS history, accept only the evidence endpoint shape plus planning/meta/task IDs; percentages without counts remain `ls_percentage`. For baseline, generate one low-confidence `baseline` record per subject profile and force `p2_lte` content transferability to zero.
 
-- [ ] **Step 4: Implement dry-run-first CLI and tests**
+- [x] **Step 4: Implement dry-run-first CLI and tests**
 
 The CLI opens the local configured SQLite through project services, never uses HTTP, never reads browser/session state, and prints only the aggregate import report. It requires a second invocation without `--dry-run` to commit. It must not log the source document or rejected proprietary fields.
 
@@ -713,7 +727,7 @@ Run focused tests, then:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the adapter savepoint**
+- [x] **Step 5: Commit the adapter savepoint**
 
 ```powershell
 git add study_os_service/services/evidence_adapters.py scripts/import_sprint_evidence.py tests/study_os_service/test_evidence_adapters.py tests/study_os_service/test_evidence_import_cli.py
@@ -736,15 +750,15 @@ git commit -m "feat: add safe local evidence adapters"
 - Adds strict DTOs/parsers/fetchers for `SprintProjection`, `SprintEvidenceList`, `SprintTrajectory`, `SourcePlanCycle`, and backlog metadata.
 - `SprintCommandCenter` loads config, optional day, projection, trajectory, evidence summary, and `fetchSourcePlanTasks(targetSlug, undefined, true)` together, so cycle/backlog remain visible even when no day exists.
 
-- [ ] **Step 1: Write failing strict parser/request tests**
+- [x] **Step 1: Write failing strict parser/request tests**
 
 Cover exact projection/evidence/trajectory/cycle documents, malformed nested intervals/confidence rejection, `asOf` URL, evidence import body, cycle import body, and preservation of abort signals/idempotency headers.
 
-- [ ] **Step 2: Write failing Command Center/source tests**
+- [x] **Step 2: Write failing Command Center/source tests**
 
 Assert that source contains visible labels `204/240`, `85%`, `equivalente bruto`, `não é a nota padronizada da FCC`, `Confiança`, `Fragilidade`, `Ciclo vigente`, `Backlog da meta encerrada`, `Por que agora`, `Origem dominante`, and an explicit `Usar override manual` control. Assert that initial `useState(42)` and `useState(55)` no longer exist. Assert cycle-overrun tasks do not hydrate calendar dates after `endsOn`.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -754,13 +768,13 @@ npx --no-install tsx --test src/study-os/api/sprint.test.ts src/study-os/compone
 
 Expected: FAIL on missing contracts/labels and old 42/55 defaults.
 
-- [ ] **Step 4: Implement strict contracts and derived-first state**
+- [x] **Step 4: Implement strict contracts and derived-first state**
 
 Load projection as authoritative. Keep override inputs unset until the user enables the manual control; send no P1/P2 override fields in derived mode. Render P1/P2 projected/interval/floor/stretch, weighted projected/204/distance, confidence, dominant origin, formula version, and the FCC distinction. The day audit shows run ID, generation time, algorithm, supersession/replay, and whether projection origin is derived/manual.
 
 Render current cycle release/start/end and status. Show pending closed-meta backlog with original cycle label and return rationale. Each action shows confidence and fragility badge beside the existing `whyNow`; its details list every rationale rather than only the first twelve scalar fields.
 
-- [ ] **Step 5: Keep responsive hierarchy and verify frontend**
+- [x] **Step 5: Keep responsive hierarchy and verify frontend**
 
 At mobile widths, keep the next executable queue before trajectory/evidence detail, use two compact metric columns, and confine dense history to internal horizontal scrolling. Run:
 
@@ -772,7 +786,7 @@ npm run build
 
 Expected: PASS; only the pre-existing Vite large-chunk/dynamic-import warnings may remain.
 
-- [ ] **Step 6: Commit the frontend savepoint**
+- [x] **Step 6: Commit the frontend savepoint**
 
 ```powershell
 git add src/study-os/api/sprint.ts src/study-os/api/sprint.test.ts src/study-os/components/SprintCommandCenter.tsx src/study-os/components/SprintCommandCenter.test.ts src/study-os/sourcePlanBridge.ts src/study-os/sourcePlanBridge.test.ts
@@ -792,31 +806,31 @@ git commit -m "feat: show auditable sprint calibration"
 - Durable local DB reaches schema 11 only after the verified schema-10 backup.
 - Live evidence import reports are retained in SQLite batches; no proprietary source file is committed.
 
-- [ ] **Step 1: Apply schema 11 and verify the protected database**
+- [x] **Step 1: Apply schema 11 and verify the protected database**
 
 Run health/initialize only now that the backup exists. Verify `PRAGMA integrity_check`, `foreign_key_check`, schema version 11, and preserved counts for Meta 46/47 and all pre-v11 command tables.
 
-- [ ] **Step 2: Repair Meta 47 cycle and preview Meta 48/49 rules**
+- [x] **Step 2: Repair Meta 47 cycle and preview Meta 48/49 rules**
 
 Attach Meta 47 to `releasedAt=2026-07-11`, `startsOn=2026-07-11`, `endsOn=2026-07-17`; preserve completed/ignored states and null only out-of-cycle future scheduled dates while recording originals in provenance. Exercise fixture imports proving Meta 48 release `2026-07-17`, eligibility `2026-07-18`, and Meta 49 `2026-07-25..2026-07-31`; do not fabricate live Meta 48/49 tasks before they exist.
 
-- [ ] **Step 3: Import the Diario backup dry-run then commit**
+- [x] **Step 3: Import the Diario backup dry-run then commit**
 
 Use explicit target `sefaz_ce` and deterministic batch ID based on the file hash. Compare dry-run and committed inserted/duplicate/conflict/unresolved counts. Re-run the same batch and require replay with no additional observations. Inspect the stored projection/evidence JSON to prove none of `statement`, `alternatives`, `correctAnswer`, or `answer` exists.
 
-- [ ] **Step 4: Read LS planning 119790 only if Chrome is already authenticated**
+- [x] **Step 4: Read LS planning 119790 only if Chrome is already authenticated**
 
 Navigate read-only from 24/04/2026 through the current meta. Capture only planning ID, meta, task ID/order, discipline/topic label, aggregate percentage, exact counts when visibly available, completion date, and board. Do not read/store credentials, cookies, or question text. Save the sanitized local export under ignored data, run CLI dry-run, inspect conflicts, then commit and replay. If authentication is absent, report that external-state blocker precisely without weakening any code/data acceptance already completed.
 
-- [ ] **Step 5: Seed SEFAZ GO low-confidence baseline**
+- [x] **Step 5: Seed SEFAZ GO low-confidence baseline**
 
 Run the baseline adapter once, verify LTE content transferability zero, and replay it. Confirm a GO LTE record cannot move projected P2 while method/trap signals can only increase fragility.
 
-- [ ] **Step 6: Verify the live projection and day behavior**
+- [x] **Step 6: Verify the live projection and day behavior**
 
 Check `GET /sprints/projection`, `GET /sprints/evidence`, `GET /sprints/trajectory`, Meta 47 eligibility on 17/18 July, explicit backlog, derived generation without manual fields, manual override labeling, and action-result projection refresh. Confirm weighted arithmetic is exactly `P1 + 2*P2` with target 204.
 
-- [ ] **Step 7: Run complete automated gate**
+- [x] **Step 7: Run complete automated gate**
 
 ```powershell
 .\.venv-study-os\Scripts\python.exe -m pytest -q
@@ -828,11 +842,11 @@ npm run build
 
 Expected: all tests pass; compile/lint/build exit 0.
 
-- [ ] **Step 8: Validate the real app at desktop and mobile**
+- [x] **Step 8: Validate the real app at desktop and mobile**
 
 Start the actual local app/service. At desktop and 390px, verify cycle, 204 distance, confidence, fragility, dominant origin, `whyNow`, derived/manual distinction, queues, backlog, no page-level horizontal overflow, no console error, and no external request needed for the Command Center. Record screenshots/log evidence locally.
 
-- [ ] **Step 9: Final whole-branch review, fixes, and push**
+- [x] **Step 9: Final whole-branch review, fixes, and push**
 
 Generate a review package from merge-base through HEAD. Require both spec compliance and code-quality approval; fix Critical/Important findings as one reviewed wave and re-run covering tests. Run the complete gate again, create a final savepoint commit if necessary, and push `codex/sefaz-ce-18d-sprint` only after every available acceptance check is green.
 
