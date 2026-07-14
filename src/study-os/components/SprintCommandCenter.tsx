@@ -18,7 +18,11 @@ import {
 import { StudyOsApiError } from '../api/client';
 import {
   fetchOptionalSprintDay,
+  fetchSourcePlanTasks,
   fetchSprintConfig,
+  fetchSprintEvidence,
+  fetchSprintProjection,
+  fetchSprintTrajectory,
   generateSprintDay,
   refreshSprintDay,
   updateSprintAction,
@@ -26,8 +30,12 @@ import {
   type SprintActionState,
   type SprintConfig,
   type SprintDay,
+  type SprintEvidenceList,
+  type SprintProjection,
   type SprintQuestionRef,
   type SprintRecommendation,
+  type SprintTrajectory,
+  type SourcePlanTask,
 } from '../api/sprint';
 
 
@@ -124,9 +132,24 @@ const promptForAction = (action: SprintAction) => [
   'Ajude apenas na execução deste bloco. Corrija a causa dos erros e termine com uma verificação curta.',
 ].filter(Boolean).join('\n');
 
-const scalarEntries = (details: Record<string, unknown>) => Object.entries(details)
-  .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
-  .slice(0, 12);
+const scoreEntries = (details: Record<string, unknown>) => Object.entries(details);
+
+const formatScoreValue = (value: unknown) => {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return 'indisponível';
+  }
+};
+
+const formatPercent = (basisPoints: number | null | undefined) => basisPoints === null || basisPoints === undefined
+  ? '—'
+  : `${(basisPoints / 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+
+const formatScore = (value: number | null | undefined) => value === null || value === undefined
+  ? '—'
+  : value.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
 const tecUrlForAction = (action: SprintAction) => {
   const candidate = action.scoreDetails.tecUrl;
@@ -149,10 +172,15 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
 }) => {
   const [config, setConfig] = useState<SprintConfig | null>(null);
   const [day, setDay] = useState<SprintDay | null>(null);
+  const [projection, setProjection] = useState<SprintProjection | null>(null);
+  const [trajectory, setTrajectory] = useState<SprintTrajectory | null>(null);
+  const [evidence, setEvidence] = useState<SprintEvidenceList | null>(null);
+  const [sourceTasks, setSourceTasks] = useState<SourcePlanTask[]>([]);
   const [date, setDate] = useState(isoToday);
   const [energy, setEnergy] = useState(3);
-  const [p1Projection, setP1Projection] = useState(42);
-  const [p2Projection, setP2Projection] = useState(55);
+  const [manualOverride, setManualOverride] = useState(false);
+  const [overrideP1, setOverrideP1] = useState<number | null>(null);
+  const [overrideP2, setOverrideP2] = useState<number | null>(null);
   const [lsBudgetMinutes, setLsBudgetMinutes] = useState(240);
   const [extraBudgetMinutes, setExtraBudgetMinutes] = useState(60);
   const [loading, setLoading] = useState(true);
@@ -166,19 +194,33 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const [nextConfig, nextDay] = await Promise.all([
+      const [nextConfig, nextDay, nextProjection, nextTrajectory, nextEvidence, nextSourceTasks] = await Promise.all([
         fetchSprintConfig(targetSlug, signal),
         fetchOptionalSprintDay(targetSlug, date, signal),
+        fetchSprintProjection(targetSlug, date, signal),
+        fetchSprintTrajectory(targetSlug, signal),
+        fetchSprintEvidence(targetSlug, signal),
+        fetchSourcePlanTasks(targetSlug, undefined, true, signal),
       ]);
       if (signal?.aborted) return;
       setConfig(nextConfig);
       setDay(nextDay);
+      setProjection(nextDay?.projection ?? nextProjection);
+      setTrajectory(nextTrajectory);
+      setEvidence(nextEvidence);
+      setSourceTasks(nextSourceTasks.items);
       setLsBudgetMinutes(nextDay?.capacity.lsBudgetMinutes ?? nextConfig.lsBudgetMinutes);
       setExtraBudgetMinutes(nextDay?.capacity.extraBudgetMinutes ?? nextConfig.extraBudgetMinutes);
       if (nextDay) {
         setEnergy(nextDay.capacity.energyLevel);
-        setP1Projection(nextDay.projections.p1);
-        setP2Projection(nextDay.projections.p2);
+        const isManual = nextDay.projectionOrigin === 'manual';
+        setManualOverride(isManual);
+        setOverrideP1(isManual ? nextDay.projections.p1 : null);
+        setOverrideP2(isManual ? nextDay.projections.p2 : null);
+      } else {
+        setManualOverride(false);
+        setOverrideP1(null);
+        setOverrideP2(null);
       }
     } catch (loadError) {
       if (!signal?.aborted) setError(errorMessage(loadError));
@@ -186,6 +228,30 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       if (!signal?.aborted) setLoading(false);
     }
   }, [date, targetSlug]);
+
+  const projectedP1 = projection?.p1.projected ?? day?.projections.p1 ?? null;
+  const projectedP2 = projection?.p2.projected ?? day?.projections.p2 ?? null;
+  const effectiveP1 = manualOverride ? overrideP1 : projectedP1;
+  const effectiveP2 = manualOverride ? overrideP2 : projectedP2;
+
+  const currentCycle = useMemo(() => sourceTasks
+    .map((task) => task.cycle)
+    .filter((cycle): cycle is NonNullable<SourcePlanTask['cycle']> => cycle !== null)
+    .filter((cycle, index, cycles) => cycles.findIndex((candidate) => candidate.id === cycle.id) === index)
+    .sort((left, right) => right.startsOn.localeCompare(left.startsOn))
+    .find((cycle) => cycle.startsOn <= date && date <= cycle.endsOn) ?? null, [date, sourceTasks]);
+
+  const backlogTasks = useMemo(() => sourceTasks
+    .filter((task) => task.backlog?.state === 'candidate')
+    .sort((left, right) => (right.backlog?.returnScoreMilli ?? 0) - (left.backlog?.returnScoreMilli ?? 0)), [sourceTasks]);
+
+  const aggregateFragilityBp = projection?.subjects.reduce(
+    (maximum, subject) => Math.max(maximum, subject.fragilityBp),
+    0,
+  ) ?? null;
+  const daysRemaining = day?.daysRemaining ?? (config
+    ? Math.max(0, Math.ceil((new Date(`${config.objectiveDate}T12:00:00`).getTime() - new Date(`${date}T12:00:00`).getTime()) / 86_400_000))
+    : null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -204,15 +270,17 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
         targetSlug,
         date,
         energyLevel: energy,
-        p1Projection,
-        p2Projection,
         lsBudgetMinutes,
         extraBudgetMinutes,
+        ...(manualOverride && effectiveP1 !== null && effectiveP2 !== null
+          ? { p1Projection: effectiveP1, p2Projection: effectiveP2 }
+          : {}),
       };
       const next = refresh
         ? await refreshSprintDay(input, mutationKey('refresh-sprint', date))
         : await generateSprintDay(input, mutationKey('generate-sprint', date));
       setDay(next);
+      setProjection(next.projection ?? projection);
       setMinimumMode(false);
       if (announce) showToast(refresh ? 'Dia recalculado.' : 'Sprint do dia gerado.');
       return next;
@@ -327,7 +395,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
               </span>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <strong className="text-3xl font-black text-white">{day?.daysRemaining ?? 18}</strong>
+              <strong className="text-3xl font-black text-white">{daysRemaining ?? '—'}</strong>
               <span className="text-xs font-black uppercase tracking-widest text-gray-400">dias para a P1</span>
             </div>
             <p className="mt-1 text-sm font-bold capitalize text-gray-400">{formatDate(date)}</p>
@@ -344,9 +412,28 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <ProjectionMetric label="Projeção P1" value={p1Projection} target={`${config?.goals.p1Low ?? 48}–${config?.goals.p1High ?? 52}`} onChange={setP1Projection} />
-          <ProjectionMetric label="Projeção P2" value={p2Projection} target={`${config?.goals.p2Low ?? 63}–${config?.goals.p2High ?? 67}`} onChange={setP2Projection} />
+        <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-5">
+          <ProjectionMetric
+            label="Projeção P1"
+            value={effectiveP1}
+            target={`piso ${config?.goals.p1Floor ?? 48} · stretch 64`}
+            interval={projection ? `${formatScore(projection.p1.low)}–${formatScore(projection.p1.high)}` : null}
+            manual={manualOverride}
+            onChange={(value) => setOverrideP1(value)}
+          />
+          <ProjectionMetric
+            label="Projeção P2"
+            value={effectiveP2}
+            target={`piso ${config?.goals.p2Low ?? 63} · stretch 70`}
+            interval={projection ? `${formatScore(projection.p2.low)}–${formatScore(projection.p2.high)}` : null}
+            manual={manualOverride}
+            onChange={(value) => setOverrideP2(value)}
+          />
+          <div className="col-span-2 min-h-16 border border-[#84cc16]/25 bg-[#84cc16]/[0.06] px-3 py-2 xl:col-span-1">
+            <span className="text-[9px] font-black uppercase tracking-widest text-[#bef264]">Meta ponderada</span>
+            <div className="mt-1 flex items-baseline justify-between gap-2"><strong className="text-lg font-black text-white">204/240</strong><span className="text-xs font-black text-[#bef264]">85%</span></div>
+            <p className="mt-1 text-[9px] font-bold leading-tight text-gray-400">equivalente bruto · não é a nota padronizada da FCC</p>
+          </div>
           <CapacityMetric
             lsMinutes={lsBudgetMinutes}
             extraMinutes={extraBudgetMinutes}
@@ -362,6 +449,33 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
             </div>
           </div>
         </div>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <AuditMetric label="Confiança" value={formatPercent(projection?.confidenceBp)} detail={projection?.formulaVersion ?? 'sem projeção derivada'} />
+          <AuditMetric label="Fragilidade" value={formatPercent(aggregateFragilityBp)} detail="maior fragilidade entre as matérias" />
+          <AuditMetric label="Origem dominante" value={projection?.dominantOrigin || '—'} detail={`${evidence?.items.length ?? 0} evidências agregadas`} />
+          <AuditMetric
+            label="Ciclo vigente"
+            value={currentCycle ? `Meta ${currentCycle.metaNumber ?? currentCycle.planLabel}` : 'Sem ciclo vigente'}
+            detail={currentCycle ? `${currentCycle.startsOn} → ${currentCycle.endsOn}` : `${backlogTasks.length} no backlog`}
+          />
+        </div>
+
+        <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-[10px] font-black uppercase tracking-wide text-gray-300">
+          <input
+            type="checkbox"
+            checked={manualOverride}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setManualOverride(enabled);
+              setOverrideP1(enabled ? (overrideP1 ?? projectedP1) : null);
+              setOverrideP2(enabled ? (overrideP2 ?? projectedP2) : null);
+            }}
+            className="h-4 w-4 accent-[#84cc16]"
+          />
+          Usar override manual
+          <span className="normal-case tracking-normal text-gray-500">(fica identificado no histórico)</span>
+        </label>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {!day ? (
@@ -399,6 +513,39 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
         </div>
       )}
 
+      <details className="border-t border-white/10 bg-[#171717] px-4 py-3 sm:px-5">
+        <summary className="cursor-pointer text-[10px] font-black uppercase tracking-[0.18em] text-gray-300 hover:text-white">Auditoria da calibração, ciclos e trajetória</summary>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <AuditPanel title="Projeção derivada">
+            <dl className="space-y-2 text-xs">
+              <AuditRow label="Ponderado" value={projection ? `${formatScore(projection.weighted.projected)}/240` : '—'} />
+              <AuditRow label="Faixa 90%" value={projection ? `${formatScore(projection.weighted.low)}–${formatScore(projection.weighted.high)}` : '—'} />
+              <AuditRow label="Distância para 204" value={projection ? formatScore(projection.weighted.distanceToTarget) : '—'} />
+              <AuditRow label="Confiança" value={formatPercent(projection?.confidenceBp)} />
+              <AuditRow label="Origem dominante" value={projection?.dominantOrigin || '—'} />
+              <AuditRow label="Origem do dia" value={day?.projectionOrigin || 'sem dia gerado'} />
+            </dl>
+            {projection?.warnings.length ? <ul className="mt-3 space-y-1 text-[10px] font-semibold text-amber-200">{projection.warnings.map((warning) => <li key={warning}>• {warning}</li>)}</ul> : null}
+          </AuditPanel>
+
+          <AuditPanel title="Ciclo vigente e backlog">
+            {currentCycle ? <p className="text-xs font-bold text-gray-300">Meta {currentCycle.metaNumber ?? currentCycle.planLabel}: {currentCycle.startsOn} → {currentCycle.endsOn}</p> : <p className="text-xs font-bold text-gray-500">Nenhum ciclo cobre a data selecionada.</p>}
+            <p className="mt-3 text-[9px] font-black uppercase tracking-widest text-gray-500">Backlog da meta encerrada</p>
+            <div className="mt-2 space-y-2">
+              {backlogTasks.length ? backlogTasks.map((task) => <div key={task.id} className="border border-white/10 bg-white/[0.03] p-2"><p className="text-xs font-black text-gray-200">{task.discipline}</p><p className="mt-1 text-[10px] font-semibold text-gray-500">{task.topicHint || task.description} · retorno {formatScore((task.backlog?.returnScoreMilli ?? 0) / 1000)}</p></div>) : <p className="text-xs font-bold text-gray-600">Sem pendências elegíveis.</p>}
+            </div>
+          </AuditPanel>
+
+          <AuditPanel title="Trajetória e evidência">
+            <p className="text-xs font-bold text-gray-300">{trajectory?.runs.length ?? 0} snapshots congelados · {evidence?.items.length ?? 0} observações agregadas</p>
+            <p className="mt-1 text-[10px] font-semibold text-gray-500">{evidence?.unresolvedCount ?? 0} observações sem matéria resolvida</p>
+            <div className="mt-3 max-h-44 space-y-2 overflow-auto pr-1">
+              {trajectory?.runs.slice().reverse().map((run, index) => <div key={`${run.runId ?? 'latest'}-${run.date ?? index}`} className="grid grid-cols-[1fr_auto] gap-3 border-b border-white/5 pb-2 text-[10px]"><span className="font-bold text-gray-400">{run.date || 'atual'} · {run.projectionOrigin || 'sem origem'}</span><span className="font-black text-gray-200">{formatScore(run.weightedProjected)}/240</span></div>)}
+            </div>
+          </AuditPanel>
+        </div>
+      </details>
+
       {activeResult && resultDraft && (
         <div className="border-t border-white/10 bg-[#262626] p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -423,11 +570,37 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   );
 };
 
-const ProjectionMetric: React.FC<{ label: string; value: number; target: string; onChange: (value: number) => void }> = ({ label, value, target, onChange }) => (
-  <label className="flex min-h-16 items-center justify-between gap-3 border border-white/10 bg-[#171717] px-3 py-2">
-    <span><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{label}</span><span className="mt-1 block text-[10px] font-bold text-gray-500">alvo {target}</span></span>
-    <input aria-label={label} type="number" min={0} max={80} value={value} onChange={(event) => onChange(Number(event.target.value))} className="h-9 w-16 rounded border border-white/10 bg-[#0d0d0d] text-center text-lg font-black text-white outline-none focus:border-[#84cc16]" />
-  </label>
+const ProjectionMetric: React.FC<{
+  label: string;
+  value: number | null;
+  target: string;
+  interval: string | null;
+  manual: boolean;
+  onChange: (value: number) => void;
+}> = ({ label, value, target, interval, manual, onChange }) => (
+  <div className="flex min-h-16 items-center justify-between gap-3 border border-white/10 bg-[#171717] px-3 py-2">
+    <span><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{label}</span><span className="mt-1 block text-[10px] font-bold text-gray-500">{target}</span>{interval && <span className="mt-0.5 block text-[9px] font-semibold text-gray-600">faixa 90% {interval}</span>}</span>
+    {manual ? <input aria-label={`${label} manual`} type="number" min={0} max={80} value={value ?? ''} onChange={(event) => onChange(Number(event.target.value))} className="h-9 w-16 rounded border border-amber-300/30 bg-[#0d0d0d] text-center text-lg font-black text-amber-100 outline-none focus:border-amber-300" /> : <strong className="text-xl font-black text-white">{formatScore(value)}</strong>}
+  </div>
+);
+
+const AuditMetric: React.FC<{ label: string; value: string; detail: string }> = ({ label, value, detail }) => (
+  <div className="border border-white/10 bg-[#171717] px-3 py-2">
+    <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{label}</span>
+    <p className="mt-1 truncate text-sm font-black text-white" title={value}>{value}</p>
+    <p className="mt-0.5 truncate text-[9px] font-semibold text-gray-600" title={detail}>{detail}</p>
+  </div>
+);
+
+const AuditPanel: React.FC<React.PropsWithChildren<{ title: string }>> = ({ title, children }) => (
+  <section className="border border-white/10 bg-[#202020] p-3">
+    <h3 className="mb-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#bef264]">{title}</h3>
+    {children}
+  </section>
+);
+
+const AuditRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-3"><dt className="font-semibold text-gray-500">{label}</dt><dd className="text-right font-black text-gray-200">{value}</dd></div>
 );
 
 const CapacityMetric: React.FC<{
@@ -463,10 +636,11 @@ const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, busy
       {actions.length ? actions.map((action) => (
         <article key={action.id} className={`border border-white/10 border-l-4 bg-[#242424] p-3 ${recommendationTone[action.recommendation]} ${action.state === 'completed' ? 'opacity-60' : ''}`}>
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className={`rounded border px-2 py-1 text-[9px] font-black uppercase ${recommendationBadge[action.recommendation]}`}>{recommendationLabel[action.recommendation]}</span><span className="text-[9px] font-black uppercase text-gray-500">{action.paper} · {action.durationMinutes} min{action.plannedQuestions ? ` · ${action.plannedQuestions} q` : ''}</span>{action.questionRefs.length > 0 && <span className="rounded bg-amber-300/10 px-2 py-1 text-[9px] font-black text-amber-200">{action.questionRefs.length} exatas</span>}</div><h3 className="mt-2 text-sm font-black leading-snug text-white">{action.title}</h3>{action.topicHint && <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{action.topicHint}</p>}</div>
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className={`rounded border px-2 py-1 text-[9px] font-black uppercase ${recommendationBadge[action.recommendation]}`}>{recommendationLabel[action.recommendation]}</span><span className="text-[9px] font-black uppercase text-gray-500">{action.paper} · {action.durationMinutes} min{action.plannedQuestions ? ` · ${action.plannedQuestions} q` : ''}</span><span className="rounded bg-white/5 px-2 py-1 text-[9px] font-black text-gray-300">Confiança {formatPercent(action.confidenceBp)}</span>{typeof action.scoreDetails.fragilityBp === 'number' && <span className="rounded bg-rose-400/10 px-2 py-1 text-[9px] font-black text-rose-200">Fragilidade {formatPercent(action.scoreDetails.fragilityBp)}</span>}{action.questionRefs.length > 0 && <span className="rounded bg-amber-300/10 px-2 py-1 text-[9px] font-black text-amber-200">{action.questionRefs.length} exatas</span>}</div><h3 className="mt-2 text-sm font-black leading-snug text-white">{action.title}</h3>{action.topicHint && <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{action.topicHint}</p>}</div>
             <span className="text-[9px] font-black uppercase text-gray-500">{action.state === 'pending' ? 'A confirmar' : action.state}</span>
           </div>
           <div className="mt-3 border-l border-white/10 pl-3"><p className="text-[9px] font-black uppercase tracking-widest text-gray-500">Por que agora</p><p className="mt-1 text-xs font-semibold leading-relaxed text-gray-300">{action.whyNow}</p></div>
+          {action.rationale.length > 0 && <ul className="mt-2 space-y-1 pl-3 text-[10px] font-semibold leading-relaxed text-gray-500">{action.rationale.map((reason, index) => <li key={`${reason}-${index}`}>• {reason}</li>)}</ul>}
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             {action.externalTaskId && <button type="button" onClick={() => onOpen(action.externalTaskId!)} className="inline-flex h-8 items-center gap-1.5 rounded bg-[#84cc16] px-2.5 text-[10px] font-black uppercase text-black hover:bg-[#65a30d]"><Play className="h-3.5 w-3.5" /> Abrir</button>}
             {action.plannedQuestions > 0 && <a href={tecUrlForAction(action)} target="study-os-tec" rel="noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded border border-sky-400/25 bg-sky-400/10 px-2.5 text-[10px] font-black uppercase text-sky-100 hover:bg-sky-400/20">TEC <ExternalLink className="h-3.5 w-3.5" /></a>}
@@ -474,7 +648,7 @@ const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, busy
             {action.state === 'pending' && <><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, true)} className="inline-flex h-8 items-center gap-1.5 rounded border border-[#84cc16]/30 bg-[#84cc16]/10 px-2.5 text-[10px] font-black uppercase text-[#bef264] disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Confirmar</button><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, false)} title="Recusar sugestão" className="grid h-8 w-8 place-items-center rounded border border-white/10 bg-white/5 text-gray-400 hover:text-white disabled:opacity-50"><X className="h-3.5 w-3.5" /></button></>}
             {!['completed', 'skipped'].includes(action.state) && <button type="button" onClick={() => onResult(action)} className={`inline-flex h-8 items-center gap-1.5 rounded border px-2.5 text-[10px] font-black uppercase ${resultActionId === action.id ? 'border-amber-300/40 bg-amber-300/15 text-amber-100' : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'}`}><Activity className="h-3.5 w-3.5" /> Resultado</button>}
           </div>
-          <details className="mt-3 border-t border-white/10 pt-2"><summary className="cursor-pointer text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-300">Detalhes do score</summary><dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">{scalarEntries(action.scoreDetails).map(([key, value]) => <React.Fragment key={key}><dt className="truncate text-gray-500">{key}</dt><dd className="text-right font-bold text-gray-300">{String(value)}</dd></React.Fragment>)}</dl></details>
+          <details className="mt-3 border-t border-white/10 pt-2"><summary className="cursor-pointer text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-300">Detalhes do score</summary><dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">{scoreEntries(action.scoreDetails).map(([key, value]) => <React.Fragment key={key}><dt className="break-words text-gray-500">{key}</dt><dd className="break-words text-right font-bold text-gray-300">{formatScoreValue(value)}</dd></React.Fragment>)}</dl></details>
         </article>
       )) : <div className="border border-dashed border-white/10 px-3 py-8 text-center text-xs font-bold text-gray-600">Nenhuma ação nesta fila.</div>}
     </div>

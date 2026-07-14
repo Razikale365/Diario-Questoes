@@ -24,8 +24,14 @@ const blockKind = (task: SourcePlanTask): PlannerTaskBlockKind | undefined => {
   return undefined;
 };
 
-const fallbackTimestamp = (task: SourcePlanTask) =>
-  task.scheduledDate ? `${task.scheduledDate}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z';
+const calendarDate = (task: SourcePlanTask): string | undefined => {
+  if (!task.scheduledDate || task.backlog) return undefined;
+  if (task.cycle && task.scheduledDate > task.cycle.endsOn) return undefined;
+  return task.scheduledDate;
+};
+
+const fallbackTimestamp = (scheduledDate: string | undefined) =>
+  scheduledDate ? `${scheduledDate}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z';
 
 export const sourceTaskKind = (task: PlannerTask): SprintSourceTaskKind => {
   if (task.plannedBlockKind) return task.plannedBlockKind;
@@ -129,7 +135,8 @@ export const mergeRestoredSourcePlanTasks = (
 };
 
 export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => {
-  const timestamp = fallbackTimestamp(task);
+  const scheduledDate = calendarDate(task);
+  const timestamp = fallbackTimestamp(scheduledDate);
   const plannedQuestions = numberValue(task.provenance.plannedQuestions);
   return {
     id: task.externalTaskId,
@@ -145,7 +152,7 @@ export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => 
     performance: task.performanceBp === null ? null : task.performanceBp / 100,
     status: task.status,
     relevance: task.relevance,
-    scheduledDate: task.scheduledDate || undefined,
+    scheduledDate,
     startTime: textValue(task.provenance.startTime) || undefined,
     durationMinutes: task.estimatedMinutes,
     source: plannerSource(task),

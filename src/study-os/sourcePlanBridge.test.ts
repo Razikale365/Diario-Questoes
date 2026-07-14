@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { SourcePlanTask } from './api/sprint';
+
 import {
   currentSourcePlanTasks,
   externalSourceTaskId,
@@ -46,6 +48,8 @@ test('persisted LS tasks hydrate the calendar without losing execution state', (
       plannedQuestions: 10,
       tecUrl: 'https://www.tecconcursos.com.br/s/Q6XHkN',
     },
+    cycle: null,
+    backlog: null,
     version: 2,
   });
 
@@ -60,6 +64,64 @@ test('persisted LS tasks hydrate the calendar without losing execution state', (
   assert.equal(task.plannedQuestions, 10);
   assert.equal(task.sourceUrl, 'https://www.tecconcursos.com.br/s/Q6XHkN');
   assert.equal(task.linkedStudyTaskId, 'study-task-1');
+});
+
+test('cycle-overrun backlog tasks remain unscheduled when hydrating the calendar', () => {
+  const sourceTask: SourcePlanTask = {
+    id: 48,
+    targetSlug: 'sefaz_ce',
+    sourceKind: 'ls',
+    externalTaskId: 'meta-47-overrun',
+    planLabel: 'Meta 47',
+    metaNumber: 47,
+    scheduledDate: '2026-07-18',
+    sourceOrder: 48,
+    discipline: 'Economia',
+    subjectKey: 'p1_economia',
+    mappingStatus: 'matched',
+    topicHint: 'Oferta e demanda',
+    taskKind: 'questions',
+    description: 'Bloco fora da janela da meta',
+    details: '',
+    materialHint: '',
+    estimatedMinutes: 45,
+    spentMinutes: 0,
+    relevance: 9,
+    status: 'pending',
+    performanceBp: null,
+    linkedStudyTaskId: null,
+    provenance: {},
+    cycle: {
+      id: 47,
+      sourceKind: 'ls',
+      planLabel: 'Meta 47',
+      metaNumber: 47,
+      releasedAt: '2026-07-11T08:00:00-03:00',
+      startsOn: '2026-07-11',
+      endsOn: '2026-07-17',
+      version: 1,
+    },
+    backlog: null,
+    version: 1,
+  };
+  const overrun = plannerTaskFromSourcePlan(sourceTask);
+  const backlog = plannerTaskFromSourcePlan({
+    ...sourceTask,
+    scheduledDate: '2026-07-17',
+    backlog: {
+      id: 1,
+      reason: 'cycle_closed_pending',
+      returnScoreMilli: 1200,
+      state: 'candidate',
+      discoveredOn: '2026-07-18',
+      recoveredOn: null,
+    },
+  });
+
+  assert.equal(overrun.scheduledDate, undefined);
+  assert.equal(overrun.createdAt, '1970-01-01T00:00:00.000Z');
+  assert.equal(overrun.updatedAt, '1970-01-01T00:00:00.000Z');
+  assert.equal(backlog.scheduledDate, undefined);
 });
 
 test('manual and trilha source kinds remain distinct after hydration', () => {
@@ -86,6 +148,8 @@ test('manual and trilha source kinds remain distinct after hydration', () => {
     performanceBp: null,
     linkedStudyTaskId: null,
     provenance: {},
+    cycle: null,
+    backlog: null,
     version: 1,
   };
 
@@ -118,6 +182,8 @@ test('calendar restoration selects the latest numbered meta but keeps unnumbered
     performanceBp: null,
     linkedStudyTaskId: null,
     provenance: {},
+    cycle: null,
+    backlog: null,
     version: 1,
   };
 
@@ -286,6 +352,8 @@ test('source-plan bridge round-trips a valid zero meta number', () => {
     performanceBp: null,
     linkedStudyTaskId: null,
     provenance: {},
+    cycle: null,
+    backlog: null,
     version: 1,
   });
   const persisted = sourcePlanTaskInput(hydrated);

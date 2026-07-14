@@ -2,12 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  fetchSourcePlanBacklog,
   fetchSourcePlanTasks,
   fetchOptionalSprintDay,
+  fetchSprintEvidence,
+  fetchSprintProjection,
+  fetchSprintTrajectory,
   generateSprintDay,
   importSourcePlan,
+  parseSourcePlanBacklogList,
   parseSprintConfig,
   parseSprintDay,
+  parseSprintEvidenceList,
+  parseSprintProjection,
+  parseSprintTrajectory,
   updateSprintAction,
 } from './sprint';
 
@@ -91,6 +99,84 @@ const action = {
   version: 1,
 };
 
+const projection = {
+  targetSlug: 'sefaz_ce',
+  asOf: '2026-07-14',
+  formulaVersion: 'sefaz-ce-projection-v2',
+  scoreKind: 'raw_weighted_equivalent_not_fcc_standardized',
+  interval: { confidenceBp: 9000, kind: 'normal_approximation_raw_equivalent' },
+  p1: { projected: 42, low: 39, high: 45, floor: 48, stretch: 64, variance: 4 },
+  p2: { projected: 55, low: 52, high: 58, floor: 63, stretch: 70, variance: 9 },
+  weighted: { projected: 152, low: 143, high: 161, target: 204, distanceToTarget: 52 },
+  confidenceBp: 3200,
+  dominantOrigin: 'diario',
+  warnings: ['Amostra representativa ainda curta.'],
+  subjects: [{
+    subjectProfileId: 1,
+    subjectKey: 'p2_lte',
+    displayName: 'Legislacao Tributaria Estadual do Ceara',
+    paper: 'P2',
+    questionCount: 20,
+    questionWeight: 2,
+    estimateBp: 7000,
+    lowBp: 6200,
+    highBp: 7800,
+    effectiveSample: 12.5,
+    confidenceBp: 3000,
+    fragilityBp: 7000,
+    representativeSetCount: 1,
+    demotionEligible: false,
+    dominantOrigin: 'diario',
+    warnings: ['LTE sem transferencia de conteudo de GO.'],
+  }],
+};
+
+const evidenceObservation = {
+  id: 11,
+  targetSlug: 'sefaz_ce',
+  batchId: 'diario-backup-2026-07-14',
+  subjectProfileId: 1,
+  subjectKey: 'p2_lte',
+  discipline: 'Legislacao Tributaria Estadual',
+  topicHint: 'Agregado do bloco',
+  observedOn: '2026-07-14',
+  origin: 'diario',
+  sourceRecordId: 'diario:task-1:block-1',
+  sourceRevision: 'sha256:revision-1',
+  sourceUpdatedAt: '2026-07-14T12:00:00.000000Z',
+  measurementType: 'mixed_set',
+  examBoard: 'FCC',
+  correctCount: 7,
+  wrongCount: 3,
+  doubtCount: 2,
+  percentageBp: 7000,
+  sampleSize: 10,
+  transferScope: 'content',
+  transferabilityBp: 10000,
+  contentHash: 'a'.repeat(64),
+  provenance: { backupFileHash: 'b'.repeat(64), imported: true },
+};
+
+const cycle = {
+  id: 7,
+  sourceKind: 'ls',
+  planLabel: 'Meta 47',
+  metaNumber: 47,
+  releasedAt: '2026-07-11T09:00:00.000000Z',
+  startsOn: '2026-07-11',
+  endsOn: '2026-07-17',
+  version: 1,
+};
+
+const backlog = {
+  id: 9,
+  reason: 'cycle_closed_pending',
+  returnScoreMilli: 1250,
+  state: 'candidate',
+  discoveredOn: '2026-07-18',
+  recoveredOn: null,
+};
+
 const day = {
   runId: 1,
   targetSlug: 'sefaz_ce',
@@ -99,6 +185,8 @@ const day = {
   modeLabel: 'Reta final tatica',
   capacity: { lsBudgetMinutes: 240, extraBudgetMinutes: 60, energyLevel: 3 },
   projections: { p1: 42, p2: 55 },
+  projection,
+  projectionOrigin: 'derived',
   actions: [action],
   minimumViable: { actionIds: [2], minutes: 60 },
   supersedesRunId: null,
@@ -128,6 +216,44 @@ test('sprint parsers reject automatic LS mutation and invalid budgets', () => {
   );
 });
 
+test('calibration parsers accept strict projection, evidence and trajectory contracts', () => {
+  const evidence = { targetSlug: 'sefaz_ce', items: [evidenceObservation], unresolvedCount: 0 };
+  const run = {
+    runId: 1,
+    date: '2026-07-14',
+    p1: 42,
+    p2: 55,
+    projection,
+    projectionOrigin: 'derived',
+    confidenceBp: 3200,
+    weightedProjected: 152,
+    distanceToTarget: 52,
+    dominantOrigin: 'diario',
+    formulaVersion: 'sefaz-ce-projection-v2',
+    generatedAt: '2026-07-14T12:05:00Z',
+  };
+  const trajectory = { targetSlug: 'sefaz_ce', latest: run, runs: [run] };
+
+  assert.deepEqual(parseSprintProjection(projection), projection);
+  assert.deepEqual(parseSprintEvidenceList(evidence), evidence);
+  assert.deepEqual(parseSprintTrajectory(trajectory), trajectory);
+});
+
+test('calibration parsers reject malformed confidence and non-aggregate evidence', () => {
+  assert.throws(
+    () => parseSprintProjection({ ...projection, interval: { ...projection.interval, confidenceBp: 9500 } }),
+    /sprint projection/i,
+  );
+  assert.throws(
+    () => parseSprintEvidenceList({
+      targetSlug: 'sefaz_ce',
+      items: [{ ...evidenceObservation, measurementType: 'question_text' }],
+      unresolvedCount: 0,
+    }),
+    /sprint evidence/i,
+  );
+});
+
 test('sprint requests preserve idempotency and exact action result payloads', async (context) => {
   const requests: Array<{ input: string; init?: RequestInit }> = [];
   context.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
@@ -135,10 +261,10 @@ test('sprint requests preserve idempotency and exact action result payloads', as
     const response = requests.length === 1
       ? day
       : requests.length === 2
-        ? {
+          ? {
             targetSlug: 'sefaz_ce', sourceKind: 'ls', planLabel: 'Meta 47',
             createdCount: 1, updatedCount: 0, unresolvedCount: 0,
-            taskIds: [4], replayed: false,
+            cycleOverrunCount: 0, cycle, taskIds: [4], replayed: false,
           }
         : { ...action, state: 'completed', version: 2, replayed: false };
     return new Response(JSON.stringify(response), {
@@ -229,6 +355,8 @@ test('source-plan task listing restores the complete persisted calendar contract
       planejamento: 'SEFAZ CE Pos-edital',
       startTime: '08:00',
     },
+    cycle,
+    backlog,
     version: 2,
   };
   context.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
@@ -242,4 +370,51 @@ test('source-plan task listing restores the complete persisted calendar contract
 
   assert.deepEqual(result.items, [sourceTask]);
   assert.equal(result.unresolvedCount, 0);
+});
+
+test('calibration fetchers preserve dates, includeInactive and backlog query contracts', async (context) => {
+  const requests: string[] = [];
+  const run = {
+    runId: 1,
+    date: '2026-07-14',
+    p1: 42,
+    p2: 55,
+    projection,
+    projectionOrigin: 'derived',
+    confidenceBp: 3200,
+    weightedProjected: 152,
+    distanceToTarget: 52,
+    dominantOrigin: 'diario',
+    formulaVersion: 'sefaz-ce-projection-v2',
+    generatedAt: '2026-07-14T12:05:00Z',
+  };
+  const responses = [
+    projection,
+    { targetSlug: 'sefaz_ce', items: [evidenceObservation], unresolvedCount: 0 },
+    { targetSlug: 'sefaz_ce', latest: run, runs: [run] },
+    { targetSlug: 'sefaz_ce', date: null, items: [], unresolvedCount: 0 },
+    { targetSlug: 'sefaz_ce', items: [backlog] },
+  ];
+  context.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify(responses[requests.length - 1]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  await fetchSprintProjection('sefaz_ce', '2026-07-14');
+  await fetchSprintEvidence('sefaz_ce');
+  await fetchSprintTrajectory('sefaz_ce');
+  await fetchSourcePlanTasks('sefaz_ce', undefined, true);
+  const listedBacklog = await fetchSourcePlanBacklog('sefaz_ce');
+
+  assert.deepEqual(parseSourcePlanBacklogList({ targetSlug: 'sefaz_ce', items: [backlog] }), listedBacklog);
+  assert.deepEqual(requests, [
+    '/api/v1/sprints/projection?targetSlug=sefaz_ce&asOf=2026-07-14',
+    '/api/v1/sprints/evidence?targetSlug=sefaz_ce',
+    '/api/v1/sprints/trajectory?targetSlug=sefaz_ce',
+    '/api/v1/source-plans/tasks?targetSlug=sefaz_ce&includeInactive=true',
+    '/api/v1/source-plans/backlog?targetSlug=sefaz_ce',
+  ]);
 });

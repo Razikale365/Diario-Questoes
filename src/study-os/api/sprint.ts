@@ -7,6 +7,17 @@ export type SprintDecision = 'pending' | 'accepted' | 'rejected';
 export type SprintSourceKind = 'ls' | 'trilha' | 'manual';
 export type SprintSourceTaskKind = 'theory' | 'questions' | 'review' | 'simulation' | 'discursive' | 'mixed';
 export type SprintSourceTaskStatus = 'pending' | 'started' | 'completed' | 'ignored' | 'archived';
+export type SprintEvidenceMeasurementType =
+  | 'full_exam'
+  | 'sectional_mock'
+  | 'unseen_set'
+  | 'mixed_set'
+  | 'error_review'
+  | 'ls_percentage'
+  | 'sprint_action'
+  | 'baseline';
+export type SprintEvidenceTransferScope = 'content' | 'method' | 'trap_pattern';
+export type SprintEvidenceScalar = string | number | boolean | null;
 
 export interface SprintSubjectProfile {
   id: number;
@@ -105,6 +116,8 @@ export interface SprintDay {
   modeLabel: string;
   capacity: { lsBudgetMinutes: number; extraBudgetMinutes: number; energyLevel: number };
   projections: { p1: number; p2: number };
+  projection: SprintProjection | null;
+  projectionOrigin: 'derived' | 'manual' | 'legacy_manual';
   actions: SprintAction[];
   minimumViable: { actionIds: number[]; minutes: number };
   supersedesRunId: number | null;
@@ -113,6 +126,127 @@ export interface SprintDay {
   generatedAt: string;
   version: number;
   replayed: boolean;
+}
+
+export interface SprintSubjectProjection {
+  subjectProfileId: number;
+  subjectKey: string;
+  displayName: string;
+  paper: 'P1' | 'P2';
+  questionCount: number;
+  questionWeight: number;
+  estimateBp: number;
+  lowBp: number;
+  highBp: number;
+  effectiveSample: number;
+  confidenceBp: number;
+  fragilityBp: number;
+  representativeSetCount: number;
+  demotionEligible: boolean;
+  dominantOrigin: string;
+  warnings: string[];
+}
+
+export interface SprintPaperProjection {
+  projected: number;
+  low: number;
+  high: number;
+  floor: number;
+  stretch: number;
+  variance: number | null;
+}
+
+export interface SprintProjection {
+  targetSlug: string;
+  asOf: string;
+  formulaVersion: string;
+  scoreKind: 'raw_weighted_equivalent_not_fcc_standardized';
+  interval: { confidenceBp: 9000; kind: 'normal_approximation_raw_equivalent' };
+  p1: SprintPaperProjection;
+  p2: SprintPaperProjection;
+  weighted: { projected: number; low: number; high: number; target: 204; distanceToTarget: number };
+  confidenceBp: number;
+  dominantOrigin: string;
+  warnings: string[];
+  subjects: SprintSubjectProjection[];
+}
+
+export interface SprintEvidenceObservation {
+  id: number;
+  targetSlug: string;
+  batchId: string;
+  subjectProfileId: number | null;
+  subjectKey: string | null;
+  discipline: string;
+  topicHint: string;
+  observedOn: string;
+  origin: string;
+  sourceRecordId: string;
+  sourceRevision: string;
+  sourceUpdatedAt: string;
+  measurementType: SprintEvidenceMeasurementType;
+  examBoard: string;
+  correctCount: number | null;
+  wrongCount: number | null;
+  doubtCount: number;
+  percentageBp: number;
+  sampleSize: number | null;
+  transferScope: SprintEvidenceTransferScope;
+  transferabilityBp: number;
+  contentHash: string;
+  provenance: Record<string, SprintEvidenceScalar>;
+}
+
+export interface SprintEvidenceList {
+  targetSlug: string;
+  items: SprintEvidenceObservation[];
+  unresolvedCount: number;
+}
+
+export interface SprintTrajectoryRun {
+  runId?: number;
+  date?: string;
+  p1: number;
+  p2: number;
+  projection: SprintProjection | null;
+  projectionOrigin: 'derived' | 'manual' | 'legacy_manual' | null;
+  confidenceBp: number | null;
+  weightedProjected: number;
+  distanceToTarget: number;
+  dominantOrigin: string | null;
+  formulaVersion: string | null;
+  generatedAt?: string;
+}
+
+export interface SprintTrajectory {
+  targetSlug: string;
+  latest: SprintTrajectoryRun;
+  runs: SprintTrajectoryRun[];
+}
+
+export interface SourcePlanCycle {
+  id: number;
+  sourceKind: SprintSourceKind;
+  planLabel: string;
+  metaNumber: number | null;
+  releasedAt: string;
+  startsOn: string;
+  endsOn: string;
+  version: number;
+}
+
+export interface SourcePlanBacklog {
+  id: number;
+  reason: 'cycle_closed_pending';
+  returnScoreMilli: number;
+  state: 'candidate' | 'recovered' | 'dismissed';
+  discoveredOn: string;
+  recoveredOn: string | null;
+}
+
+export interface SourcePlanBacklogList {
+  targetSlug: string;
+  items: SourcePlanBacklog[];
 }
 
 export interface GenerateSprintDayInput {
@@ -174,6 +308,8 @@ export interface SourcePlanTask extends SourcePlanTaskInput {
   performanceBp: number | null;
   linkedStudyTaskId: string | null;
   provenance: Record<string, unknown>;
+  cycle: SourcePlanCycle | null;
+  backlog: SourcePlanBacklog | null;
   version: number;
 }
 
@@ -189,6 +325,7 @@ export interface ImportSourcePlanInput {
   sourceKind: SprintSourceKind;
   planLabel: string;
   metaNumber?: number;
+  cycle?: { releasedAt: string; startsOn: string; endsOn: string };
   tasks: SourcePlanTaskInput[];
 }
 
@@ -199,6 +336,8 @@ export interface SourcePlanImportResult {
   createdCount: number;
   updatedCount: number;
   unresolvedCount: number;
+  cycleOverrunCount: number;
+  cycle: SourcePlanCycle | null;
   taskIds: number[];
   replayed: boolean;
 }
@@ -215,7 +354,22 @@ const inRange = (value: unknown, minimum: number, maximum: number): value is num
   isNumber(value) && value >= minimum && value <= maximum;
 const isDate = (value: unknown): value is string =>
   isString(value) && /^\d{4}-\d{2}-\d{2}$/.test(value);
+const isTimestamp = (value: unknown): value is string =>
+  isString(value)
+  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+  && !Number.isNaN(Date.parse(value));
 const isNullableText = (value: unknown): value is string | null => value === null || isString(value);
+const isNullableNonEmptyText = (value: unknown): value is string | null => value === null || isText(value);
+const isBasisPoints = (value: unknown): value is number => isInteger(value) && Number(value) >= 0 && Number(value) <= 10000;
+const isScalar = (value: unknown): value is SprintEvidenceScalar =>
+  value === null
+  || isString(value)
+  || typeof value === 'boolean'
+  || isNumber(value);
+const isScalarRecord = (value: unknown): value is Record<string, SprintEvidenceScalar> =>
+  isRecord(value)
+  && Object.entries(value).every(([key, item]) => Boolean(key.trim()) && isScalar(item));
+const isTextArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isText);
 const oneOf = <T extends string>(value: unknown, choices: readonly T[]): value is T =>
   isString(value) && choices.includes(value as T);
 const invalid = (label: string): never => {
@@ -324,6 +478,184 @@ export const parseSprintAction = (value: unknown): SprintAction => {
   };
 };
 
+const parseSprintSubjectProjection = (value: unknown): SprintSubjectProjection => {
+  if (!isRecord(value)
+    || !isPositive(value.subjectProfileId)
+    || !isText(value.subjectKey)
+    || !isText(value.displayName)
+    || !oneOf(value.paper, ['P1', 'P2'] as const)
+    || !isPositive(value.questionCount)
+    || !isNumber(value.questionWeight)
+    || value.questionWeight <= 0
+    || !isBasisPoints(value.estimateBp)
+    || !isBasisPoints(value.lowBp)
+    || !isBasisPoints(value.highBp)
+    || value.lowBp > value.estimateBp
+    || value.estimateBp > value.highBp
+    || !isNumber(value.effectiveSample)
+    || value.effectiveSample < 0
+    || !isBasisPoints(value.confidenceBp)
+    || !isBasisPoints(value.fragilityBp)
+    || !isNonNegative(value.representativeSetCount)
+    || typeof value.demotionEligible !== 'boolean'
+    || !isText(value.dominantOrigin)
+    || !isTextArray(value.warnings)) invalid('sprint subject projection');
+  return value as unknown as SprintSubjectProjection;
+};
+
+const parseSprintPaperProjection = (value: unknown): SprintPaperProjection => {
+  if (!isRecord(value)
+    || !inRange(value.projected, 0, 80)
+    || !inRange(value.low, 0, 80)
+    || !inRange(value.high, 0, 80)
+    || value.low > value.projected
+    || value.projected > value.high
+    || !isNonNegative(value.floor)
+    || value.floor > 80
+    || !isNonNegative(value.stretch)
+    || value.stretch > 80
+    || value.floor > value.stretch
+    || !(value.variance === null || (isNumber(value.variance) && value.variance >= 0))) {
+    invalid('sprint paper projection');
+  }
+  return value as unknown as SprintPaperProjection;
+};
+
+export const parseSprintProjection = (value: unknown): SprintProjection => {
+  if (!isRecord(value)
+    || !isText(value.targetSlug)
+    || !isDate(value.asOf)
+    || !isText(value.formulaVersion)
+    || value.scoreKind !== 'raw_weighted_equivalent_not_fcc_standardized'
+    || !isRecord(value.interval)
+    || value.interval.confidenceBp !== 9000
+    || value.interval.kind !== 'normal_approximation_raw_equivalent'
+    || !isRecord(value.p1)
+    || !isRecord(value.p2)
+    || !isRecord(value.weighted)
+    || !inRange(value.weighted.projected, 0, 240)
+    || !inRange(value.weighted.low, 0, 240)
+    || !inRange(value.weighted.high, 0, 240)
+    || value.weighted.low > value.weighted.projected
+    || value.weighted.projected > value.weighted.high
+    || value.weighted.target !== 204
+    || !isNumber(value.weighted.distanceToTarget)
+    || !isBasisPoints(value.confidenceBp)
+    || !isText(value.dominantOrigin)
+    || !isTextArray(value.warnings)
+    || !Array.isArray(value.subjects)) invalid('sprint projection');
+  const record = value as Record<string, unknown>;
+  const p1 = parseSprintPaperProjection(record.p1);
+  const p2 = parseSprintPaperProjection(record.p2);
+  const subjects = (record.subjects as unknown[]).map(parseSprintSubjectProjection);
+  if (new Set(subjects.map((subject) => subject.subjectKey)).size !== subjects.length) {
+    invalid('sprint projection');
+  }
+  return {
+    ...(value as unknown as SprintProjection),
+    p1,
+    p2,
+    subjects,
+  };
+};
+
+const parseSprintEvidenceObservation = (value: unknown): SprintEvidenceObservation => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !isText(value.targetSlug)
+    || !isText(value.batchId)
+    || !(value.subjectProfileId === null || isPositive(value.subjectProfileId))
+    || !(value.subjectKey === null || isText(value.subjectKey))
+    || !isText(value.discipline)
+    || !isString(value.topicHint)
+    || !isDate(value.observedOn)
+    || !isText(value.origin)
+    || !isText(value.sourceRecordId)
+    || !isText(value.sourceRevision)
+    || !isTimestamp(value.sourceUpdatedAt)
+    || !oneOf(value.measurementType, [
+      'full_exam', 'sectional_mock', 'unseen_set', 'mixed_set', 'error_review',
+      'ls_percentage', 'sprint_action', 'baseline',
+    ] as const)
+    || !isString(value.examBoard)
+    || !(
+      (value.correctCount === null && value.wrongCount === null)
+      || (isNonNegative(value.correctCount) && isNonNegative(value.wrongCount))
+    )
+    || !isNonNegative(value.doubtCount)
+    || !isBasisPoints(value.percentageBp)
+    || !(value.sampleSize === null || isNonNegative(value.sampleSize))
+    || !oneOf(value.transferScope, ['content', 'method', 'trap_pattern'] as const)
+    || !isBasisPoints(value.transferabilityBp)
+    || !isString(value.contentHash)
+    || !/^[0-9a-f]{64}$/.test(value.contentHash)
+    || !isScalarRecord(value.provenance)) invalid('sprint evidence observation');
+  const observation = value as unknown as SprintEvidenceObservation;
+  if (observation.correctCount !== null && observation.wrongCount !== null) {
+    const sampleSize = observation.correctCount + observation.wrongCount;
+    if (observation.sampleSize !== sampleSize || observation.doubtCount > sampleSize) {
+      invalid('sprint evidence observation');
+    }
+  } else if (observation.sampleSize !== null) {
+    invalid('sprint evidence observation');
+  }
+  return observation;
+};
+
+export const parseSprintEvidenceList = (value: unknown): SprintEvidenceList => {
+  if (!isRecord(value)
+    || !isText(value.targetSlug)
+    || !Array.isArray(value.items)
+    || !isNonNegative(value.unresolvedCount)) invalid('sprint evidence list');
+  const list = value as unknown as SprintEvidenceList;
+  const items = (list.items as unknown[]).map(parseSprintEvidenceObservation);
+  if (items.some((item) => item.targetSlug !== list.targetSlug)
+    || items.filter((item) => item.subjectKey === null).length !== list.unresolvedCount) {
+    invalid('sprint evidence list');
+  }
+  return { ...(value as unknown as SprintEvidenceList), items };
+};
+
+const parseSprintTrajectoryRun = (value: unknown, requireIdentity: boolean): SprintTrajectoryRun => {
+  if (!isRecord(value)
+    || !(value.runId === undefined || isPositive(value.runId))
+    || !(value.date === undefined || isDate(value.date))
+    || !inRange(value.p1, 0, 80)
+    || !inRange(value.p2, 0, 80)
+    || !(value.projection === null || isRecord(value.projection))
+    || !(value.projectionOrigin === null || oneOf(value.projectionOrigin, ['derived', 'manual', 'legacy_manual'] as const))
+    || !(value.confidenceBp === null || isBasisPoints(value.confidenceBp))
+    || !inRange(value.weightedProjected, 0, 240)
+    || !isNumber(value.distanceToTarget)
+    || !isNullableNonEmptyText(value.dominantOrigin)
+    || !isNullableNonEmptyText(value.formulaVersion)
+    || !(value.generatedAt === undefined || isTimestamp(value.generatedAt))) invalid('sprint trajectory run');
+  const run = value as unknown as SprintTrajectoryRun;
+  if (requireIdentity && (!isPositive(run.runId) || !isDate(run.date) || !isTimestamp(run.generatedAt))) {
+    invalid('sprint trajectory run');
+  }
+  const projection = run.projection === null ? null : parseSprintProjection(run.projection);
+  if ((projection === null && run.projectionOrigin !== null && run.projectionOrigin !== 'legacy_manual')
+    || (projection !== null && !oneOf(run.projectionOrigin, ['derived', 'manual'] as const))) {
+    invalid('sprint trajectory run');
+  }
+  return { ...(value as unknown as SprintTrajectoryRun), projection };
+};
+
+export const parseSprintTrajectory = (value: unknown): SprintTrajectory => {
+  if (!isRecord(value)
+    || !isText(value.targetSlug)
+    || !isRecord(value.latest)
+    || !Array.isArray(value.runs)) invalid('sprint trajectory');
+  const trajectory = value as unknown as SprintTrajectory;
+  const latest = parseSprintTrajectoryRun(trajectory.latest, false);
+  const runs = (trajectory.runs as unknown[]).map((run) => parseSprintTrajectoryRun(run, true));
+  if ([latest, ...runs].some((run) => run.projection !== null && run.projection.targetSlug !== trajectory.targetSlug)) {
+    invalid('sprint trajectory');
+  }
+  return { ...(value as unknown as SprintTrajectory), latest, runs };
+};
+
 export const parseSprintDay = (value: unknown): SprintDay => {
   if (!isRecord(value)
     || !isPositive(value.runId)
@@ -338,6 +670,8 @@ export const parseSprintDay = (value: unknown): SprintDay => {
     || !isRecord(value.projections)
     || !inRange(value.projections.p1, 0, 80)
     || !inRange(value.projections.p2, 0, 80)
+    || !(value.projection === null || isRecord(value.projection))
+    || !oneOf(value.projectionOrigin, ['derived', 'manual', 'legacy_manual'] as const)
     || !Array.isArray(value.actions)
     || !isRecord(value.minimumViable)
     || !Array.isArray(value.minimumViable.actionIds)
@@ -349,9 +683,56 @@ export const parseSprintDay = (value: unknown): SprintDay => {
     || !isText(value.generatedAt)
     || !isPositive(value.version)
     || typeof value.replayed !== 'boolean') invalid('sprint day');
+  const day = value as unknown as SprintDay;
+  const projection = day.projection === null ? null : parseSprintProjection(day.projection);
+  if ((projection === null && day.projectionOrigin !== 'legacy_manual')
+    || (projection !== null && day.projectionOrigin === 'legacy_manual')
+    || (projection !== null && (
+      projection.targetSlug !== day.targetSlug
+      || projection.asOf !== day.date
+      || projection.p1.projected !== day.projections.p1
+      || projection.p2.projected !== day.projections.p2
+    ))) invalid('sprint day');
   return {
     ...(value as unknown as SprintDay),
+    projection,
     actions: ((value as Record<string, unknown>).actions as unknown[]).map(parseSprintAction),
+  };
+};
+
+export const parseSourcePlanCycle = (value: unknown): SourcePlanCycle => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !oneOf(value.sourceKind, ['ls', 'trilha', 'manual'] as const)
+    || !isText(value.planLabel)
+    || !(value.metaNumber === null || isNonNegative(value.metaNumber))
+    || !isTimestamp(value.releasedAt)
+    || !isDate(value.startsOn)
+    || !isDate(value.endsOn)
+    || value.startsOn > value.endsOn
+    || value.releasedAt.slice(0, 10) > value.endsOn
+    || !isPositive(value.version)) invalid('source-plan cycle');
+  return value as unknown as SourcePlanCycle;
+};
+
+export const parseSourcePlanBacklog = (value: unknown): SourcePlanBacklog => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || value.reason !== 'cycle_closed_pending'
+    || !isNonNegative(value.returnScoreMilli)
+    || !oneOf(value.state, ['candidate', 'recovered', 'dismissed'] as const)
+    || !isDate(value.discoveredOn)
+    || !(value.recoveredOn === null || isDate(value.recoveredOn))) invalid('source-plan backlog');
+  return value as unknown as SourcePlanBacklog;
+};
+
+export const parseSourcePlanBacklogList = (value: unknown): SourcePlanBacklogList => {
+  if (!isRecord(value) || !isText(value.targetSlug) || !Array.isArray(value.items)) {
+    invalid('source-plan backlog list');
+  }
+  return {
+    ...(value as unknown as SourcePlanBacklogList),
+    items: ((value as Record<string, unknown>).items as unknown[]).map(parseSourcePlanBacklog),
   };
 };
 
@@ -363,10 +744,17 @@ const parseImportResult = (value: unknown): SourcePlanImportResult => {
     || !isNonNegative(value.createdCount)
     || !isNonNegative(value.updatedCount)
     || !isNonNegative(value.unresolvedCount)
+    || !isNonNegative(value.cycleOverrunCount)
+    || !(value.cycle === null || isRecord(value.cycle))
     || !Array.isArray(value.taskIds)
     || !value.taskIds.every(isPositive)
     || typeof value.replayed !== 'boolean') invalid('source plan import');
-  return value as unknown as SourcePlanImportResult;
+  return {
+    ...(value as unknown as SourcePlanImportResult),
+    cycle: (value as Record<string, unknown>).cycle === null
+      ? null
+      : parseSourcePlanCycle((value as Record<string, unknown>).cycle),
+  };
 };
 
 const parseSourcePlanTask = (value: unknown): SourcePlanTask => {
@@ -394,8 +782,18 @@ const parseSourcePlanTask = (value: unknown): SourcePlanTask => {
     || !(value.performanceBp === null || inRange(value.performanceBp, 0, 10000))
     || !isNullableText(value.linkedStudyTaskId)
     || !isRecord(value.provenance)
+    || !(value.cycle === null || isRecord(value.cycle))
+    || !(value.backlog === null || isRecord(value.backlog))
     || !isPositive(value.version)) invalid('source-plan task');
-  return value as unknown as SourcePlanTask;
+  return {
+    ...(value as unknown as SourcePlanTask),
+    cycle: (value as Record<string, unknown>).cycle === null
+      ? null
+      : parseSourcePlanCycle((value as Record<string, unknown>).cycle),
+    backlog: (value as Record<string, unknown>).backlog === null
+      ? null
+      : parseSourcePlanBacklog((value as Record<string, unknown>).backlog),
+  };
 };
 
 export const parseSourcePlanTaskList = (value: unknown): SourcePlanTaskList => {
@@ -460,6 +858,32 @@ export const fetchOptionalSprintDay = async (
   }
 };
 
+export const fetchSprintProjection = async (
+  targetSlug: string,
+  asOf?: string,
+  signal?: AbortSignal,
+): Promise<SprintProjection> => {
+  const query = new URLSearchParams({ targetSlug });
+  if (asOf) query.set('asOf', asOf);
+  return parseSprintProjection(await requestJson(`/api/v1/sprints/projection?${query}`, { signal }));
+};
+
+export const fetchSprintEvidence = async (
+  targetSlug: string,
+  signal?: AbortSignal,
+): Promise<SprintEvidenceList> => {
+  const query = new URLSearchParams({ targetSlug });
+  return parseSprintEvidenceList(await requestJson(`/api/v1/sprints/evidence?${query}`, { signal }));
+};
+
+export const fetchSprintTrajectory = async (
+  targetSlug: string,
+  signal?: AbortSignal,
+): Promise<SprintTrajectory> => {
+  const query = new URLSearchParams({ targetSlug });
+  return parseSprintTrajectory(await requestJson(`/api/v1/sprints/trajectory?${query}`, { signal }));
+};
+
 export const updateSprintAction = async (
   actionId: number,
   input: SprintActionResultInput,
@@ -475,12 +899,37 @@ export const importSourcePlan = async (
   '/api/v1/source-plans/import', jsonMutation('POST', input, idempotencyKey),
 ));
 
-export const fetchSourcePlanTasks = async (
+export function fetchSourcePlanTasks(
   targetSlug: string,
   date?: string,
   signal?: AbortSignal,
-): Promise<SourcePlanTaskList> => {
+): Promise<SourcePlanTaskList>;
+export function fetchSourcePlanTasks(
+  targetSlug: string,
+  date: string | undefined,
+  includeInactive: boolean,
+  signal?: AbortSignal,
+): Promise<SourcePlanTaskList>;
+export async function fetchSourcePlanTasks(
+  targetSlug: string,
+  date?: string,
+  includeInactiveOrSignal?: boolean | AbortSignal,
+  trailingSignal?: AbortSignal,
+): Promise<SourcePlanTaskList> {
+  const includeInactive = typeof includeInactiveOrSignal === 'boolean' ? includeInactiveOrSignal : false;
+  const signal = typeof includeInactiveOrSignal === 'boolean' ? trailingSignal : includeInactiveOrSignal;
   const query = new URLSearchParams({ targetSlug });
   if (date) query.set('date', date);
+  if (includeInactive) query.set('includeInactive', 'true');
   return parseSourcePlanTaskList(await requestJson(`/api/v1/source-plans/tasks?${query}`, { signal }));
+}
+
+export const fetchSourcePlanBacklog = async (
+  targetSlug: string,
+  includeAll = false,
+  signal?: AbortSignal,
+): Promise<SourcePlanBacklogList> => {
+  const query = new URLSearchParams({ targetSlug });
+  if (includeAll) query.set('includeAll', 'true');
+  return parseSourcePlanBacklogList(await requestJson(`/api/v1/source-plans/backlog?${query}`, { signal }));
 };

@@ -18,6 +18,16 @@ test('sprint command center keeps the tactical workflow visible and score detail
     'Projeção P2',
     'Minutos LS',
     'Minutos extras',
+    '204/240',
+    '85%',
+    'equivalente bruto',
+    'não é a nota padronizada da FCC',
+    'Confiança',
+    'Fragilidade',
+    'Ciclo vigente',
+    'Backlog da meta encerrada',
+    'Origem dominante',
+    'Usar override manual',
     'Dia mínimo viável',
     'Por que agora',
     'Detalhes do score',
@@ -29,6 +39,11 @@ test('sprint command center keeps the tactical workflow visible and score detail
   }
   assert.equal(source.includes('updateSprintAction'), true);
   assert.equal(source.includes('refreshSprintDay'), true);
+  assert.equal(source.includes('useState(42)'), false);
+  assert.equal(source.includes('useState(55)'), false);
+  assert.equal(source.includes('fetchSprintProjection'), true);
+  assert.equal(source.includes('fetchSprintTrajectory'), true);
+  assert.equal(source.includes('fetchSprintEvidence'), true);
   assert.equal(source.includes('<details'), true);
 });
 
