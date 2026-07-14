@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   AlertTriangle,
@@ -71,6 +71,19 @@ import {
 } from '../study-os/components/CutoverStatus';
 import { CourseInventory } from '../study-os/components/CourseInventory';
 import { AutonomousDay } from '../study-os/components/AutonomousDay';
+import { SprintCommandCenter } from '../study-os/components/SprintCommandCenter';
+import {
+  fetchSourcePlanTasks,
+  importSourcePlan,
+  type SprintQuestionRef,
+} from '../study-os/api/sprint';
+import {
+  currentSourcePlanTasks,
+  externalSourceTaskId,
+  mergeRestoredSourcePlanTasks,
+  plannerTaskFromSourcePlan,
+  sourcePlanTaskInput,
+} from '../study-os/sourcePlanBridge';
 
 type PlannerView = 'month' | 'week';
 type PlannerSection = 'today' | 'meta' | 'calendar' | 'courses' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
@@ -241,6 +254,15 @@ const formatShortDate = (value: string) => {
   return date.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
 };
 
+const compactHash = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
 const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: QuestionBankItem[] = []): StudyTask => {
   const matchedQuestions = bankItems.map(questionBankItemToQuestion);
   const bank = bankItems[0]?.bank || 'Outra';
@@ -307,8 +329,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const lastSourceSync = useRef('');
+  const sourcePlanHydrationInFlight = useRef(false);
   const cutover = useStudyOsCutover();
   const studyOsTarget = cutover.activeTargetSlug;
+  const [hydratedSourcePlanTarget, setHydratedSourcePlanTarget] = useState<string | null>(null);
   const studyOsActiveTarget = useMemo(
     () => cutover.targets.find((target) => target.targetSlug === studyOsTarget),
     [cutover.targets, studyOsTarget],
@@ -356,6 +381,100 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       setSelectedTaskId(null);
     }
   }, [plannerTasks, selectedTaskId]);
+
+  useEffect(() => {
+    if (studyOsTarget !== 'sefaz_ce') {
+      sourcePlanHydrationInFlight.current = false;
+      setHydratedSourcePlanTarget(null);
+      return;
+    }
+    sourcePlanHydrationInFlight.current = true;
+    const shouldAnnounceRestore = plannerTasks.length === 0;
+    const localLatestMeta = plannerTasks.reduce(
+      (latest, task) => Math.max(latest, task.metaNumber ?? 0),
+      0,
+    );
+    const controller = new AbortController();
+    void fetchSourcePlanTasks(studyOsTarget, undefined, controller.signal)
+      .then((result) => {
+        const currentItems = currentSourcePlanTasks(result.items);
+        if (currentItems.length === 0) return;
+        const restored = currentItems.map(plannerTaskFromSourcePlan);
+        setPlannerTasks((current) => mergeRestoredSourcePlanTasks(current, restored));
+        const completedTasks = restored.filter((task) => task.status === 'completed').length;
+        const ignoredTasks = restored.filter((task) => task.status === 'ignored').length;
+        const startedTasks = restored.filter((task) => task.status === 'started').length;
+        const first = currentItems[0];
+        setMetaSummary((current) => {
+          if ((first?.metaNumber ?? 0) < localLatestMeta) return current;
+          return {
+            id: `source-${first?.sourceKind || 'ls'}-${first?.metaNumber ?? compactHash(first?.planLabel || 'plano')}`,
+            title: first?.planLabel || 'Plano persistido',
+            planejamento: restored[0]?.planejamento,
+            metaNumber: first?.metaNumber ?? undefined,
+            totalTasks: restored.length,
+            totalDisciplines: countTaskDisciplines(restored),
+            completedPercent: Math.round((completedTasks / restored.length) * 100),
+            completedTasks,
+            pendingTasks: restored.filter((task) => task.status === 'pending').length,
+            ignoredTasks,
+            startedTasks,
+            importedAt: new Date().toISOString(),
+          };
+        });
+        if (shouldAnnounceRestore) showToast(`${restored.length} tarefa(s) restauradas do Study OS.`);
+      })
+      .catch((restoreError) => {
+        if (!controller.signal.aborted) {
+          console.error('[Diário LS] Source-plan restore failed', restoreError);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          sourcePlanHydrationInFlight.current = false;
+          setHydratedSourcePlanTarget(studyOsTarget);
+        }
+      });
+    return () => controller.abort();
+  }, [showToast, studyOsTarget]);
+
+  useEffect(() => {
+    if (
+      studyOsTarget !== 'sefaz_ce'
+      || sourcePlanHydrationInFlight.current
+      || hydratedSourcePlanTarget !== studyOsTarget
+      || plannerTasks.length === 0
+    ) return;
+    const tasks = plannerTasks.map(sourcePlanTaskInput);
+    const sourceKind = plannerTasks.every((task) => task.plannerSourceKind === 'trilha_estrategica')
+      ? 'trilha'
+      : plannerTasks.every((task) => task.source === 'manual' || task.source === 'generated')
+        ? 'manual'
+        : 'ls';
+    const payload = {
+      targetSlug: 'sefaz_ce',
+      sourceKind,
+      planLabel: metaSummary?.title || plannerTasks[0]?.planejamento || 'Plano local',
+      metaNumber: metaSummary?.metaNumber,
+      tasks,
+    } as const;
+    const signature = compactHash(JSON.stringify(payload));
+    if (lastSourceSync.current === signature) return;
+    lastSourceSync.current = signature;
+    void importSourcePlan(payload, `planner-sync-${signature}`)
+      .then((result) => {
+        if (result.createdCount > 0) {
+          showToast(`${result.createdCount} tarefa(s) LS persistidas no Study OS.`);
+        }
+        if (result.unresolvedCount > 0) {
+          showToast(`${result.unresolvedCount} disciplina(s) aguardam correspondência com o edital.`);
+        }
+      })
+      .catch((syncError) => {
+        console.error('[Diário LS] Source-plan sync failed', syncError);
+        lastSourceSync.current = '';
+      });
+  }, [hydratedSourcePlanTarget, metaSummary, plannerTasks, showToast, studyOsTarget]);
 
   const activePlannerTasks = useMemo(
     () => plannerTasks.filter((task) => task.status !== 'archived'),
@@ -530,7 +649,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     const scheduleByNumber = new Map(weekSchedule.entries.map((entry) => [entry.number, entry]));
     const nextTasks = plannerTasks.map((task) => {
       const entry = scheduleByNumber.get(task.number);
-      const matchesMeta = !weekSchedule.metaNumber || task.metaNumber === weekSchedule.metaNumber;
+      const matchesMeta = weekSchedule.metaNumber === undefined || task.metaNumber === weekSchedule.metaNumber;
       if (!entry || !matchesMeta) return task;
 
       return {
@@ -685,6 +804,28 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     if (matches.length > 0) {
       showToast(`${matches.length} questão(ões) do banco vinculadas à tarefa.`);
     }
+  };
+
+  const sprintQuestionRefs = (taskId: string): SprintQuestionRef[] => {
+    const task = plannerTasks.find((item) => item.id === taskId || externalSourceTaskId(item) === taskId);
+    if (!task) return [];
+    return matchQuestionBankItemsToPlannerTask(task, questionBankItems)
+      .map((item): SprintQuestionRef | null => {
+        const lastAttempt = item.attempts[item.attempts.length - 1];
+        const reason = lastAttempt?.isCorrect === false
+          ? 'wrong'
+          : item.hasDoubt
+            ? 'doubt'
+            : item.favorite
+              ? 'favorite'
+              : null;
+        return reason ? {
+          questionFingerprint: item.fingerprint,
+          sourceTaskId: task.linkedStudyTaskId || task.id,
+          reason,
+        } : null;
+      })
+      .filter((item): item is SprintQuestionRef => item !== null);
   };
 
   const updateDraftTask = (key: string, updates: DraftTaskEdit) => {
@@ -926,8 +1067,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   );
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="space-y-3 sm:space-y-6">
+      <header className={`${activeSection === 'today' ? 'hidden sm:flex' : 'flex'} flex-wrap items-start justify-between gap-4`}>
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.3em] text-purple-400">Metas de Estudo</p>
           <h1 className="text-3xl font-black text-white">Planner</h1>
@@ -985,7 +1126,18 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
       {activeSection === 'today' && (
         <>
-          {studyOsTarget && (
+          {studyOsTarget === 'sefaz_ce' && (
+            <SprintCommandCenter
+              targetSlug={studyOsTarget}
+              onOpenSourceTask={(taskId) => {
+                const task = plannerTasks.find((item) => item.id === taskId || externalSourceTaskId(item) === taskId);
+                if (task) createOrOpenStudyTask(task);
+              }}
+              getQuestionRefs={sprintQuestionRefs}
+              showToast={showToast}
+            />
+          )}
+          {studyOsTarget && studyOsTarget !== 'sefaz_ce' && (
             <AutonomousDay
               targetSlug={studyOsTarget}
               onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
@@ -1001,6 +1153,30 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               onOpenLegacyTask={setSelectedTaskId}
               showToast={showToast}
             />
+          )}
+          {studyOsTarget === 'sefaz_ce' && (
+            <details className="rounded-lg border border-[#404040] bg-[#202020]">
+              <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-400">
+                Planner autônomo geral
+              </summary>
+              <div className="border-t border-white/10 p-3">
+                <AutonomousDay
+                  targetSlug={studyOsTarget}
+                  onTargetChange={(targetSlug) => void cutover.setActiveTarget(targetSlug)}
+                  legacyTasks={todayCommandCenter.tasks.map((task) => ({
+                    id: task.id,
+                    discipline: task.discipline,
+                    description: task.description,
+                    source: task.source,
+                    targetSlug: task.targetSlug,
+                    status: task.status,
+                  }))}
+                  questionBankItems={questionBankItems}
+                  onOpenLegacyTask={setSelectedTaskId}
+                  showToast={showToast}
+                />
+              </div>
+            </details>
           )}
           <details className="rounded-lg border border-[#404040] bg-[#202020]">
             <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-400">
@@ -1679,7 +1855,7 @@ const PlannerTaskDetailModal: React.FC<{
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Status</span>{statusLabel[task.status]}</p>
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Formato</span>{task.format || '-'}</p>
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Planejamento</span>{task.planejamento || '-'}</p>
-              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Meta</span>{task.metaNumber || '-'}</p>
+              <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Meta</span>{task.metaNumber ?? '-'}</p>
               <p><span className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Desempenho</span>{task.performance === null ? '-' : `${task.performance}%`}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-[#262626] p-3">

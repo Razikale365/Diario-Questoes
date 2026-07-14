@@ -329,7 +329,7 @@ const createTaskId = (metaNumber: number | undefined, number: number, line: stri
     hash ^= line.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return `planner_${metaNumber || 'meta'}_${number}_${(hash >>> 0).toString(36)}`;
+  return `planner_${metaNumber ?? 'meta'}_${number}_${(hash >>> 0).toString(36)}`;
 };
 
 const cleanPdfChrome = (value: string) =>
@@ -544,7 +544,7 @@ export const parseLsMetaText = (text: string, source: PlannerTaskSource = 'ls-me
 
   return {
     meta: {
-      id: `meta_${metaNumber || Date.now()}`,
+      id: `meta_${metaNumber ?? Date.now()}`,
       title: extractMetaTitle(normalizedText, metaNumber),
       planejamento,
       metaNumber,

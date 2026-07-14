@@ -144,6 +144,7 @@ export interface PlannerTask {
   plannedBlockKind?: PlannerTaskBlockKind;
   plannedQuestions?: number;
   materialHint?: string;
+  sourceUrl?: string;
   sourceReason?: string[];
   scoreBreakdown?: PlannerTaskScoreBreakdown;
   displacedReason?: string;

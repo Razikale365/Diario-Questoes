@@ -218,21 +218,21 @@ export const CutoverStatus: React.FC<{
 
   const activeTarget = state.status.activeTarget;
   return (
-    <section className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-y border-white/10 bg-[#242424] px-4 py-3">
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
+    <section className="flex min-h-14 items-center justify-between gap-2 border-y border-white/10 bg-[#242424] px-3 py-2 sm:flex-wrap sm:gap-3 sm:px-4 sm:py-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-wrap sm:gap-3">
         <div className="flex items-center gap-2 text-[#84cc16]">
           <CheckCircle2 className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-widest">SQLite ativo</span>
+          <span className="hidden text-xs font-black uppercase tracking-widest sm:inline">SQLite ativo</span>
         </div>
         <span className="hidden h-4 w-px bg-white/10 sm:block" />
-        <label className="flex items-center gap-2 text-xs font-bold text-gray-400">
-          <Database className="h-4 w-4" />
+        <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-bold text-gray-400 sm:flex-none">
+          <Database className="hidden h-4 w-4 sm:block" />
           <span className="sr-only">Alvo ativo</span>
           <select
             value={activeTarget?.targetSlug || ''}
             onChange={(event) => void controller.setActiveTarget(event.target.value)}
             disabled={state.action !== null || activeTarget === null || state.targets.length === 0}
-            className="h-8 max-w-64 rounded border border-white/10 bg-[#181818] px-2 text-xs font-bold text-white outline-none focus:border-[#84cc16] disabled:opacity-50"
+            className="h-8 min-w-0 w-full max-w-52 rounded border border-white/10 bg-[#181818] px-2 text-xs font-bold text-white outline-none focus:border-[#84cc16] disabled:opacity-50 sm:w-auto sm:max-w-64"
             aria-label="Alvo ativo do Study OS"
           >
             {state.targets.length === 0 && <option value="">Sem alvo configurado</option>}
@@ -243,14 +243,14 @@ export const CutoverStatus: React.FC<{
             ))}
           </select>
         </label>
-        <span className="text-[11px] font-bold text-gray-500">
+        <span className="hidden text-[11px] font-bold text-gray-500 sm:inline">
           {state.status.migrations.length} migração(ões) · {state.status.legacyMappingCount} vínculos
         </span>
       </div>
       <button
         type="button"
         onClick={() => void copyExportCommand()}
-        className="flex h-9 w-9 items-center justify-center rounded border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
+        className="hidden h-9 w-9 items-center justify-center rounded border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white sm:flex"
         aria-label="Copiar comando de exportação portátil"
         title={copied ? 'Comando copiado' : 'Copiar comando de exportação portátil'}
       >
