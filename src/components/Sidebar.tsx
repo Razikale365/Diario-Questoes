@@ -19,6 +19,7 @@ interface SidebarProps {
   syncLastSyncAt: string | null;
   onSyncNow: () => void;
   onAuth: () => void;
+  onChangePassword: () => void;
   onDisconnect: () => void;
 }
 
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   syncLastSyncAt,
   onSyncNow,
   onAuth,
+  onChangePassword,
   onDisconnect
 }) => {
   return (
@@ -58,9 +60,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <p className="text-xs text-purple-300 mb-1 uppercase tracking-wider">Orientação de Estudos</p>
             <p className="text-sm font-bold text-white text-center truncate w-full">ALUNO LS</p>
             <div className="flex gap-2 mt-3 text-xs text-purple-200 justify-center">
-              <button className="hover:text-white underline">Minha Conta</button>
+              <button onClick={onChangePassword} className="hover:text-white underline">Minha Conta</button>
               <span>|</span>
-              <button className="hover:text-white underline">Sair</button>
+              <button onClick={onDisconnect} className="hover:text-white underline">Sair</button>
             </div>
           </div>
         )}
@@ -164,6 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         lastSyncAt={syncLastSyncAt}
         onSyncNow={onSyncNow}
         onAuth={onAuth}
+        onChangePassword={onChangePassword}
         onDisconnect={onDisconnect}
         isCollapsed={isCollapsed}
       />

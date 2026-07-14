@@ -18,7 +18,7 @@ import { GabaritoModal } from './components/GabaritoModal';
 import { BlockEditModal } from './components/BlockEditModal';
 import { SectionEditModal } from './components/SectionEditModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
-import { AuthModal } from './components/AuthModal';
+import { AuthModal, AuthModalMode } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
 import { formatQuestionList, parseQuestionsText } from './utils/parser';
 import {
@@ -102,9 +102,32 @@ function App() {
     pendingChanges: 0,
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('sign-in');
   const syncEngineRef = useRef<SyncEngine | null>(null);
   const isInitialMount = useRef(true);
   const skipSyncRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+
+    void import('./lib/supabase').then(({ supabase }) => {
+      if (!active || !supabase) return;
+
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          setAuthModalMode('update-password');
+          setShowAuthModal(true);
+        }
+      });
+      unsubscribe = () => data.subscription.unsubscribe();
+    });
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, []);
 
   useEffect(() => {
     const adapter = new LocalStorageAdapter();
@@ -159,6 +182,16 @@ function App() {
     syncEngineRef.current?.syncNow();
   }, []);
 
+  const handleOpenAuth = useCallback(() => {
+    setAuthModalMode('sign-in');
+    setShowAuthModal(true);
+  }, []);
+
+  const handleOpenPasswordChange = useCallback(() => {
+    setAuthModalMode('update-password');
+    setShowAuthModal(true);
+  }, []);
+
   const handleAuthComplete = useCallback(() => {
     setShowAuthModal(false);
     syncEngineRef.current?.init();
@@ -167,6 +200,13 @@ function App() {
 
   const handleAuthError = useCallback((message: string) => {
     showToast(message);
+  }, []);
+
+  const handlePasswordUpdated = useCallback(() => {
+    setShowAuthModal(false);
+    setAuthModalMode('sign-in');
+    syncEngineRef.current?.init();
+    showToast('Senha atualizada. Use a mesma senha no celular.');
   }, []);
 
   const handleDisconnect = useCallback(() => {
@@ -523,7 +563,8 @@ function App() {
         syncStatus={syncState.status}
         syncLastSyncAt={syncState.lastSyncAt}
         onSyncNow={handleSyncNow}
-        onAuth={() => setShowAuthModal(true)}
+        onAuth={handleOpenAuth}
+        onChangePassword={handleOpenPasswordChange}
         onDisconnect={handleDisconnect}
       />
 
@@ -806,8 +847,10 @@ function App() {
 
       <AuthModal
         isOpen={showAuthModal}
+        initialMode={authModalMode}
         onClose={() => setShowAuthModal(false)}
         onAuthComplete={handleAuthComplete}
+        onPasswordUpdated={handlePasswordUpdated}
         onError={handleAuthError}
       />
 
@@ -816,7 +859,7 @@ function App() {
         setActiveTab={setActiveTab}
         syncStatus={syncState.status}
         onSyncNow={handleSyncNow}
-        onAuth={() => setShowAuthModal(true)}
+        onAuth={handleOpenAuth}
         inProgressCount={inProgressTasks.length}
       />
     </div>

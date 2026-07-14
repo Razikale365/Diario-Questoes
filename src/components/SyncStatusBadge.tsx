@@ -1,11 +1,12 @@
 import { SyncStatus } from '../types/sync';
-import { Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle, KeyRound, LogIn } from 'lucide-react';
 
 interface SyncStatusBadgeProps {
   status: SyncStatus;
   lastSyncAt: string | null;
   onSyncNow: () => void;
   onAuth: () => void;
+  onChangePassword: () => void;
   onDisconnect: () => void;
   isCollapsed: boolean;
 }
@@ -24,6 +25,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
   lastSyncAt,
   onSyncNow,
   onAuth,
+  onChangePassword,
   onDisconnect,
   isCollapsed,
 }) => {
@@ -79,6 +81,15 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
             className="flex-1 text-[9px] text-purple-400 hover:text-white py-1 rounded transition-colors"
           >
             Fazer login
+          </button>
+        )}
+        {status === 'synced' && (
+          <button
+            onClick={onChangePassword}
+            className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-white py-1 px-2 rounded transition-colors"
+          >
+            <KeyRound className="h-3 w-3" />
+            Alterar senha
           </button>
         )}
         {status === 'synced' && (
