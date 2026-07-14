@@ -190,6 +190,17 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   const [resultActionId, setResultActionId] = useState<number | null>(null);
   const [resultDraft, setResultDraft] = useState<ResultDraft | null>(null);
 
+  const refreshAuditState = useCallback(async () => {
+    const [nextTrajectory, nextEvidence, nextSourceTasks] = await Promise.all([
+      fetchSprintTrajectory(targetSlug),
+      fetchSprintEvidence(targetSlug),
+      fetchSourcePlanTasks(targetSlug, undefined, true),
+    ]);
+    setTrajectory(nextTrajectory);
+    setEvidence(nextEvidence);
+    setSourceTasks(nextSourceTasks.items);
+  }, [targetSlug]);
+
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
@@ -282,6 +293,11 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       setDay(next);
       setProjection(next.projection ?? projection);
       setMinimumMode(false);
+      try {
+        await refreshAuditState();
+      } catch (auditError) {
+        setError(`Dia atualizado, mas a auditoria não foi recarregada: ${errorMessage(auditError)}`);
+      }
       if (announce) showToast(refresh ? 'Dia recalculado.' : 'Sprint do dia gerado.');
       return next;
     } catch (mutationError) {
@@ -345,6 +361,13 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       setResultDraft(null);
       setEnergy(resultDraft.energyAfter);
       const refreshed = await createDay(true, false);
+      if (!refreshed) {
+        try {
+          await refreshAuditState();
+        } catch (auditError) {
+          setError(`Resultado salvo; recálculo e auditoria pendentes: ${errorMessage(auditError)}`);
+        }
+      }
       showToast(refreshed
         ? 'Resultado salvo e restante do dia recalculado.'
         : 'Resultado salvo; recálculo pendente.');

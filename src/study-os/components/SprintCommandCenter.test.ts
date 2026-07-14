@@ -117,3 +117,29 @@ test('a saved result is retained locally when the day refresh fails', () => {
   assert.equal(source.includes('const refreshed = await createDay(true, false)'), true);
   assert.equal(source.includes("refreshed\n        ? 'Resultado salvo e restante do dia recalculado.'\n        : 'Resultado salvo; recálculo pendente.'"), true);
 });
+
+test('generation, recalculation, and saved results refresh audit state in parallel', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+  const auditRefresh = source.match(
+    /const refreshAuditState = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[targetSlug\]\);/,
+  );
+
+  assert.ok(auditRefresh, 'the command center must expose a focused audit refresh');
+  for (const contract of [
+    'Promise.all([',
+    'fetchSprintTrajectory(targetSlug)',
+    'fetchSprintEvidence(targetSlug)',
+    'fetchSourcePlanTasks(targetSlug, undefined, true)',
+    'setTrajectory(nextTrajectory)',
+    'setEvidence(nextEvidence)',
+    'setSourceTasks(nextSourceTasks.items)',
+  ]) {
+    assert.equal(auditRefresh[1].includes(contract), true, `${contract} must remain in the audit refresh`);
+  }
+
+  const createDay = source.slice(source.indexOf('const createDay = async'), source.indexOf('const confirmAction = async'));
+  assert.equal(createDay.includes('await refreshAuditState()'), true);
+
+  const submitResult = source.slice(source.indexOf('const submitResult = async'), source.indexOf('const copyPrompt = async'));
+  assert.equal(submitResult.includes('await createDay(true, false)'), true);
+});
