@@ -29,6 +29,17 @@ def _timestamp_text(value: datetime) -> str:
     )
 
 
+def _observed_date(value: object) -> date:
+    text = str(value)
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+            parsed = parsed.astimezone(UTC)
+        return parsed.date()
+
+
 def _digest(value: object) -> str:
     encoded = json.dumps(
         value,
@@ -96,7 +107,7 @@ def observations_from_diario_backup(
         if not discipline:
             continue
         try:
-            observed_on = date.fromisoformat(str(task.get("date")))
+            observed_on = _observed_date(task.get("date"))
         except ValueError:
             continue
         blocks = task.get("blocks")

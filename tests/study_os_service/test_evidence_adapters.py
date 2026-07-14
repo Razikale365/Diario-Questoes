@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 import json
 
 from study_os_service.services.evidence_adapters import (
@@ -77,6 +77,31 @@ def test_diario_hash_revision_is_deterministic_and_target_is_explicit():
         assert "target" in str(exc)
     else:
         raise AssertionError("empty target was accepted")
+
+
+def test_diario_adapter_derives_observed_date_from_iso_datetime():
+    document = [
+        {
+            "id": "timestamped-task",
+            "date": "2026-07-14T00:50:01.639Z",
+            "discipline": "Economia",
+            "blocks": [
+                {
+                    "id": "timestamped-block",
+                    "questions": [{"isCorrect": True, "hasDoubt": False}],
+                }
+            ],
+        }
+    ]
+
+    observations = observations_from_diario_backup(
+        document,
+        "sefaz_ce",
+        datetime(2026, 7, 14, 12, tzinfo=UTC),
+    )
+
+    assert len(observations) == 1
+    assert observations[0].observed_on == date(2026, 7, 14)
 
 
 def test_ls_percentage_stays_low_sample_when_counts_are_unknown():

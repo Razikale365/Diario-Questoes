@@ -1,12 +1,29 @@
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from fastapi.testclient import TestClient
 
 from scripts.import_sprint_evidence import main
 from study_os_service.app import create_app
 from study_os_service.config import StudyOsSettings
+
+
+def test_script_can_be_invoked_directly_from_repo_root():
+    repo_root = Path(__file__).resolve().parents[2]
+
+    result = subprocess.run(
+        [sys.executable, "scripts/import_sprint_evidence.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Import aggregate-only sprint evidence" in result.stdout
 
 
 def test_cli_is_dry_run_by_default_then_commits_and_replays(

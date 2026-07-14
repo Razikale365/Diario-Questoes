@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 import sys
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
 from study_os_service.services.evidence_adapters import (
