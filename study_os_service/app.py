@@ -42,6 +42,11 @@ from study_os_service.api.cutover import (
     cutover_api_error_handler,
     router as cutover_router,
 )
+from study_os_service.api.sprints import (
+    SprintApiError,
+    router as sprints_router,
+    sprint_api_error_handler,
+)
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
 from study_os_service.db.migrations import MigrationRunner
@@ -80,6 +85,7 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.add_exception_handler(LearningApiError, learning_api_error_handler)
     app.add_exception_handler(StrategyApiError, strategy_api_error_handler)
     app.add_exception_handler(CutoverApiError, cutover_api_error_handler)
+    app.add_exception_handler(SprintApiError, sprint_api_error_handler)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(inventory_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
@@ -89,4 +95,5 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.include_router(learning_router, prefix="/api/v1")
     app.include_router(strategy_router, prefix="/api/v1")
     app.include_router(cutover_router, prefix="/api/v1")
+    app.include_router(sprints_router, prefix="/api/v1")
     return app

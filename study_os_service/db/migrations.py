@@ -932,6 +932,295 @@ CREATE TABLE planner_blocks (
             "CREATE INDEX idx_legacy_id_run ON legacy_id_mappings(migration_run_id, record_kind, id);",
         ),
     ),
+    (
+        10,
+        (
+            """
+            UPDATE exam_targets SET
+              display_name=CASE
+                WHEN display_name IN ('SEFAZ CE', 'SEFAZ CE Auditor Fiscal')
+                  THEN 'SEFAZ CE - Auditor Fiscal da Receita Estadual'
+                ELSE display_name END,
+              institution=CASE
+                WHEN institution IN ('SEFAZ CE', 'Secretaria da Fazenda do Ceara')
+                  THEN 'Secretaria da Fazenda do Estado do Ceara'
+                ELSE institution END,
+              role=CASE
+                WHEN role='Auditor Fiscal'
+                  THEN 'Auditor Fiscal da Receita Estadual - Gestao Fazendaria'
+                ELSE role END,
+              banca=CASE WHEN banca='CEBRASPE' THEN 'FCC' ELSE banca END,
+              deadline=CASE WHEN deadline IS NULL THEN '2026-08-01' ELSE deadline END,
+              priority_score=CASE WHEN priority_score=96 THEN 100 ELSE priority_score END,
+              source_urls_json=CASE
+                WHEN source_urls_json='["https://www.sefaz.ce.gov.br/"]'
+                  THEN '["https://www.sefaz.ce.gov.br/wp-content/uploads/sites/61/2026/04/do20260424p02.pdf"]'
+                ELSE source_urls_json END,
+              notes=CASE
+                WHEN notes='Perfil editavel do ciclo em andamento; conferir data e pesos oficiais.'
+                  THEN 'Sprint oficial SEFAZ CE 2026. P1 em 01/08; P2 e discursiva em 02/08.'
+                ELSE notes END,
+              version=version+1,
+              updated_at=CURRENT_TIMESTAMP
+            WHERE target_slug='sefaz_ce' AND (
+              display_name IN ('SEFAZ CE', 'SEFAZ CE Auditor Fiscal')
+              OR institution IN ('SEFAZ CE', 'Secretaria da Fazenda do Ceara')
+              OR role='Auditor Fiscal' OR banca='CEBRASPE' OR deadline IS NULL
+              OR priority_score=96
+              OR source_urls_json='["https://www.sefaz.ce.gov.br/"]'
+              OR notes='Perfil editavel do ciclo em andamento; conferir data e pesos oficiais.'
+            );
+            """,
+            """
+            CREATE TABLE exam_subject_profiles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              subject_key TEXT NOT NULL CHECK (length(trim(subject_key)) > 0),
+              display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+              aliases_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(aliases_json) AND json_type(aliases_json)='array'),
+              paper TEXT NOT NULL CHECK (paper IN ('P1','P2')),
+              question_count INTEGER NOT NULL CHECK (question_count BETWEEN 1 AND 80),
+              question_weight REAL NOT NULL CHECK (question_weight BETWEEN 0.1 AND 10),
+              discursive_eligible INTEGER NOT NULL DEFAULT 0
+                CHECK (discursive_eligible IN (0,1)),
+              baseline_accuracy_bp INTEGER
+                CHECK (baseline_accuracy_bp IS NULL OR baseline_accuracy_bp BETWEEN 0 AND 10000),
+              target_low_bp INTEGER NOT NULL CHECK (target_low_bp BETWEEN 0 AND 10000),
+              target_high_bp INTEGER NOT NULL CHECK (target_high_bp BETWEEN 0 AND 10000),
+              baseline_confidence_bp INTEGER NOT NULL DEFAULT 0
+                CHECK (baseline_confidence_bp BETWEEN 0 AND 10000),
+              focus_band TEXT NOT NULL DEFAULT 'maintenance'
+                CHECK (focus_band IN ('focus','maintenance','survival')),
+              baseline_source TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (length(trim(baseline_source)) > 0),
+              notes TEXT NOT NULL DEFAULT '',
+              active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (target_slug, subject_key),
+              CHECK (target_low_bp <= target_high_bp)
+            );
+            """,
+            """
+            CREATE TABLE source_plan_tasks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              source_kind TEXT NOT NULL
+                CHECK (source_kind IN ('ls','trilha','manual')),
+              external_task_id TEXT NOT NULL
+                CHECK (length(trim(external_task_id)) > 0),
+              plan_label TEXT NOT NULL CHECK (length(trim(plan_label)) > 0),
+              meta_number INTEGER CHECK (meta_number IS NULL OR meta_number >= 0),
+              scheduled_date TEXT CHECK (
+                scheduled_date IS NULL OR
+                (length(scheduled_date)=10 AND date(scheduled_date)=scheduled_date)
+              ),
+              source_order INTEGER NOT NULL DEFAULT 0 CHECK (source_order >= 0),
+              discipline TEXT NOT NULL CHECK (length(trim(discipline)) > 0),
+              subject_key TEXT,
+              topic_hint TEXT NOT NULL DEFAULT '',
+              task_kind TEXT NOT NULL CHECK (
+                task_kind IN (
+                  'theory','questions','review','simulation','discursive','mixed'
+                )
+              ),
+              description TEXT NOT NULL CHECK (length(trim(description)) > 0),
+              details TEXT NOT NULL DEFAULT '',
+              material_hint TEXT NOT NULL DEFAULT '',
+              estimated_minutes INTEGER NOT NULL
+                CHECK (estimated_minutes BETWEEN 1 AND 720),
+              spent_minutes INTEGER NOT NULL DEFAULT 0
+                CHECK (spent_minutes BETWEEN 0 AND 720),
+              relevance REAL NOT NULL DEFAULT 5 CHECK (relevance BETWEEN 0 AND 10),
+              status TEXT NOT NULL DEFAULT 'pending' CHECK (
+                status IN ('pending','started','completed','ignored','archived')
+              ),
+              performance_bp INTEGER
+                CHECK (performance_bp IS NULL OR performance_bp BETWEEN 0 AND 10000),
+              linked_study_task_id TEXT,
+              provenance_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(provenance_json) AND json_type(provenance_json)='object'),
+              imported_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              UNIQUE (target_slug, source_kind, external_task_id),
+              CHECK (subject_key IS NULL OR length(trim(subject_key)) > 0)
+            );
+            """,
+            """
+            CREATE TABLE exam_sprint_configs (
+              target_slug TEXT PRIMARY KEY
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              start_date TEXT NOT NULL
+                CHECK (length(start_date)=10 AND date(start_date)=start_date),
+              objective_date TEXT NOT NULL
+                CHECK (length(objective_date)=10 AND date(objective_date)=objective_date),
+              exam_end_date TEXT NOT NULL
+                CHECK (length(exam_end_date)=10 AND date(exam_end_date)=exam_end_date),
+              ls_budget_minutes INTEGER NOT NULL DEFAULT 240
+                CHECK (ls_budget_minutes BETWEEN 15 AND 720),
+              extra_budget_minutes INTEGER NOT NULL DEFAULT 60
+                CHECK (extra_budget_minutes BETWEEN 0 AND 240),
+              p1_floor_questions INTEGER NOT NULL DEFAULT 48
+                CHECK (p1_floor_questions BETWEEN 0 AND 80),
+              p1_goal_low INTEGER NOT NULL CHECK (p1_goal_low BETWEEN 0 AND 80),
+              p1_goal_high INTEGER NOT NULL CHECK (p1_goal_high BETWEEN 0 AND 80),
+              p2_goal_low INTEGER NOT NULL CHECK (p2_goal_low BETWEEN 0 AND 80),
+              p2_goal_high INTEGER NOT NULL CHECK (p2_goal_high BETWEEN 0 AND 80),
+              discursive_goal_low INTEGER NOT NULL
+                CHECK (discursive_goal_low BETWEEN 0 AND 100),
+              discursive_goal_high INTEGER NOT NULL
+                CHECK (discursive_goal_high BETWEEN 0 AND 100),
+              triage_mode TEXT NOT NULL DEFAULT 'suggest_only'
+                CHECK (triage_mode='suggest_only'),
+              state TEXT NOT NULL DEFAULT 'active'
+                CHECK (state IN ('active','paused','completed')),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              CHECK (start_date <= objective_date AND objective_date <= exam_end_date),
+              CHECK (p1_goal_low <= p1_goal_high),
+              CHECK (p2_goal_low <= p2_goal_high),
+              CHECK (discursive_goal_low <= discursive_goal_high)
+            );
+            """,
+            """
+            CREATE TABLE sprint_day_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE
+                CHECK (length(trim(idempotency_key)) > 0),
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              plan_date TEXT NOT NULL
+                CHECK (length(plan_date)=10 AND date(plan_date)=plan_date),
+              days_remaining INTEGER NOT NULL CHECK (days_remaining >= 0),
+              ls_budget_minutes INTEGER NOT NULL
+                CHECK (ls_budget_minutes BETWEEN 15 AND 720),
+              extra_budget_minutes INTEGER NOT NULL
+                CHECK (extra_budget_minutes BETWEEN 0 AND 240),
+              energy_level INTEGER NOT NULL DEFAULT 3 CHECK (energy_level BETWEEN 1 AND 5),
+              algorithm_version TEXT NOT NULL
+                CHECK (length(trim(algorithm_version)) > 0),
+              input_hash TEXT NOT NULL CHECK (length(trim(input_hash)) > 0),
+              supersedes_run_id INTEGER
+                REFERENCES sprint_day_runs(id) ON DELETE RESTRICT,
+              status TEXT NOT NULL CHECK (status IN ('generated','shortfall')),
+              score_snapshot_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(score_snapshot_json) AND json_type(score_snapshot_json)='object'),
+              generated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            );
+            """,
+            """
+            CREATE TABLE sprint_actions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id INTEGER NOT NULL
+                REFERENCES sprint_day_runs(id) ON DELETE RESTRICT,
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              position INTEGER NOT NULL CHECK (position > 0),
+              action_kind TEXT NOT NULL CHECK (action_kind IN (
+                'ls_execute','ls_compress','ls_defer','microblock','review',
+                'simulation','discursive','minimum_viable'
+              )),
+              recommendation TEXT NOT NULL
+                CHECK (recommendation IN ('execute','compress','defer','extra')),
+              source_plan_task_id INTEGER
+                REFERENCES source_plan_tasks(id) ON DELETE RESTRICT,
+              subject_profile_id INTEGER
+                REFERENCES exam_subject_profiles(id) ON DELETE RESTRICT,
+              topic_hint TEXT NOT NULL DEFAULT '',
+              title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+              duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 5 AND 240),
+              planned_questions INTEGER NOT NULL DEFAULT 0 CHECK (planned_questions >= 0),
+              expected_gain_milli INTEGER NOT NULL DEFAULT 0 CHECK (expected_gain_milli >= 0),
+              confidence_bp INTEGER NOT NULL DEFAULT 0
+                CHECK (confidence_bp BETWEEN 0 AND 10000),
+              rationale_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(rationale_json) AND json_type(rationale_json)='array'),
+              evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(evidence_json) AND json_type(evidence_json)='object'),
+              decision TEXT NOT NULL DEFAULT 'pending'
+                CHECK (decision IN ('pending','accepted','rejected')),
+              state TEXT NOT NULL DEFAULT 'pending'
+                CHECK (state IN ('pending','active','completed','skipped','failed')),
+              actual_minutes INTEGER CHECK (actual_minutes IS NULL OR actual_minutes BETWEEN 0 AND 720),
+              questions_done INTEGER NOT NULL DEFAULT 0 CHECK (questions_done >= 0),
+              correct_count INTEGER NOT NULL DEFAULT 0 CHECK (correct_count >= 0),
+              wrong_count INTEGER NOT NULL DEFAULT 0 CHECK (wrong_count >= 0),
+              doubt_count INTEGER NOT NULL DEFAULT 0 CHECK (doubt_count >= 0),
+              energy_after INTEGER CHECK (energy_after IS NULL OR energy_after BETWEEN 1 AND 5),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (run_id, position),
+              CHECK (source_plan_task_id IS NOT NULL OR subject_profile_id IS NOT NULL),
+              CHECK (correct_count + wrong_count <= questions_done),
+              CHECK (doubt_count <= questions_done),
+              CHECK (
+                (recommendation='execute' AND action_kind IN ('ls_execute','simulation')) OR
+                (recommendation='compress' AND action_kind='ls_compress') OR
+                (recommendation='defer' AND action_kind='ls_defer') OR
+                (recommendation='extra' AND action_kind IN (
+                  'microblock','review','simulation','discursive','minimum_viable'
+                ))
+              )
+            );
+            """,
+            """
+            CREATE TABLE sprint_action_question_refs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              action_id INTEGER NOT NULL
+                REFERENCES sprint_actions(id) ON DELETE RESTRICT,
+              question_fingerprint TEXT NOT NULL
+                CHECK (length(trim(question_fingerprint)) > 0),
+              source_task_id TEXT,
+              reason TEXT NOT NULL CHECK (reason IN ('wrong','doubt','favorite')),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (action_id, question_fingerprint)
+            );
+            """,
+            """
+            CREATE TABLE sprint_mutation_receipts (
+              idempotency_key TEXT PRIMARY KEY
+                CHECK (length(trim(idempotency_key)) > 0),
+              mutation_kind TEXT NOT NULL CHECK (length(trim(mutation_kind)) > 0),
+              target_slug TEXT NOT NULL
+                REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              entity_ref TEXT NOT NULL DEFAULT '',
+              payload_hash TEXT NOT NULL CHECK (
+                length(payload_hash)=64
+                AND payload_hash=lower(payload_hash)
+                AND payload_hash NOT GLOB '*[^0-9a-f]*'
+              ),
+              response_json TEXT NOT NULL
+                CHECK (json_valid(response_json) AND json_type(response_json)='object'),
+              created_at TEXT NOT NULL DEFAULT
+                (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW'))
+            );
+            """,
+            "CREATE INDEX idx_subject_profiles_target_paper ON exam_subject_profiles(target_slug, paper, active);",
+            "CREATE INDEX idx_source_plan_target_date ON source_plan_tasks(target_slug, scheduled_date, status, source_order);",
+            "CREATE INDEX idx_source_plan_unmatched ON source_plan_tasks(target_slug, subject_key, status) WHERE subject_key IS NULL;",
+            "CREATE INDEX idx_sprint_runs_target_date ON sprint_day_runs(target_slug, plan_date, id DESC);",
+            "CREATE INDEX idx_sprint_actions_run_state ON sprint_actions(run_id, state, position);",
+            "CREATE INDEX idx_sprint_question_refs_reason ON sprint_action_question_refs(reason, action_id);",
+            "CREATE INDEX idx_sprint_receipts_target_kind ON sprint_mutation_receipts(target_slug, mutation_kind, created_at);",
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
