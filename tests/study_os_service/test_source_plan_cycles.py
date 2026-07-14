@@ -153,10 +153,21 @@ def test_closed_cycle_creates_visible_backlog_and_recovers_only_high_return(
             "/api/v1/source-plans/backlog",
             params={"targetSlug": "sefaz_ce", "includeAll": True},
         )
+        operational_backlog = client.get(
+            "/api/v1/source-plans/backlog",
+            params={"targetSlug": "sefaz_ce"},
+        )
 
     assert imported.status_code == 201, imported.text
     assert backlog.status_code == 200, backlog.text
     assert len(backlog.json()["items"]) == 2
+    assert {row["state"] for row in backlog.json()["items"]} == {
+        "candidate",
+        "dismissed",
+    }
+    assert operational_backlog.status_code == 200, operational_backlog.text
+    assert len(operational_backlog.json()["items"]) == 1
+    assert operational_backlog.json()["items"][0]["returnScoreMilli"] >= 1000
     recovered = [row for row in day.json()["actions"] if row["sourcePlanTaskId"]]
     assert len(recovered) == 1
     assert recovered[0]["scoreDetails"]["backlog"]["returnScoreMilli"] >= 1000

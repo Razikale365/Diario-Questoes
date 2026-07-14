@@ -11,6 +11,9 @@ from study_os_service.domain.sprint_evidence import (
     SourcePlanCycle,
     SubjectProjection,
 )
+
+
+HIGH_RETURN_BACKLOG_MIN_MILLI = 1000
 from study_os_service.repositories.sprint import SprintRepository
 
 
@@ -216,27 +219,46 @@ class SourcePlanCycleService:
                 if cycle.ends_on >= plan_date:
                     continue
                 score = self._return_score(task, profiles, projections)
+                backlog_state = (
+                    "candidate"
+                    if score >= HIGH_RETURN_BACKLOG_MIN_MILLI
+                    else "dismissed"
+                )
                 if backlog is None:
                     self.connection.execute(
                         """
                         INSERT OR IGNORE INTO source_plan_backlog_candidates (
                           target_slug, source_cycle_id, source_plan_task_id,
                           reason, return_score_milli, state, discovered_on
-                        ) VALUES (?, ?, ?, 'cycle_closed_pending', ?, 'candidate', ?)
+                        ) VALUES (?, ?, ?, 'cycle_closed_pending', ?, ?, ?)
                         """,
                         (
                             target_slug,
                             cycle.id,
                             task.id,
                             score,
+                            backlog_state,
                             plan_date.isoformat(),
                         ),
+                    )
+                    _cycle_again, backlog = self.context_for_task(task)
+                elif backlog.state in {"candidate", "dismissed"} and (
+                    backlog.return_score_milli != score
+                    or backlog.state != backlog_state
+                ):
+                    self.connection.execute(
+                        """
+                        UPDATE source_plan_backlog_candidates
+                        SET return_score_milli=?, state=?,
+                            updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+                        WHERE id=?
+                        """,
+                        (score, backlog_state, backlog.id),
                     )
                     _cycle_again, backlog = self.context_for_task(task)
                 if (
                     backlog is not None
                     and backlog.state == "candidate"
-                    and backlog.return_score_milli >= 1000
                 ):
                     eligible.append(SourcePlanEligibility(task, cycle, backlog))
             if started_transaction:
