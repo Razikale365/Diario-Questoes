@@ -1486,6 +1486,273 @@ CREATE TABLE planner_blocks (
             """,
         ),
     ),
+    (
+        12,
+        (
+            """
+            CREATE TABLE sprint_calendar_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE,
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              window_start TEXT NOT NULL CHECK (date(window_start)=window_start),
+              window_end TEXT NOT NULL CHECK (date(window_end)=window_end),
+              planning_cutoff TEXT NOT NULL,
+              exact_through TEXT NOT NULL CHECK (date(exact_through)=exact_through),
+              algorithm_version TEXT NOT NULL,
+              request_hash TEXT NOT NULL CHECK (length(request_hash)=64),
+              input_hash TEXT NOT NULL CHECK (length(input_hash)=64),
+              base_applied_run_id INTEGER,
+              supersedes_run_id INTEGER,
+              decision TEXT NOT NULL CHECK (decision IN ('draft','applied','rejected')),
+              status TEXT NOT NULL CHECK (status IN ('generated','shortfall')),
+              warnings_json TEXT NOT NULL CHECK (json_valid(warnings_json) AND json_type(warnings_json)='array'),
+              shortfalls_json TEXT NOT NULL CHECK (json_valid(shortfalls_json) AND json_type(shortfalls_json)='array'),
+              projection_snapshot_json TEXT NOT NULL CHECK (json_valid(projection_snapshot_json)),
+              capacity_snapshot_json TEXT NOT NULL CHECK (json_valid(capacity_snapshot_json)),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              generated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              applied_at TEXT,
+              UNIQUE (id, target_slug),
+              CHECK (window_start <= window_end),
+              CHECK (julianday(window_end)-julianday(window_start) BETWEEN 0 AND 14),
+              CHECK (supersedes_run_id IS NULL OR supersedes_run_id != id),
+              CHECK (
+                (decision='applied' AND applied_at IS NOT NULL) OR
+                (decision!='applied' AND applied_at IS NULL)
+              ),
+              FOREIGN KEY (base_applied_run_id, target_slug)
+                REFERENCES sprint_calendar_runs(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (supersedes_run_id, target_slug)
+                REFERENCES sprint_calendar_runs(id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE UNIQUE INDEX uq_sprint_calendar_supersedes
+            ON sprint_calendar_runs(supersedes_run_id)
+            WHERE supersedes_run_id IS NOT NULL;
+            """,
+            """
+            CREATE INDEX idx_sprint_calendar_runs_head
+            ON sprint_calendar_runs(target_slug, decision, id DESC);
+            """,
+            """
+            CREATE UNIQUE INDEX uq_source_plan_tasks_id_target
+            ON source_plan_tasks(id, target_slug);
+            """,
+            """
+            CREATE UNIQUE INDEX uq_exam_subject_profiles_id_target
+            ON exam_subject_profiles(id, target_slug);
+            """,
+            """
+            CREATE UNIQUE INDEX uq_sprint_day_runs_id_target
+            ON sprint_day_runs(id, target_slug);
+            """,
+            """
+            CREATE UNIQUE INDEX uq_sprint_actions_id_run_target
+            ON sprint_actions(id, run_id, target_slug);
+            """,
+            """
+            CREATE TABLE sprint_calendar_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              item_key TEXT NOT NULL,
+              origin TEXT NOT NULL CHECK (origin IN ('source','manual','system')),
+              kind TEXT NOT NULL CHECK (kind IN ('source_task','manual','intervention','future_cycle_capacity')),
+              source_plan_task_id INTEGER,
+              subject_profile_id INTEGER,
+              title TEXT NOT NULL,
+              expected_meta_number INTEGER CHECK (expected_meta_number IS NULL OR expected_meta_number >= 0),
+              state TEXT NOT NULL CHECK (state IN ('pending','active','completed','failed','ignored','archived')),
+              result_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(result_json) AND json_type(result_json)='object'),
+              completed_at TEXT,
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (id, target_slug),
+              UNIQUE (target_slug, item_key),
+              UNIQUE (target_slug, source_plan_task_id),
+              CHECK (kind!='source_task' OR (origin='source' AND source_plan_task_id IS NOT NULL)),
+              CHECK (
+                kind!='future_cycle_capacity' OR (
+                  origin='system' AND source_plan_task_id IS NULL AND
+                  subject_profile_id IS NULL AND state='pending' AND
+                  result_json='{}' AND completed_at IS NULL
+                )
+              ),
+              FOREIGN KEY (source_plan_task_id, target_slug)
+                REFERENCES source_plan_tasks(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (subject_profile_id, target_slug)
+                REFERENCES exam_subject_profiles(id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE TABLE sprint_calendar_days (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              plan_date TEXT NOT NULL CHECK (date(plan_date)=plan_date),
+              precision TEXT NOT NULL CHECK (precision IN ('exact','provisional','protected')),
+              availability_source TEXT NOT NULL CHECK (
+                availability_source IN ('manual_date','manual_weekday','manual_global','learned','default')
+              ),
+              available INTEGER NOT NULL CHECK (available IN (0,1)),
+              available_minutes INTEGER NOT NULL CHECK (available_minutes BETWEEN 0 AND 960),
+              ls_minutes INTEGER NOT NULL CHECK (ls_minutes BETWEEN 0 AND 720),
+              extra_minutes INTEGER NOT NULL CHECK (extra_minutes BETWEEN 0 AND 240),
+              reserved_minutes INTEGER NOT NULL CHECK (reserved_minutes >= 0),
+              overage_minutes INTEGER NOT NULL CHECK (overage_minutes >= 0),
+              energy_level INTEGER NOT NULL CHECK (energy_level BETWEEN 1 AND 5),
+              confidence_bp INTEGER NOT NULL CHECK (confidence_bp BETWEEN 0 AND 10000),
+              warnings_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(warnings_json) AND json_type(warnings_json)='array'),
+              UNIQUE (run_id, plan_date),
+              CHECK (available_minutes = ls_minutes + extra_minutes),
+              CHECK (
+                (available=0 AND available_minutes=0) OR
+                (available=1 AND available_minutes>0)
+              ),
+              CHECK (overage_minutes = MAX(reserved_minutes - available_minutes, 0)),
+              FOREIGN KEY (run_id, target_slug)
+                REFERENCES sprint_calendar_runs(id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE TABLE sprint_calendar_assignments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id INTEGER NOT NULL,
+              target_slug TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              plan_date TEXT NOT NULL CHECK (date(plan_date)=plan_date),
+              position INTEGER NOT NULL CHECK (position > 0),
+              duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 1 AND 720),
+              precision TEXT NOT NULL CHECK (precision IN ('exact','provisional','protected')),
+              priority_tier TEXT NOT NULL CHECK (priority_tier IN ('critical','high','maintenance','protected')),
+              reason_json TEXT NOT NULL DEFAULT '[]'
+                CHECK (json_valid(reason_json) AND json_type(reason_json)='array'),
+              pinned_snapshot INTEGER NOT NULL DEFAULT 0 CHECK (pinned_snapshot IN (0,1)),
+              action_json TEXT CHECK (
+                action_json IS NULL OR (json_valid(action_json) AND json_type(action_json)='object')
+              ),
+              expected_gain_milli INTEGER NOT NULL DEFAULT 0 CHECK (expected_gain_milli >= 0),
+              replaces_placeholder_item_id INTEGER,
+              UNIQUE (id, target_slug),
+              UNIQUE (run_id, item_id),
+              UNIQUE (run_id, plan_date, position),
+              CHECK (replaces_placeholder_item_id IS NULL OR replaces_placeholder_item_id != item_id),
+              FOREIGN KEY (run_id, target_slug)
+                REFERENCES sprint_calendar_runs(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (run_id, plan_date)
+                REFERENCES sprint_calendar_days(run_id, plan_date) ON DELETE RESTRICT,
+              FOREIGN KEY (item_id, target_slug)
+                REFERENCES sprint_calendar_items(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (replaces_placeholder_item_id, target_slug)
+                REFERENCES sprint_calendar_items(id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE TRIGGER trg_sprint_calendar_placeholder_assignment_insert
+            BEFORE INSERT ON sprint_calendar_assignments
+            WHEN EXISTS (
+              SELECT 1 FROM sprint_calendar_items AS item
+              WHERE item.id=NEW.item_id AND item.target_slug=NEW.target_slug
+                AND item.kind='future_cycle_capacity'
+            ) AND (NEW.action_json IS NOT NULL OR NEW.expected_gain_milli != 0)
+            BEGIN
+              SELECT RAISE(ABORT, 'future cycle capacity cannot be executable');
+            END;
+            """,
+            """
+            CREATE TABLE sprint_calendar_materializations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL,
+              assignment_id INTEGER NOT NULL,
+              sprint_day_run_id INTEGER NOT NULL,
+              sprint_action_id INTEGER NOT NULL,
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              UNIQUE (assignment_id),
+              UNIQUE (sprint_action_id),
+              FOREIGN KEY (assignment_id, target_slug)
+                REFERENCES sprint_calendar_assignments(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (sprint_day_run_id, target_slug)
+                REFERENCES sprint_day_runs(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (sprint_action_id, sprint_day_run_id, target_slug)
+                REFERENCES sprint_actions(id, run_id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE TABLE sprint_calendar_day_overrides (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              scope_kind TEXT NOT NULL CHECK (scope_kind IN ('date','weekday','global')),
+              scope_value TEXT NOT NULL,
+              availability TEXT NOT NULL CHECK (availability IN ('default','available','unavailable')),
+              ls_minutes INTEGER CHECK (ls_minutes IS NULL OR ls_minutes BETWEEN 0 AND 720),
+              extra_minutes INTEGER CHECK (extra_minutes IS NULL OR extra_minutes BETWEEN 0 AND 240),
+              energy_level INTEGER CHECK (energy_level IS NULL OR energy_level BETWEEN 1 AND 5),
+              active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              CHECK (
+                (scope_kind='date' AND date(scope_value)=scope_value) OR
+                (scope_kind='weekday' AND scope_value IN ('0','1','2','3','4','5','6')) OR
+                (scope_kind='global' AND scope_value='*')
+              ),
+              CHECK (
+                (availability='unavailable' AND ls_minutes=0 AND extra_minutes=0) OR
+                (availability!='unavailable' AND
+                  (ls_minutes IS NULL OR ls_minutes BETWEEN 1 AND 720) AND
+                  (extra_minutes IS NULL OR extra_minutes BETWEEN 0 AND 240))
+              )
+            );
+            """,
+            """
+            CREATE UNIQUE INDEX uq_sprint_calendar_active_day_override
+            ON sprint_calendar_day_overrides(target_slug, scope_kind, scope_value)
+            WHERE active=1;
+            """,
+            """
+            CREATE TABLE sprint_calendar_item_overrides (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              target_slug TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              plan_date TEXT NOT NULL CHECK (date(plan_date)=plan_date),
+              start_time TEXT CHECK (
+                start_time IS NULL OR
+                (length(start_time)=5 AND time(start_time)=start_time || ':00')
+              ),
+              position INTEGER CHECK (position IS NULL OR position > 0),
+              duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 720),
+              pinned INTEGER NOT NULL DEFAULT 1 CHECK (pinned IN (0,1)),
+              active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              CHECK (active=0 OR pinned=1),
+              FOREIGN KEY (item_id, target_slug)
+                REFERENCES sprint_calendar_items(id, target_slug) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE UNIQUE INDEX uq_sprint_calendar_active_item_override
+            ON sprint_calendar_item_overrides(target_slug, item_id)
+            WHERE active=1;
+            """,
+            """
+            CREATE INDEX idx_sprint_calendar_days_target_date
+            ON sprint_calendar_days(target_slug, plan_date, run_id);
+            """,
+            """
+            CREATE INDEX idx_sprint_calendar_assignments_date_position
+            ON sprint_calendar_assignments(target_slug, plan_date, position);
+            """,
+            """
+            CREATE INDEX idx_sprint_calendar_items_state
+            ON sprint_calendar_items(target_slug, state, updated_at);
+            """,
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]

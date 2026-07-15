@@ -66,7 +66,7 @@ def test_version_eight_upgrades_to_cutover_schema_without_setting_loss(
         connection.commit()
 
         assert MigrationRunner(connection).migrate() == CURRENT_SCHEMA_VERSION
-        assert CURRENT_SCHEMA_VERSION == 11
+        assert CURRENT_SCHEMA_VERSION == 12
         assert CUTOVER_TABLES <= table_names(connection)
         assert "version" in app_setting_columns(connection)
         assert dict(
