@@ -306,7 +306,14 @@ def test_action_result_uses_version_idempotency_and_refreshes_remaining_day(
     assert trajectory.status_code == 200
     assert len(trajectory.json()["runs"]) == 3
     assert trajectory.json()["latest"]["p1"] >= 0
-    assert all(row["status"] == "pending" for row in source)
+    assert next(
+        row for row in source if row["id"] == action["sourcePlanTaskId"]
+    )["status"] == "completed"
+    assert all(
+        row["status"] == "pending"
+        for row in source
+        if row["id"] != action["sourcePlanTaskId"]
+    )
 
 
 def test_config_update_is_idempotent_and_optimistically_versioned(tmp_path: Path):

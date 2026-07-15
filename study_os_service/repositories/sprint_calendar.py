@@ -190,6 +190,108 @@ class SprintCalendarRepository:
             )
         )
 
+    def executable_assignments_for_date(
+        self, target_slug: str, plan_date: date
+    ) -> tuple[sqlite3.Row, ...]:
+        head = self.get_head(target_slug)
+        if head is None:
+            return ()
+        return tuple(
+            self.connection.execute(
+                """
+                SELECT assignment.id AS assignment_id,
+                       assignment.run_id AS calendar_run_id,
+                       assignment.plan_date, assignment.position,
+                       assignment.duration_minutes, assignment.precision,
+                       assignment.priority_tier, assignment.action_json,
+                       item.id AS item_id, item.source_plan_task_id,
+                       item.subject_profile_id, item.item_key, item.state
+                FROM sprint_calendar_assignments AS assignment
+                JOIN sprint_calendar_items AS item
+                  ON item.id=assignment.item_id
+                 AND item.target_slug=assignment.target_slug
+                WHERE assignment.run_id=? AND assignment.plan_date=?
+                  AND item.kind='source_task'
+                  AND item.source_plan_task_id IS NOT NULL
+                  AND item.state IN ('pending','active','failed')
+                  AND assignment.action_json IS NOT NULL
+                ORDER BY assignment.position, assignment.id
+                """,
+                (head["id"], plan_date.isoformat()),
+            )
+        )
+
+    def insert_materialization_in_transaction(
+        self,
+        *,
+        assignment_id: int,
+        sprint_day_run_id: int,
+        sprint_action_id: int,
+    ) -> sqlite3.Row:
+        self._require_transaction()
+        assignment = self.connection.execute(
+            """
+            SELECT assignment.*, item.source_plan_task_id
+            FROM sprint_calendar_assignments AS assignment
+            JOIN sprint_calendar_items AS item
+              ON item.id=assignment.item_id
+             AND item.target_slug=assignment.target_slug
+            WHERE assignment.id=?
+            """,
+            (assignment_id,),
+        ).fetchone()
+        action = self.connection.execute(
+            """
+            SELECT action.*, run.plan_date
+            FROM sprint_actions AS action
+            JOIN sprint_day_runs AS run ON run.id=action.run_id
+            WHERE action.id=? AND action.run_id=?
+            """,
+            (sprint_action_id, sprint_day_run_id),
+        ).fetchone()
+        if assignment is None or action is None:
+            raise CalendarItemConflictError(
+                "calendar materialization identity was not found"
+            )
+        if (
+            assignment["target_slug"] != action["target_slug"]
+            or assignment["plan_date"] != action["plan_date"]
+            or assignment["source_plan_task_id"]
+            != action["source_plan_task_id"]
+        ):
+            raise CalendarItemConflictError(
+                "calendar materialization does not match the daily action"
+            )
+        existing = self.connection.execute(
+            """
+            SELECT * FROM sprint_calendar_materializations
+            WHERE assignment_id=?
+            """,
+            (assignment_id,),
+        ).fetchone()
+        if existing is not None:
+            return existing
+        cursor = self.connection.execute(
+            """
+            INSERT INTO sprint_calendar_materializations (
+              target_slug, assignment_id, sprint_day_run_id, sprint_action_id
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                action["target_slug"],
+                assignment_id,
+                sprint_day_run_id,
+                sprint_action_id,
+            ),
+        )
+        saved = self.connection.execute(
+            "SELECT * FROM sprint_calendar_materializations WHERE id=?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        if saved is None:
+            raise RuntimeError("calendar materialization was not visible")
+        return saved
+
     def _insert_or_get_item(
         self, target_slug: str, item: object
     ) -> sqlite3.Row:
@@ -586,6 +688,34 @@ class SprintCalendarRepository:
               AND state NOT IN ('ignored','archived')
             """,
             (_canonical_json(result), stored_at, source_task_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+        return self.connection.execute(
+            """
+            SELECT * FROM sprint_calendar_items
+            WHERE source_plan_task_id=?
+            """,
+            (source_task_id,),
+        ).fetchone()
+
+    def fail_item_for_source_in_transaction(
+        self,
+        source_task_id: int,
+        *,
+        result: Mapping[str, Any] | sqlite3.Row,
+    ) -> sqlite3.Row | None:
+        self._require_transaction()
+        cursor = self.connection.execute(
+            """
+            UPDATE sprint_calendar_items
+            SET state='failed', result_json=?, completed_at=NULL,
+                version=version+1,
+                updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+            WHERE source_plan_task_id=? AND kind='source_task'
+              AND state NOT IN ('ignored','archived','completed')
+            """,
+            (_canonical_json(result), source_task_id),
         )
         if cursor.rowcount == 0:
             return None

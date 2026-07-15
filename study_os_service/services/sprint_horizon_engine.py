@@ -87,6 +87,7 @@ class SprintHorizonEngine:
                 self._locked_assignment(item, items_by_key)
                 for item in locked_rows
             ]
+            assigned_item_keys = {item.item_key for item in assignments}
             used_positions = {item.position for item in assignments}
             locked_minutes = sum(item.duration_minutes for item in assignments)
             locked_from_ls = min(capacity.ls_minutes, locked_minutes)
@@ -215,6 +216,8 @@ class SprintHorizonEngine:
                         source_item_by_id=source_item_by_id,
                         intervention_counts=intervention_counts,
                     )
+                    if item.item_key in assigned_item_keys:
+                        continue
                     tier, reason = self._priority(
                         action=action,
                         source_task=source_task,
@@ -255,6 +258,7 @@ class SprintHorizonEngine:
                             replaces_placeholder_item_key=replaces_placeholder,
                         )
                     )
+                    assigned_item_keys.add(item.item_key)
                     used_positions.add(next_position)
                     next_position = self._next_position(used_positions)
                     if action.source_plan_task_id is not None:

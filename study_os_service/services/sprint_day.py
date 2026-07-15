@@ -15,6 +15,7 @@ from study_os_service.repositories.sprint import (
     SprintRepository,
     SprintVersionConflictError,
 )
+from study_os_service.repositories.sprint_calendar import SprintCalendarRepository
 from study_os_service.services.sprint import (
     IdempotencyConflictError,
     SprintProfileService,
@@ -168,6 +169,7 @@ class SprintDayService:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
         self.repository = SprintRepository(connection)
+        self.calendar_repository = SprintCalendarRepository(connection)
         self.engine = SprintEngine()
 
     def generate(
@@ -235,6 +237,28 @@ class SprintDayService:
             for item in eligibility
             if item.task.id not in completed_source_ids
         )
+        calendar_preferences = (
+            self.calendar_repository.executable_assignments_for_date(
+                target_slug, prepared["plan_date"]
+            )
+        )
+        preference_by_source = {
+            row["source_plan_task_id"]: row for row in calendar_preferences
+        }
+        source_tasks = tuple(
+            sorted(
+                source_tasks,
+                key=lambda task: (
+                    0 if task.id in preference_by_source else 1,
+                    (
+                        preference_by_source[task.id]["position"]
+                        if task.id in preference_by_source
+                        else task.source_order
+                    ),
+                    task.id,
+                ),
+            )
+        )
         eligibility_by_task = {
             item.task.id: item for item in eligibility
         }
@@ -248,6 +272,29 @@ class SprintDayService:
             projection=projection,
             afo_rescues_this_week=self.repository.afo_rescues_this_week(
                 target_slug, prepared["plan_date"]
+            ),
+        )
+        indexed_actions = tuple(enumerate(draft.actions))
+        draft = replace(
+            draft,
+            actions=tuple(
+                action
+                for _index, action in sorted(
+                    indexed_actions,
+                    key=lambda row: (
+                        0
+                        if row[1].source_plan_task_id in preference_by_source
+                        else 1,
+                        (
+                            preference_by_source[row[1].source_plan_task_id][
+                                "position"
+                            ]
+                            if row[1].source_plan_task_id in preference_by_source
+                            else row[0]
+                        ),
+                        row[0],
+                    ),
+                )
             ),
         )
         score_snapshot = dict(draft.score_snapshot) | {
@@ -304,6 +351,15 @@ class SprintDayService:
                     position=position,
                     values=self._action_values(action),
                 )
+                preference = preference_by_source.get(
+                    action.source_plan_task_id
+                )
+                if preference is not None:
+                    self.calendar_repository.insert_materialization_in_transaction(
+                        assignment_id=preference["assignment_id"],
+                        sprint_day_run_id=run["id"],
+                        sprint_action_id=saved_action["id"],
+                    )
                 if action.action_kind == "review" and action.planned_questions > 0:
                     refs = self.repository.review_question_refs(
                         target_slug,
@@ -364,11 +420,26 @@ class SprintDayService:
                 self.connection
             ).append_action_result_in_transaction(saved)
             if saved["source_plan_task_id"] is not None and saved["state"] == "completed":
+                self.repository.mark_source_task_completed_in_transaction(
+                    saved["source_plan_task_id"]
+                )
                 SourcePlanCycleService(
                     self.connection
                 ).mark_recovered_in_transaction(
                     saved["source_plan_task_id"],
                     date.fromisoformat(saved["plan_date"]),
+                )
+                self.calendar_repository.complete_item_for_source_in_transaction(
+                    saved["source_plan_task_id"],
+                    result=saved,
+                    completed_at=saved["updated_at"],
+                )
+            elif (
+                saved["source_plan_task_id"] is not None
+                and saved["state"] == "failed"
+            ):
+                self.calendar_repository.fail_item_for_source_in_transaction(
+                    saved["source_plan_task_id"], result=saved
                 )
             response = self._action_document(saved) | {"replayed": False}
             self.repository.save_receipt(

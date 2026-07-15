@@ -646,6 +646,37 @@ class SprintRepository:
             raise RuntimeError("updated sprint action disappeared")
         return row
 
+    def mark_source_task_completed_in_transaction(
+        self, source_task_id: int
+    ) -> SourcePlanTask:
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active sprint transaction")
+        cursor = self.connection.execute(
+            """
+            UPDATE source_plan_tasks
+            SET status='completed', version=version+1,
+                updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+            WHERE id=? AND status IN ('pending','started')
+            """,
+            (source_task_id,),
+        )
+        if cursor.rowcount != 1:
+            row = self.connection.execute(
+                "SELECT * FROM source_plan_tasks WHERE id=?",
+                (source_task_id,),
+            ).fetchone()
+            if row is None or row["status"] != "completed":
+                raise SprintVersionConflictError(
+                    f"source plan task {source_task_id} cannot be completed"
+                )
+            return _source_task(row)
+        row = self.connection.execute(
+            "SELECT * FROM source_plan_tasks WHERE id=?", (source_task_id,)
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("completed source plan task disappeared")
+        return _source_task(row)
+
     def resolved_source_task_ids_for_day(
         self, target_slug: str, plan_date: date
     ) -> set[int]:
