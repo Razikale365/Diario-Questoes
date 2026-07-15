@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Mapping
 
 from study_os_service.domain.sprint_calendar import (
@@ -64,12 +64,13 @@ def _manual_override(
 
 
 def _eligible_observations(
-    observations: tuple[CapacityObservation, ...], target: date
+    observations: tuple[CapacityObservation, ...], horizon_start: date
 ) -> tuple[CapacityObservation, ...]:
+    lookback_start = horizon_start - timedelta(days=14)
     return tuple(
         item
         for item in observations
-        if item.plan_date < target
+        if lookback_start <= item.plan_date < horizon_start
         and item.available
         and item.result_bearing
         and item.scheduled_actions > 0
@@ -92,6 +93,7 @@ def suggest_horizon_capacities(
     if not isinstance(previous, Mapping):
         raise ValueError("previous capacities must be a mapping")
 
+    samples = _eligible_observations(observations, min(dates)) if dates else ()
     suggestions: list[HorizonDayCapacity] = []
     for target in dates:
         prior = previous.get(target)
@@ -106,7 +108,6 @@ def suggest_horizon_capacities(
         origin = "learned" if prior_learned is not None else "default"
         confidence = prior_learned.confidence_bp if prior_learned is not None else 0
 
-        samples = _eligible_observations(observations, target)
         if len(samples) >= 3:
             observed = _weighted_median(
                 tuple(

@@ -148,7 +148,7 @@ def test_learning_ignores_non_result_and_unavailable_observations():
 def test_learning_is_bounded_by_default_and_previous_calendar():
     high_history = tuple(
         observation(date(2026, 7, day), 720)
-        for day in (1, 2, 3)
+        for day in (4, 5, 6)
     )
     previous = {
         TARGET: HorizonDayCapacity(
@@ -170,6 +170,22 @@ def test_learning_is_bounded_by_default_and_previous_calendar():
     )[0]
     assert result.ls_minutes == 276
     assert result.ls_minutes <= 300
+
+
+def test_learning_uses_only_the_fourteen_days_before_horizon_start():
+    history = (
+        observation(date(2026, 7, 10), 240),
+        observation(date(2026, 7, 11), 240),
+        observation(date(2026, 7, 3), 720),
+    )
+    result = suggest_horizon_capacities(
+        dates=(TARGET, date(2026, 7, 19)),
+        defaults=defaults(),
+        observations=history,
+        overrides=(),
+        previous={},
+    )
+    assert [item.origin for item in result] == ["default", "default"]
 
 
 def test_removed_manual_override_does_not_leak_from_previous_calendar():
