@@ -120,6 +120,21 @@ def test_preview_is_draft_and_replay_is_exact(tmp_path: Path):
             for assignment in first["assignments"]
             if assignment["itemId"] in placeholder_ids
         )
+        items_by_id = {item["id"]: item for item in first["items"]}
+        future_assignments = [
+            assignment
+            for assignment in first["assignments"]
+            if assignment["date"] > first["run"]["exactThrough"]
+        ]
+        assert future_assignments
+        assert all(
+            items_by_id[assignment["itemId"]]["kind"]
+            == "future_cycle_capacity"
+            and assignment["precision"] == "provisional"
+            and assignment["action"] is None
+            and assignment["expectedGainMilli"] == 0
+            for assignment in future_assignments
+        )
     finally:
         database.close()
 

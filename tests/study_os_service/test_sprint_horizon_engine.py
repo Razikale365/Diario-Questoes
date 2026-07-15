@@ -157,6 +157,30 @@ def test_unknown_meta_uses_non_executable_capacity_envelope():
     assert reserved.expected_gain_milli == 0
 
 
+def test_days_after_exact_through_have_only_provisional_capacity_envelopes():
+    draft = SprintHorizonEngine().plan(
+        request=request(date(2026, 7, 15), 15),
+        snapshot=snapshot(tasks=(source(1),)),
+    )
+
+    future_days = tuple(
+        day for day in draft.days if day.plan_date > draft.exact_through
+    )
+    assert future_days
+    assert all(day.capacity.extra_minutes > 0 for day in future_days)
+    assert all(day.precision == "provisional" for day in future_days)
+    assert all(day.assignments for day in future_days)
+    assert all(
+        assignment.kind == "future_cycle_capacity"
+        and assignment.precision == "provisional"
+        and assignment.action is None
+        and assignment.source_plan_task_id is None
+        and assignment.expected_gain_milli == 0
+        for day in future_days
+        for assignment in day.assignments
+    )
+
+
 def test_energy_one_and_five_change_composition_not_available_minutes():
     tasks = (
         source(1, subject_key="p1_portugues", minutes=120, task_kind="simulation"),

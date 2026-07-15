@@ -177,17 +177,24 @@ class SprintHorizonEngine:
                         cycle_by_task[task.id], capacity.plan_date
                     )
                 )
-                actions = self._daily_actions(
-                    snapshot=snapshot,
-                    capacity=capacity,
-                    ls_minutes=ls_minutes,
-                    extra_minutes=extra_minutes,
-                    source_tasks=released_tasks,
-                    afo_rescues_this_week=virtual_afo_count,
-                    has_scheduled_simulation=(
-                        virtual_simulation_present
-                        or any(task.task_kind == "simulation" for task in released_tasks)
-                    ),
+                actions = (
+                    ()
+                    if capacity.plan_date > exact_through
+                    else self._daily_actions(
+                        snapshot=snapshot,
+                        capacity=capacity,
+                        ls_minutes=ls_minutes,
+                        extra_minutes=extra_minutes,
+                        source_tasks=released_tasks,
+                        afo_rescues_this_week=virtual_afo_count,
+                        has_scheduled_simulation=(
+                            virtual_simulation_present
+                            or any(
+                                task.task_kind == "simulation"
+                                for task in released_tasks
+                            )
+                        ),
+                    )
                 )
                 executable = self._fit_actions(actions, available_minutes)
                 normal_count = sum(
