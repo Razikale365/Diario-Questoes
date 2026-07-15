@@ -20,6 +20,10 @@ import { SectionEditModal } from './components/SectionEditModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal, AuthModalMode } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
+import { AppShell } from './components/AppShell';
+import { MorePage } from './components/MorePage';
+import { useAppRoute } from './utils/appRoute';
+import type { PlannerSection } from './components/PlannerArea';
 import { formatQuestionList, parseQuestionsText } from './utils/parser';
 import {
   QUESTION_BANK_BACKUP_SCHEMA,
@@ -214,7 +218,9 @@ function App() {
     showToast('Desconectado da nuvem.');
   }, []);
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('caderno');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('planner');
+  const route = useAppRoute();
+  const humanShell = true;
   const [taskWorkTab, setTaskWorkTab] = useState<TaskWorkTab>('caderno');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(true);
@@ -531,6 +537,38 @@ function App() {
   const viewingTask = useMemo(() => tasks.find(t => t.id === viewingTaskId), [tasks, viewingTaskId]);
   const taskWorkContextTask = activeTab === 'historico' && viewingTask ? viewingTask : activeTask;
 
+  const moreView = route.destination === 'more' ? route.params.get('view') : null;
+  const plannerSection: PlannerSection = route.destination === 'calendar'
+    ? 'calendar'
+    : route.destination === 'tasks'
+      ? 'list'
+      : route.destination === 'more' && ['meta', 'courses', 'insights', 'generator', 'history', 'maps', 'archived'].includes(moreView || '')
+        ? moreView as PlannerSection
+        : 'today';
+  const showMoreIndex = route.destination === 'more' && !moreView && activeTab === 'planner';
+
+  const openMoreSection = (id: string) => {
+    if (id === 'review') {
+      setActiveTab('revisao');
+      return;
+    }
+    if (id === 'history') {
+      setActiveTab('historico');
+      return;
+    }
+    if (id === 'backup') {
+      exportBackup();
+      showToast('Backup exportado.');
+      return;
+    }
+    if (id === 'account') {
+      handleOpenAuth();
+      return;
+    }
+    setActiveTab('planner');
+    window.location.hash = `#/more?view=${encodeURIComponent(id)}`;
+  };
+
   useEffect(() => {
     const normalizedTab = normalizeTaskWorkTabForTask(taskWorkContextTask, taskWorkTab);
     if (normalizedTab !== taskWorkTab) {
@@ -549,7 +587,7 @@ function App() {
         </div>
       )}
 
-      <Sidebar 
+      {!humanShell && <Sidebar
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         setHistoryPage={setHistoryPage}
@@ -566,9 +604,10 @@ function App() {
         onAuth={handleOpenAuth}
         onChangePassword={handleOpenPasswordChange}
         onDisconnect={handleDisconnect}
-      />
+      />}
 
       <main className="flex-1 overflow-y-auto bg-[#2d2d2d] p-4 md:p-8 transition-all duration-300 pb-24 md:pb-8">
+        <AppShell destination={route.destination} onNavigate={() => setActiveTab('planner')}>
         <div className="max-w-[1600px] mx-auto px-2 md:px-4">
           {activeTab === 'caderno' && (
             <div className="space-y-6">
@@ -718,12 +757,19 @@ function App() {
           )}
 
           {activeTab === 'planner' && (
-            <PlannerArea
-              studyTasks={tasks}
-              onOpenStudyTask={handleOpenPlannerStudyTask}
-              onCreateStudyTask={handleCreateStudyTaskFromPlanner}
-              showToast={showToast}
-            />
+            showMoreIndex ? (
+              <MorePage onOpen={openMoreSection} />
+            ) : (
+              <PlannerArea
+                studyTasks={tasks}
+                onOpenStudyTask={handleOpenPlannerStudyTask}
+                onCreateStudyTask={handleCreateStudyTaskFromPlanner}
+                showToast={showToast}
+                section={plannerSection}
+                hideSectionNav
+                taskQuery={route.params.get('q') || ''}
+              />
+            )
           )}
 
           {activeTab === 'historico' && (
@@ -800,6 +846,7 @@ function App() {
             </div>
           )}
         </div>
+        </AppShell>
       </main>
 
       {/* Modals */}
@@ -854,14 +901,14 @@ function App() {
         onError={handleAuthError}
       />
 
-      <BottomNav 
+      {!humanShell && <BottomNav
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         syncStatus={syncState.status}
         onSyncNow={handleSyncNow}
         onAuth={handleOpenAuth}
         inProgressCount={inProgressTasks.length}
-      />
+      />}
     </div>
   );
 }

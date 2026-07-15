@@ -131,7 +131,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     ...document.days.flatMap((day) => day.warnings),
   ])] : [], [document]);
 
-  const createPreview = async () => {
+  const createPreview = useCallback(async () => {
     mutationControllerRef.current?.abort();
     const controller = new AbortController();
     mutationControllerRef.current = controller;
@@ -162,7 +162,13 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
         setBusy(null);
       }
     }
-  };
+  }, [document, endDate, onNotice, startDate, targetSlug]);
+
+  useEffect(() => {
+    const handleAutoOrganize = () => void createPreview();
+    window.addEventListener('study-os:auto-organize', handleAutoOrganize);
+    return () => window.removeEventListener('study-os:auto-organize', handleAutoOrganize);
+  }, [createPreview]);
 
   const applyPreview = async () => {
     if (!document || document.run.decision !== 'draft') return;

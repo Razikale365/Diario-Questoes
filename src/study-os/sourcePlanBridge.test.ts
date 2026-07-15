@@ -265,6 +265,28 @@ test('SQLite restoration keeps a newer local edit for the same LS task', () => {
   assert.equal(merged[0]?.updatedAt, '2026-07-13T12:00:00.000Z');
 });
 
+test('SQLite restoration cannot regress a completed pinned task', () => {
+  const persisted = {
+    id: 'meta-47-task-30', number: 30, metaNumber: 47, discipline: 'ICMS', format: 'Questões',
+    description: 'Descrição atualizada pela LS', spentMinutes: 0, estimatedMinutes: 60,
+    performance: null, status: 'pending' as const, relevance: 10, durationMinutes: 60,
+    source: 'ls-meta-text' as const, plannerSourceKind: 'ls' as const,
+    createdAt: '2026-07-13T10:00:00.000Z', updatedAt: '2026-07-15T10:00:00.000Z',
+  };
+  const local = {
+    ...persisted, description: 'Descrição antiga', status: 'completed' as const,
+    completedAt: '2026-07-14T11:00:00.000Z', lastOutcome: 'completed' as const,
+    spentMinutes: 55, performance: 91, scheduleOrigin: 'manual' as const, schedulePinned: true,
+    scheduledDate: '2026-07-14', startTime: '09:00', updatedAt: '2026-07-14T11:00:00.000Z',
+  };
+  const [merged] = mergeRestoredSourcePlanTasks([local], [persisted]);
+  assert.equal(merged.description, 'Descrição atualizada pela LS');
+  assert.equal(merged.status, 'completed');
+  assert.equal(merged.completedAt, '2026-07-14T11:00:00.000Z');
+  assert.equal(merged.schedulePinned, true);
+  assert.equal(merged.spentMinutes, 55);
+});
+
 test('LS task identity is deterministic across browser imports', () => {
   assert.equal(externalSourceTaskId({
     id: 'old-random-browser-id',

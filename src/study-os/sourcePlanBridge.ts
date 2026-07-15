@@ -64,7 +64,7 @@ export const sourcePlanTaskInput = (task: PlannerTask): SourcePlanTaskInput => (
   estimatedMinutes: Math.max(1, task.durationMinutes || task.estimatedMinutes || 60),
   spentMinutes: Math.max(0, task.spentMinutes || 0),
   relevance: Math.max(0, Math.min(10, task.relevance)),
-  status: task.status,
+  status: task.status === 'failed' ? 'pending' : task.status,
   performanceBp: task.performance === null
     ? null
     : Math.max(0, Math.min(10000, Math.round(task.performance * 100))),
@@ -81,6 +81,7 @@ export const sourcePlanTaskInput = (task: PlannerTask): SourcePlanTaskInput => (
     updatedAt: task.updatedAt,
     plannedQuestions: task.plannedQuestions ?? null,
     tecUrl: task.sourceUrl || null,
+    lastOutcome: task.lastOutcome || null,
   },
 });
 
@@ -126,10 +127,29 @@ export const mergeRestoredSourcePlanTasks = (
     if (!local) return task;
     const localUpdatedAt = Date.parse(local.updatedAt);
     const persistedUpdatedAt = Date.parse(task.updatedAt);
-    return Number.isFinite(localUpdatedAt)
-      && (!Number.isFinite(persistedUpdatedAt) || localUpdatedAt > persistedUpdatedAt)
-      ? local
-      : task;
+    const localIsNewer = Number.isFinite(localUpdatedAt)
+      && (!Number.isFinite(persistedUpdatedAt) || localUpdatedAt > persistedUpdatedAt);
+    if (localIsNewer) return local;
+    const localHasAuthority = local.status === 'completed'
+      || local.status === 'started'
+      || local.status === 'failed'
+      || local.scheduleOrigin === 'manual'
+      || local.schedulePinned === true;
+    if (!localHasAuthority) return task;
+    return {
+      ...task,
+      status: local.status,
+      completedAt: local.completedAt,
+      lastOutcome: local.lastOutcome,
+      spentMinutes: local.spentMinutes,
+      performance: local.performance,
+      linkedStudyTaskId: local.linkedStudyTaskId ?? task.linkedStudyTaskId,
+      scheduledDate: local.scheduledDate,
+      startTime: local.startTime,
+      scheduleOrigin: local.scheduleOrigin,
+      schedulePinned: local.schedulePinned,
+      updatedAt: local.updatedAt,
+    };
   });
   return mergePlannerTasks(retained, restored);
 };

@@ -64,6 +64,8 @@ import {
   questionBankItemToQuestion,
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
+import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
+import { parseTaskResultDraft, type TaskResultDraft } from '../utils/taskResultDraft';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
   CutoverStatus,
@@ -72,6 +74,7 @@ import {
 import { CourseInventory } from '../study-os/components/CourseInventory';
 import { AutonomousDay } from '../study-os/components/AutonomousDay';
 import { SprintCommandCenter } from '../study-os/components/SprintCommandCenter';
+import { SprintCalendarPanel } from '../study-os/components/SprintCalendarPanel';
 import {
   fetchSourcePlanTasks,
   importSourcePlan,
@@ -86,7 +89,7 @@ import {
 } from '../study-os/sourcePlanBridge';
 
 type PlannerView = 'month' | 'week';
-type PlannerSection = 'today' | 'meta' | 'calendar' | 'courses' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
+export type PlannerSection = 'today' | 'meta' | 'calendar' | 'courses' | 'insights' | 'generator' | 'history' | 'maps' | 'list' | 'discipline' | 'pending' | 'ignored' | 'archived';
 type DraftTaskItem = { key: string; task: PlannerDraftTask };
 type DraftTaskEdit = Partial<Pick<PlannerDraftTask, 'description' | 'durationMinutes' | 'relevance'>>;
 
@@ -95,6 +98,9 @@ interface PlannerAreaProps {
   onOpenStudyTask: (taskId: string) => void;
   onCreateStudyTask: (task: StudyTask) => void;
   showToast: (message: string) => void;
+  section?: PlannerSection;
+  hideSectionNav?: boolean;
+  taskQuery?: string;
 }
 
 const TASKS_KEY = 'ls_planner_tasks_v1';
@@ -152,6 +158,7 @@ const statusLabel: Record<PlannerTask['status'], string> = {
   pending: 'Pendente',
   completed: 'Concluída',
   started: 'Iniciada',
+  failed: 'Falhou',
   ignored: 'Ignorada',
   archived: 'Arquivada',
 };
@@ -160,6 +167,7 @@ const statusClass: Record<PlannerTask['status'], string> = {
   pending: 'border-purple-500/20 bg-purple-500/10 text-purple-200',
   completed: 'border-[#84cc16]/20 bg-[#84cc16]/10 text-[#84cc16]',
   started: 'border-blue-400/20 bg-blue-400/10 text-blue-300',
+  failed: 'border-red-400/30 bg-red-500/10 text-red-200',
   ignored: 'border-gray-500/20 bg-gray-500/10 text-gray-400',
   archived: 'border-yellow-400/20 bg-yellow-400/10 text-yellow-300',
 };
@@ -307,6 +315,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   onOpenStudyTask,
   onCreateStudyTask,
   showToast,
+  section,
+  hideSectionNav = false,
+  taskQuery = '',
 }) => {
   const [plannerTasks, setPlannerTasks] = useState<PlannerTask[]>(loadStoredTasks);
   const [metaSummary, setMetaSummary] = useState<PlannerMetaSummary | null>(loadStoredMeta);
@@ -329,11 +340,20 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [questionBankItems, setQuestionBankItems] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskSearch, setTaskSearch] = useState(taskQuery);
+  const [taskQuickView, setTaskQuickView] = useState<TaskQuickView>('all');
+  const [taskDiscipline, setTaskDiscipline] = useState('');
   const lastSourceSync = useRef('');
   const sourcePlanHydrationInFlight = useRef(false);
   const cutover = useStudyOsCutover();
   const studyOsTarget = cutover.activeTargetSlug;
   const [hydratedSourcePlanTarget, setHydratedSourcePlanTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (section) setActiveSection(section);
+  }, [section]);
+
+  useEffect(() => setTaskSearch(taskQuery), [taskQuery]);
   const studyOsActiveTarget = useMemo(
     () => cutover.targets.find((target) => target.targetSlug === studyOsTarget),
     [cutover.targets, studyOsTarget],
@@ -556,6 +576,13 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     return [...activePlannerTasks].sort((a, b) => a.number - b.number);
   }, [activeSection, activePlannerTasks, plannerTasks]);
 
+  const discoveredTasks = useMemo(() => filterPlannerTaskDiscovery(visibleListTasks, {
+    query: taskSearch,
+    discipline: taskDiscipline,
+    view: taskQuickView,
+    today: toIsoDate(new Date()),
+  }), [taskDiscipline, taskQuickView, taskSearch, visibleListTasks]);
+
   const plannerInsights = useMemo(
     () => buildPlannerInsights(activePlannerTasks, metaHistory, metaSummary?.id),
     [activePlannerTasks, metaHistory, metaSummary?.id]
@@ -715,13 +742,19 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       started: 'Tarefa iniciada.',
       completed: 'Resultado registrado.',
       failed: 'Falha registrada para refresh.',
-      skipped: 'Tarefa ignorada.',
+      skipped: 'Pulo registrado; a tarefa continua pendente.',
     };
+    const before = plannerTasks.find((task) => task.id === taskId);
     const now = new Date().toISOString();
     setPlannerTasks((current) =>
       current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
     );
-    showToast(resultLabel[result.outcome]);
+    if (result.outcome === 'completed' && before?.status !== 'completed') {
+      const evidence = [result.spentMinutes !== undefined ? `${result.spentMinutes} min` : null, result.performance !== null && result.performance !== undefined ? `${result.performance}%` : null].filter(Boolean).join(' · ');
+      showToast(`Conquista comprovada${evidence ? `: ${evidence}` : ''}.`);
+    } else {
+      showToast(resultLabel[result.outcome]);
+    }
   };
 
   const copyPlannerTaskChatPrompt = async (task: PlannerTask) => {
@@ -773,6 +806,12 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const autoOrganize = () => {
+    if (studyOsTarget === 'sefaz_ce') {
+      window.location.hash = '#/calendar';
+      setActiveSection('calendar');
+      window.setTimeout(() => window.dispatchEvent(new Event('study-os:auto-organize')), 0);
+      return;
+    }
     setPlannerTasks((current) =>
       autoSchedulePlannerTasks(current, {
         maxTasksPerDay,
@@ -1101,7 +1140,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
       <CutoverStatus controller={cutover} />
 
-      <section className="rounded-lg border border-[#404040] bg-[#262626] p-2">
+      {!hideSectionNav && <section className="rounded-lg border border-[#404040] bg-[#262626] p-2">
         <div className="flex gap-2 overflow-x-auto">
           {SECTION_NAV.map((item) => {
             const Icon = item.icon;
@@ -1122,7 +1161,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             );
           })}
         </div>
-      </section>
+      </section>}
 
       {activeSection === 'today' && (
         <>
@@ -1346,6 +1385,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       )}
 
       {activeSection === 'calendar' && (
+      <div className="space-y-4">
+      {studyOsTarget === 'sefaz_ce' && (
+        <SprintCalendarPanel
+          targetSlug={studyOsTarget}
+          startDate={toIsoDate(new Date())}
+          endDate={toIsoDate(shiftDate(new Date(), 14))}
+          onNotice={showToast}
+        />
+      )}
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="space-y-4">
           <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
@@ -1510,6 +1558,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           )}
         </main>
       </section>
+      </div>
       )}
 
       {selectedTask && (
@@ -1573,15 +1622,47 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       )}
 
       {activeSection === 'list' && (
-        <TaskTable
-          title="Lista de Tarefas"
-          icon={Table2}
-          tasks={visibleListTasks}
-          onExecute={createOrOpenStudyTask}
-          onClearSchedule={clearSchedule}
-          onArchive={archivePlannerTask}
-          onRestore={restorePlannerTask}
-        />
+        <section className="space-y-4">
+          <div className="sticky top-0 z-20 rounded-xl border border-white/10 bg-[#202020]/95 p-3 shadow-xl backdrop-blur">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <label className="relative min-w-0 flex-1">
+                <span className="sr-only">Buscar tarefas</span>
+                <input
+                  type="search"
+                  value={taskSearch}
+                  onChange={(event) => setTaskSearch(event.target.value)}
+                  placeholder="Buscar nº, disciplina, assunto ou material…"
+                  className="h-11 w-full rounded-lg border border-white/15 bg-[#151515] px-4 text-sm text-white outline-none placeholder:text-gray-600 focus:border-purple-400"
+                />
+              </label>
+              <select value={taskDiscipline} onChange={(event) => setTaskDiscipline(event.target.value)} className="h-11 rounded-lg border border-white/15 bg-[#151515] px-3 text-sm text-white outline-none focus:border-purple-400">
+                <option value="">Todas as disciplinas</option>
+                {disciplines.map((discipline) => <option key={discipline} value={discipline}>{discipline}</option>)}
+              </select>
+              {(taskSearch || taskDiscipline || taskQuickView !== 'all') && (
+                <button type="button" onClick={() => { setTaskSearch(''); setTaskDiscipline(''); setTaskQuickView('all'); }} className="h-11 rounded-lg border border-white/10 px-4 text-xs font-black uppercase text-gray-300 hover:bg-white/5">Limpar filtros</button>
+              )}
+            </div>
+            <div aria-label="Visões rápidas" className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {([
+                ['all', 'Todas'], ['today', 'Hoje'], ['started', 'Em andamento'], ['pending', 'Pendentes'], ['completed', 'Concluídas'],
+              ] as const).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={taskQuickView === id} onClick={() => setTaskQuickView(id)} className={`min-h-9 shrink-0 rounded-full border px-3 text-xs font-bold ${taskQuickView === id ? 'border-purple-400 bg-purple-500/20 text-white' : 'border-white/10 text-gray-400 hover:text-white'}`}>{label}</button>
+              ))}
+              <span className="ml-auto shrink-0 self-center text-xs font-bold text-gray-500">{discoveredTasks.length} resultado(s)</span>
+            </div>
+          </div>
+          <TaskTable
+            title="Tarefas"
+            icon={Table2}
+            tasks={discoveredTasks}
+            onOpen={setSelectedTaskId}
+            onExecute={createOrOpenStudyTask}
+            onClearSchedule={clearSchedule}
+            onArchive={archivePlannerTask}
+            onRestore={restorePlannerTask}
+          />
+        </section>
       )}
 
       {activeSection === 'discipline' && (
@@ -1677,28 +1758,23 @@ const NumberField: React.FC<{ label: string; value: number; onChange: (value: nu
   </label>
 );
 
-const clampInputValue = (value: number, min: number, max: number) => {
-  const safeValue = Number.isFinite(value) ? value : min;
-  return Math.min(max, Math.max(min, Math.round(safeValue)));
-};
-
 const ResultNumberField: React.FC<{
   label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
-}> = ({ label, value, min, max, onChange }) => (
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}> = ({ label, value, error, onChange }) => (
   <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
     {label}
     <input
-      type="number"
-      min={min}
-      max={max}
+      type="text"
+      inputMode="numeric"
       value={value}
-      onChange={(event) => onChange(clampInputValue(Number(event.target.value), min, max))}
-      className="min-w-0 rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm font-black text-white outline-none focus:border-purple-500"
+      aria-invalid={Boolean(error)}
+      onChange={(event) => onChange(event.target.value)}
+      className={`min-w-0 rounded border bg-[#404040] px-3 py-2 text-sm font-black text-white outline-none focus:border-purple-500 ${error ? 'border-red-400' : 'border-[#525252]'}`}
     />
+    {error && <span className="normal-case tracking-normal text-red-300">{error}</span>}
   </label>
 );
 
@@ -1731,13 +1807,19 @@ const PlannerTaskDetailModal: React.FC<{
   onClearSchedule: () => void;
   onArchive: () => void;
 }> = ({ task, onClose, onExecute, onCopyChatPrompt, onApplyResult, onClearSchedule, onArchive }) => {
-  const [draftPerformance, setDraftPerformance] = useState(task.performance ?? 70);
-  const [draftMinutes, setDraftMinutes] = useState(task.spentMinutes || task.durationMinutes || 60);
+  const [draft, setDraft] = useState<TaskResultDraft>({ performance: `${task.performance ?? 70}`, spentMinutes: `${task.spentMinutes || task.durationMinutes || 60}` });
+  const [draftErrors, setDraftErrors] = useState<Partial<Record<keyof TaskResultDraft, string>>>({});
 
   useEffect(() => {
-    setDraftPerformance(task.performance ?? 70);
-    setDraftMinutes(task.spentMinutes || task.durationMinutes || 60);
+    setDraft({ performance: `${task.performance ?? 70}`, spentMinutes: `${task.spentMinutes || task.durationMinutes || 60}` });
+    setDraftErrors({});
   }, [task.id, task.performance, task.spentMinutes, task.durationMinutes]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
 
   const submitResult = (outcome: PlannerTaskResultInput['outcome']) => {
     if (outcome === 'started') {
@@ -1745,10 +1827,17 @@ const PlannerTaskDetailModal: React.FC<{
       return;
     }
     if (outcome === 'skipped') {
-      onApplyResult({ outcome, spentMinutes: draftMinutes });
+      const minutes = /^\d+$/.test(draft.spentMinutes) ? Number(draft.spentMinutes) : 0;
+      onApplyResult({ outcome, spentMinutes: minutes });
       return;
     }
-    onApplyResult({ outcome, performance: draftPerformance, spentMinutes: draftMinutes });
+    const parsed = parseTaskResultDraft(draft);
+    if (!parsed.ok) {
+      setDraftErrors(parsed.errors);
+      return;
+    }
+    setDraftErrors({});
+    onApplyResult({ outcome, ...parsed.value });
   };
   const visibleDetails = task.plannerSourceKind === 'generated_planner'
     ? task.details
@@ -1759,7 +1848,7 @@ const PlannerTaskDetailModal: React.FC<{
     : task.details;
 
   return (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="planner-task-dialog-title">
     <div
       className="flex flex-col rounded-2xl border border-[#525252] bg-[#262626] shadow-2xl"
       style={createPlannerTaskModalStyle()}
@@ -1769,7 +1858,7 @@ const PlannerTaskDetailModal: React.FC<{
           <p className="text-[11px] font-black uppercase tracking-[0.25em] text-purple-400">
             Tarefa {task.number} - {task.discipline}
           </p>
-          <h2 className="mt-1 text-xl font-black leading-tight text-white md:text-2xl">{task.description}</h2>
+          <h2 id="planner-task-dialog-title" className="mt-1 text-xl font-black leading-tight text-white md:text-2xl">{task.description}</h2>
         </div>
         <button
           type="button"
@@ -1863,20 +1952,23 @@ const PlannerTaskDetailModal: React.FC<{
               <div className="grid grid-cols-2 gap-2">
                 <ResultNumberField
                   label="Desemp. %"
-                  value={draftPerformance}
-                  min={0}
-                  max={100}
-                  onChange={setDraftPerformance}
+                  value={draft.performance}
+                  error={draftErrors.performance}
+                  onChange={(performance) => setDraft((current) => ({ ...current, performance }))}
                 />
                 <ResultNumberField
                   label="Minutos"
-                  value={draftMinutes}
-                  min={0}
-                  max={240}
-                  onChange={setDraftMinutes}
+                  value={draft.spentMinutes}
+                  error={draftErrors.spentMinutes}
+                  onChange={(spentMinutes) => setDraft((current) => ({ ...current, spentMinutes }))}
                 />
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              {task.status === 'completed' ? (
+                <div className="mt-3 rounded-lg border border-[#84cc16]/25 bg-[#84cc16]/10 p-3">
+                  <p className="text-xs font-bold text-[#d9f99d]">Concluída e mantida no calendário como evidência.</p>
+                  <button type="button" onClick={() => submitResult('started')} className="mt-2 rounded border border-white/10 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-white/5">Reabrir tarefa</button>
+                </div>
+              ) : <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => submitResult('started')}
@@ -1905,7 +1997,7 @@ const PlannerTaskDetailModal: React.FC<{
                 >
                   <Ban className="h-3.5 w-3.5" /> Pular
                 </button>
-              </div>
+              </div>}
             </div>
           </aside>
         </div>
@@ -1956,7 +2048,8 @@ const TaskTable: React.FC<{
   onClearSchedule: (taskId: string) => void;
   onArchive: (taskId: string) => void;
   onRestore: (taskId: string) => void;
-}> = ({ title, icon: Icon, tasks, onExecute, onClearSchedule, onArchive, onRestore }) => (
+  onOpen?: (taskId: string) => void;
+}> = ({ title, icon: Icon, tasks, onExecute, onClearSchedule, onArchive, onRestore, onOpen }) => (
   <section className="rounded-lg border border-[#404040] bg-[#262626] p-4">
     <div className="mb-4 flex items-center gap-2">
       <Icon className="h-5 w-5 text-[#84cc16]" />
@@ -1972,6 +2065,7 @@ const TaskTable: React.FC<{
         onClearSchedule={onClearSchedule}
         onArchive={onArchive}
         onRestore={onRestore}
+        onOpen={onOpen}
       />
     ) : (
       <EmptyPanel icon={Icon} title="Nenhuma tarefa nesta visão" />
@@ -1985,7 +2079,8 @@ const TaskRows: React.FC<{
   onClearSchedule: (taskId: string) => void;
   onArchive: (taskId: string) => void;
   onRestore: (taskId: string) => void;
-}> = ({ tasks, onExecute, onClearSchedule, onArchive, onRestore }) => (
+  onOpen?: (taskId: string) => void;
+}> = ({ tasks, onExecute, onClearSchedule, onArchive, onRestore, onOpen }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[880px] border-collapse text-left">
       <thead>
@@ -2004,7 +2099,18 @@ const TaskRows: React.FC<{
       </thead>
       <tbody>
         {tasks.map((task) => (
-          <tr key={task.id} className="border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03]">
+          <tr
+            key={task.id}
+            tabIndex={onOpen ? 0 : undefined}
+            onClick={() => onOpen?.(task.id)}
+            onKeyDown={(event) => {
+              if (onOpen && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                onOpen(task.id);
+              }
+            }}
+            className={`border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400 ${onOpen ? 'cursor-pointer' : ''}`}
+          >
             <td className="px-3 py-3 font-black text-white">{task.number}</td>
             <td className="px-3 py-3 font-bold text-white">{task.discipline}</td>
             <td className="px-3 py-3 text-gray-400">{task.format}</td>
@@ -2027,7 +2133,7 @@ const TaskRows: React.FC<{
                 {task.scheduledDate && task.status !== 'archived' && (
                   <button
                     type="button"
-                    onClick={() => onClearSchedule(task.id)}
+                    onClick={(event) => { event.stopPropagation(); onClearSchedule(task.id); }}
                     className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
                   >
                     Soltar
@@ -2036,7 +2142,7 @@ const TaskRows: React.FC<{
                 {task.status === 'archived' ? (
                   <button
                     type="button"
-                    onClick={() => onRestore(task.id)}
+                    onClick={(event) => { event.stopPropagation(); onRestore(task.id); }}
                     className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20"
                   >
                     Restaurar
@@ -2045,14 +2151,14 @@ const TaskRows: React.FC<{
                   <>
                     <button
                       type="button"
-                      onClick={() => onArchive(task.id)}
+                      onClick={(event) => { event.stopPropagation(); onArchive(task.id); }}
                       className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
                     >
                       Arquivar
                     </button>
                     <button
                       type="button"
-                      onClick={() => onExecute(task)}
+                      onClick={(event) => { event.stopPropagation(); onExecute(task); }}
                       className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
                     >
                       Executar

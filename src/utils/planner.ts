@@ -140,6 +140,8 @@ export const applyPlannerTaskResult = (
     return {
       ...task,
       status: 'started',
+      lastOutcome: 'started',
+      completedAt: undefined,
       spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
       updatedAt: now,
     };
@@ -148,8 +150,21 @@ export const applyPlannerTaskResult = (
   if (result.outcome === 'skipped') {
     return {
       ...task,
-      status: 'ignored',
-      performance: null,
+      status: 'pending',
+      lastOutcome: 'skipped',
+      completedAt: undefined,
+      spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
+      updatedAt: now,
+    };
+  }
+
+  if (result.outcome === 'failed') {
+    return {
+      ...task,
+      status: 'failed',
+      lastOutcome: 'failed',
+      completedAt: undefined,
+      performance: sanitizePerformance(result.performance ?? 0),
       spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
       updatedAt: now,
     };
@@ -158,7 +173,9 @@ export const applyPlannerTaskResult = (
   return {
     ...task,
     status: 'completed',
-    performance: sanitizePerformance(result.outcome === 'failed' ? result.performance ?? 0 : result.performance),
+    lastOutcome: 'completed',
+    completedAt: task.completedAt ?? now,
+    performance: sanitizePerformance(result.performance),
     spentMinutes: sanitizeSpentMinutes(result.spentMinutes, task.spentMinutes),
     updatedAt: now,
   };

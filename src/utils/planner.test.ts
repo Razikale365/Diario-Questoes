@@ -253,6 +253,8 @@ test('applyPlannerTaskResult completes a task with bounded performance and spent
   );
 
   assert.equal(result.status, 'completed');
+  assert.equal(result.lastOutcome, 'completed');
+  assert.equal(result.completedAt, '2026-07-08T12:00:00.000Z');
   assert.equal(result.performance, 100);
   assert.equal(result.spentMinutes, 58);
   assert.equal(result.scheduledDate, '2026-07-08');
@@ -275,14 +277,24 @@ test('applyPlannerTaskResult records failed and skipped blocks for adaptive refr
   );
   const skipped = applyPlannerTaskResult(task, { outcome: 'skipped' }, '2026-07-08T14:00:00.000Z');
 
-  assert.equal(failed.status, 'completed');
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.lastOutcome, 'failed');
+  assert.equal(failed.completedAt, undefined);
   assert.equal(failed.performance, 0);
   assert.equal(failed.spentMinutes, 0);
   assert.equal(failed.updatedAt, '2026-07-08T13:00:00.000Z');
-  assert.equal(skipped.status, 'ignored');
-  assert.equal(skipped.performance, null);
+  assert.equal(skipped.status, 'pending');
+  assert.equal(skipped.lastOutcome, 'skipped');
+  assert.equal(skipped.performance, 72);
   assert.equal(skipped.spentMinutes, 45);
   assert.equal(skipped.updatedAt, '2026-07-08T14:00:00.000Z');
+});
+
+test('applyPlannerTaskResult keeps the first completion timestamp on replay', () => {
+  const task = makeTask({ id: 'replay-task' });
+  const first = applyPlannerTaskResult(task, { outcome: 'completed', spentMinutes: 45 }, '2026-07-08T12:00:00.000Z');
+  const replay = applyPlannerTaskResult(first, { outcome: 'completed', spentMinutes: 45 }, '2026-07-08T13:00:00.000Z');
+  assert.equal(replay.completedAt, '2026-07-08T12:00:00.000Z');
 });
 
 test('buildPlannerTaskChatPrompt creates a source-aware prompt for a generated planner block', () => {

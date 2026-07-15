@@ -97,7 +97,8 @@ export interface StudyTask {
   status: 'in_progress' | 'completed';
 }
 
-export type PlannerTaskStatus = 'pending' | 'completed' | 'started' | 'ignored' | 'archived';
+export type PlannerTaskStatus = 'pending' | 'completed' | 'started' | 'failed' | 'ignored' | 'archived';
+export type PlannerTaskOutcome = 'started' | 'completed' | 'failed' | 'skipped';
 export type PlannerTaskSource = 'ls-meta-text' | 'ls-meta-pdf' | 'manual' | 'generated';
 export type PlannerMetaHistoryOrigin = 'ls' | 'generated';
 export type PlannerTaskSourceKind = 'ls' | 'trilha_estrategica' | 'generated_planner' | 'manual';
@@ -149,6 +150,10 @@ export interface PlannerTask {
   scoreBreakdown?: PlannerTaskScoreBreakdown;
   displacedReason?: string;
   linkedStudyTaskId?: string;
+  completedAt?: string;
+  lastOutcome?: PlannerTaskOutcome;
+  scheduleOrigin?: 'source' | 'auto' | 'manual';
+  schedulePinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }
