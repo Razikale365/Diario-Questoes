@@ -120,6 +120,7 @@ def inspect_schema_version(connection: sqlite3.Connection) -> int:
         ) from exc
     if (
         not applied_versions
+        or any(type(version) is not int for version in applied_versions)
         or len(applied_versions) > len(expected_versions)
         or applied_versions != expected_versions[: len(applied_versions)]
     ):

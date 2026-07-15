@@ -100,6 +100,35 @@ def _install_migration_prefix(path: Path, schema_version: int) -> None:
         connection.close()
 
 
+def _install_real_migration_history(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+              version REAL PRIMARY KEY,
+              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO schema_migrations (version) VALUES (?)",
+            ((float(version),) for version, _statements in MIGRATIONS),
+        )
+        connection.commit()
+        stored = tuple(
+            row[0]
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        )
+        assert stored
+        assert all(type(version) is float for version in stored)
+    finally:
+        connection.close()
+
+
 def _assert_valid_historical_database(path: Path) -> None:
     connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
@@ -406,8 +435,8 @@ def _assert_calendar_state(
         connection.execute(
             """
             SELECT item.source_plan_task_id, item.subject_profile_id,
-                   assignment.action_json, assignment.expected_gain_milli,
-                   materialization.id
+                   assignment.precision, assignment.action_json,
+                   assignment.expected_gain_milli, materialization.id
             FROM sprint_calendar_items AS item
             JOIN sprint_calendar_assignments AS assignment
               ON assignment.item_id=item.id
@@ -418,7 +447,10 @@ def _assert_calendar_state(
         )
     )
     assert placeholders
-    assert all(tuple(row) == (None, None, None, 0, None) for row in placeholders)
+    assert all(
+        tuple(row) == (None, None, "provisional", None, 0, None)
+        for row in placeholders
+    )
     materializations = tuple(
         connection.execute(
             """
@@ -528,6 +560,32 @@ def test_portable_export_rejects_unknown_or_future_schema_history(
             )
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize("command", ["backup", "export"])
+def test_cli_snapshot_commands_reject_real_migration_history(
+    tmp_path: Path,
+    command: str,
+):
+    data_dir = tmp_path / command
+    database_path = data_dir / "study-os.sqlite3"
+    archive_path = tmp_path / "real-history.zip"
+    _install_real_migration_history(database_path)
+    arguments = (
+        ("export", "--output", str(archive_path))
+        if command == "export"
+        else ("backup",)
+    )
+
+    result = _run_cli(data_dir, *arguments)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    diagnostic = json.loads(result.stderr)
+    assert diagnostic["errorType"] == "PortableArchiveError"
+    assert "migration history" in diagnostic["message"]
+    assert not archive_path.exists()
+    assert not any((data_dir / "backups").glob("*.sqlite3"))
 
 
 @pytest.mark.parametrize(
@@ -644,3 +702,31 @@ def test_calendar_survives_restart_online_backup_and_portable_restore(
         assert _database_snapshot(restored) == expected_snapshot
     finally:
         restored.close()
+
+
+def test_calendar_durability_invariant_rejects_nonprovisional_placeholder(
+    tmp_path: Path,
+):
+    source, _database_path, source_identities = _bootstrap_calendar_database(tmp_path)
+    try:
+        expected = _create_apply_pin_complete_and_draft(source)
+        changed = source.execute(
+            """
+            UPDATE sprint_calendar_assignments
+            SET precision='protected'
+            WHERE id=(
+              SELECT assignment.id
+              FROM sprint_calendar_assignments AS assignment
+              JOIN sprint_calendar_items AS item ON item.id=assignment.item_id
+              WHERE item.kind='future_cycle_capacity'
+              ORDER BY assignment.id
+              LIMIT 1
+            )
+            """
+        )
+        assert changed.rowcount == 1
+
+        with pytest.raises(AssertionError):
+            _assert_calendar_state(source, expected, source_identities)
+    finally:
+        source.close()
