@@ -515,8 +515,8 @@ class SprintCalendarRepository:
                 """
                 INSERT INTO sprint_calendar_item_overrides (
                   target_slug, item_id, plan_date, start_time, position,
-                  duration_minutes, pinned
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                  duration_minutes, pinned, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     target_slug,
@@ -525,6 +525,7 @@ class SprintCalendarRepository:
                     start_time,
                     position,
                     duration_minutes,
+                    int(pinned),
                     int(pinned),
                 ),
             )
@@ -536,7 +537,7 @@ class SprintCalendarRepository:
                 """
                 UPDATE sprint_calendar_item_overrides
                 SET plan_date=?, start_time=?, position=?, duration_minutes=?,
-                    pinned=?, version=version+1,
+                    pinned=?, active=?, version=version+1,
                     updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
                 WHERE id=? AND active=1 AND version=?
                 """,
@@ -545,6 +546,7 @@ class SprintCalendarRepository:
                     start_time,
                     position,
                     duration_minutes,
+                    int(pinned),
                     int(pinned),
                     current["id"],
                     expected_version,
@@ -594,4 +596,3 @@ class SprintCalendarRepository:
             """,
             (source_task_id,),
         ).fetchone()
-
