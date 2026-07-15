@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { StudyOsApiError } from '../api/client';
+import { SprintCalendarPanel } from './SprintCalendarPanel';
 import {
   fetchOptionalSprintDay,
   fetchSourcePlanTasks,
@@ -94,8 +95,8 @@ const formatDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDate
 });
 
 const mutationKey = (prefix: string, date: string) => {
-  const suffix = typeof crypto?.randomUUID === 'function'
-    ? crypto.randomUUID()
+  const suffix = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${prefix}-${date}-${suffix}`;
 };
@@ -397,6 +398,13 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   const lsActions = visibleActions.filter((action) => action.sourcePlanTaskId !== null);
   const extraActions = visibleActions.filter((action) => action.sourcePlanTaskId === null);
   const activeResult = day?.actions.find((action) => action.id === resultActionId) || null;
+  const calendarStartDate = isoToday();
+  const calendarEndDate = useMemo(() => {
+    const rollingEnd = shiftDate(calendarStartDate, 14);
+    if (!config) return rollingEnd;
+    const dayBeforeP1 = shiftDate(config.objectiveDate, -1);
+    return dayBeforeP1 < rollingEnd ? dayBeforeP1 : rollingEnd;
+  }, [calendarStartDate, config]);
 
   if (loading) {
     return (
@@ -407,7 +415,14 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   }
 
   return (
-    <section className="overflow-hidden border-y border-[#404040] bg-[#202020]">
+    <>
+      <SprintCalendarPanel
+        targetSlug={targetSlug}
+        startDate={calendarStartDate}
+        endDate={calendarEndDate}
+        onNotice={showToast}
+      />
+      <section className="overflow-hidden border-y border-[#404040] bg-[#202020]">
       <div className="border-b border-white/10 px-3 py-3 sm:px-5 sm:py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
@@ -589,7 +604,8 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
           </div>
         </div>
       )}
-    </section>
+      </section>
+    </>
   );
 };
 
