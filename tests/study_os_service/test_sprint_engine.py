@@ -700,3 +700,63 @@ def test_engine_rejects_projection_inputs_that_cannot_share_one_snapshot():
             subject_projections=divergent,
             projection=frozen,
         )
+
+
+def test_engine_accepts_a_frozen_past_projection_and_rejects_future_evidence():
+    subjects = _subject_projections()
+    frozen = _projection(subjects, as_of=date(2026, 7, 14))
+    plan = SprintEngine().generate(
+        config=DEFAULT_SEFAZ_CONFIG,
+        subjects=_subjects(),
+        source_tasks=(),
+        plan_date=date(2026, 7, 15),
+        energy_level=3,
+        subject_projections=subjects,
+        projection=frozen,
+    )
+    assert plan.plan_date == date(2026, 7, 15)
+
+    future = replace(frozen, as_of=date(2026, 7, 16))
+    with pytest.raises(ValueError, match="cutoff cannot be after plan date"):
+        SprintEngine().generate(
+            config=DEFAULT_SEFAZ_CONFIG,
+            subjects=_subjects(),
+            source_tasks=(),
+            plan_date=date(2026, 7, 15),
+            energy_level=3,
+            subject_projections=subjects,
+            projection=future,
+        )
+
+
+def test_low_energy_compresses_heavy_work_while_high_energy_keeps_it():
+    config = replace(
+        DEFAULT_SEFAZ_CONFIG,
+        ls_budget_minutes=180,
+        extra_budget_minutes=0,
+    )
+    tasks = (
+        _source_task(1, "p1_portugues", minutes=120, task_kind="simulation"),
+        _source_task(2, "p2_lte", minutes=60, task_kind="questions"),
+    )
+    low = _generate(
+        config=config,
+        subjects=_subjects(),
+        source_tasks=tasks,
+        plan_date=date(2026, 7, 14),
+        energy_level=1,
+    )
+    high = _generate(
+        config=config,
+        subjects=_subjects(),
+        source_tasks=tasks,
+        plan_date=date(2026, 7, 14),
+        energy_level=5,
+    )
+    low_executable = [row for row in low.actions if row.recommendation != "defer"]
+    high_executable = [row for row in high.actions if row.recommendation != "defer"]
+    assert all(row.duration_minutes <= 25 for row in low_executable)
+    assert not any(row.action_kind in {"simulation", "discursive"} for row in low_executable)
+    assert any(row.action_kind == "simulation" for row in high_executable)
+    assert sum(row.duration_minutes for row in low_executable) <= 180
+    assert sum(row.duration_minutes for row in high_executable) <= 180

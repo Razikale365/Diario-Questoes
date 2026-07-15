@@ -66,8 +66,8 @@ class SprintEngine:
             raise ValueError("energy level must be between 1 and 5")
         if plan_date > config.exam_end_date:
             raise ValueError("plan date is after the exam")
-        if projection.as_of != plan_date:
-            raise ValueError("projection date must match plan date")
+        if projection.as_of > plan_date:
+            raise ValueError("projection cutoff cannot be after plan date")
         subject_by_key = {subject.subject_key: subject for subject in subjects if subject.active}
         frozen_subject_projections = {
             subject.subject_key: subject for subject in projection.subjects
@@ -101,6 +101,7 @@ class SprintEngine:
                 min(120, config.ls_budget_minutes + config.extra_budget_minutes),
                 subject_projections,
             )
+            actions = self._energy_actions(actions, energy_level)
             return self._day(
                 plan_date,
                 days_remaining,
@@ -135,7 +136,7 @@ class SprintEngine:
             afo_rescues_this_week=afo_rescues_this_week,
             has_scheduled_simulation=scheduled_simulation,
         )
-        actions = self._positioned(ls_actions + extras)
+        actions = self._energy_actions(self._positioned(ls_actions + extras), energy_level)
         mode_label = "D-1: reducao de carga" if d1 else "Reta final tática"
         return self._day(
             plan_date,
@@ -663,6 +664,68 @@ class SprintEngine:
         actions: tuple[SprintActionDraft, ...]
     ) -> tuple[SprintActionDraft, ...]:
         return actions
+
+    @staticmethod
+    def _energy_actions(
+        actions: tuple[SprintActionDraft, ...], energy_level: int
+    ) -> tuple[SprintActionDraft, ...]:
+        if energy_level == 5:
+            return tuple(
+                action
+                for _, action in sorted(
+                    enumerate(actions),
+                    key=lambda row: (
+                        0
+                        if row[1].action_kind in {"simulation", "discursive"}
+                        else 1,
+                        row[0],
+                    ),
+                )
+            )
+        cap = 25 if energy_level == 1 else 35 if energy_level == 2 else None
+        if cap is None:
+            return actions
+        adjusted: list[SprintActionDraft] = []
+        for action in actions:
+            if action.recommendation == "defer":
+                adjusted.append(action)
+                continue
+            heavy = action.action_kind in {"simulation", "discursive"}
+            source_execution = (
+                action.source_plan_task_id is not None
+                and action.recommendation in {"execute", "compress"}
+            )
+            action_kind = (
+                "ls_compress"
+                if source_execution
+                else "review"
+                if heavy
+                else action.action_kind
+            )
+            recommendation = "compress" if source_execution else action.recommendation
+            adjusted.append(
+                replace(
+                    action,
+                    action_kind=action_kind,
+                    recommendation=recommendation,
+                    duration_minutes=min(cap, action.duration_minutes),
+                    rationale=action.rationale
+                    + (
+                        f"Energia {energy_level}: bloco limitado a {cap} minutos; carga cognitiva pesada convertida em revisão/compressão."
+                        if heavy
+                        else f"Energia {energy_level}: bloco limitado a {cap} minutos.",
+                    ),
+                    evidence=MappingProxyType(
+                        dict(action.evidence)
+                        | {
+                            "energyLevel": energy_level,
+                            "energyDurationCap": cap,
+                            "energyHeavyConverted": heavy,
+                        }
+                    ),
+                )
+            )
+        return tuple(adjusted)
 
     @staticmethod
     def _day(
