@@ -589,11 +589,24 @@ export const mergePlannerTasks = (existing: PlannerTask[], incoming: PlannerTask
 
   incoming.forEach((task) => {
     const previous = byId.get(task.id) || existingByNaturalKey.get(getPlannerTaskMergeKey(task));
+    const authoritativeCompletion = Boolean(
+      previous
+      && task.status === 'completed'
+      && task.scheduleOrigin === 'source',
+    );
     const merged = previous ? {
       ...task,
       id: previous.id,
-      scheduledDate: previous.scheduledDate ?? task.scheduledDate,
-      startTime: previous.startTime ?? task.startTime,
+      scheduledDate: previous.schedulePinned
+        ? previous.scheduledDate
+        : authoritativeCompletion
+          ? task.scheduledDate
+          : previous.scheduledDate ?? task.scheduledDate,
+      startTime: previous.schedulePinned
+        ? previous.startTime
+        : authoritativeCompletion
+          ? task.startTime
+          : previous.startTime ?? task.startTime,
       linkedStudyTaskId: previous.linkedStudyTaskId ?? task.linkedStudyTaskId,
     } : task;
 

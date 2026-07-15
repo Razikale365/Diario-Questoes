@@ -127,6 +127,20 @@ export const mergeRestoredSourcePlanTasks = (
     if (!local) return task;
     const localUpdatedAt = Date.parse(local.updatedAt);
     const persistedUpdatedAt = Date.parse(task.updatedAt);
+    if (
+      task.status === 'completed'
+      && task.scheduleOrigin === 'source'
+      && local.schedulePinned !== true
+    ) {
+      return {
+        ...task,
+        linkedStudyTaskId: local.linkedStudyTaskId ?? task.linkedStudyTaskId,
+        scheduledDate: local.schedulePinned ? local.scheduledDate : task.scheduledDate,
+        startTime: local.schedulePinned ? local.startTime : task.startTime,
+        scheduleOrigin: local.schedulePinned ? local.scheduleOrigin : task.scheduleOrigin,
+        schedulePinned: local.schedulePinned || task.schedulePinned,
+      };
+    }
     const localIsNewer = Number.isFinite(localUpdatedAt)
       && (!Number.isFinite(persistedUpdatedAt) || localUpdatedAt > persistedUpdatedAt);
     if (localIsNewer) return local;
@@ -158,6 +172,7 @@ export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => 
   const scheduledDate = calendarDate(task);
   const timestamp = fallbackTimestamp(scheduledDate);
   const plannedQuestions = numberValue(task.provenance.plannedQuestions);
+  const observedOn = textValue(task.provenance.observedOn);
   return {
     id: task.externalTaskId,
     number: task.sourceOrder,
@@ -183,6 +198,11 @@ export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => 
     materialHint: task.materialHint || undefined,
     sourceUrl: textValue(task.provenance.tecUrl) || undefined,
     linkedStudyTaskId: task.linkedStudyTaskId || undefined,
+    completedAt: task.status === 'completed'
+      ? textValue(task.provenance.completedAt) || (observedOn ? `${observedOn}T12:00:00-03:00` : timestamp)
+      : undefined,
+    lastOutcome: task.status === 'completed' ? 'completed' : undefined,
+    scheduleOrigin: task.provenance.origin === 'ls-visible-history' ? 'source' : undefined,
     createdAt: textValue(task.provenance.createdAt, timestamp),
     updatedAt: textValue(task.provenance.updatedAt, timestamp),
   };

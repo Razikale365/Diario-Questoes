@@ -373,6 +373,9 @@ class SourcePlanService:
     ) -> None:
         incoming_provenance = task["provenance"]
         local_sync = incoming_provenance.get("origin") == "planner-local-sync"
+        incoming_is_ls_history = (
+            incoming_provenance.get("origin") == "ls-visible-history"
+        )
         existing_is_ls_history = (
             existing.provenance.get("origin") == "ls-visible-history"
         )
@@ -382,10 +385,11 @@ class SourcePlanService:
         elif task["performance_bp"] is None:
             task["performance_bp"] = existing.performance_bp
 
-        task["spent_minutes"] = max(
-            existing.spent_minutes,
-            task["spent_minutes"],
-        )
+        if not incoming_is_ls_history:
+            task["spent_minutes"] = max(
+                existing.spent_minutes,
+                task["spent_minutes"],
+            )
         if not task["material_hint"]:
             task["material_hint"] = existing.material_hint
         if not task["details"]:

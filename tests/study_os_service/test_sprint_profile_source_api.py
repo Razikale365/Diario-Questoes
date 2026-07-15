@@ -528,3 +528,48 @@ def test_local_planner_sync_does_not_downgrade_richer_ls_history(tmp_path: Path)
     assert task["materialHint"] == "TEC Concursos + resumos"
     assert task["linkedStudyTaskId"] == "local-study-task"
     assert task["provenance"]["tecUrl"] == "https://www.tecconcursos.com.br/s/Q6Z7ae"
+
+
+def test_authoritative_ls_history_corrects_stale_local_minutes(tmp_path: Path):
+    local = {
+        "targetSlug": "sefaz_ce",
+        "sourceKind": "ls",
+        "planLabel": "Meta 47",
+        "metaNumber": 47,
+        "tasks": [{
+            "externalTaskId": "ls-sefaz-ce-meta-47-task-5",
+            "scheduledDate": "2026-07-17",
+            "sourceOrder": 5,
+            "discipline": "Direito Administrativo",
+            "taskKind": "mixed",
+            "description": "Jurisprudencias",
+            "estimatedMinutes": 30,
+            "spentMinutes": 30,
+            "status": "pending",
+            "provenance": {"origin": "planner-local-sync"},
+        }],
+    }
+    visible = local | {
+        "tasks": [local["tasks"][0] | {
+            "scheduledDate": "2026-07-14",
+            "estimatedMinutes": 20,
+            "spentMinutes": 20,
+            "status": "completed",
+            "performanceBp": 9300,
+            "provenance": {"origin": "ls-visible-history"},
+        }],
+    }
+
+    with _client(tmp_path) as client:
+        _seed_sefaz(client)
+        first = client.post("/api/v1/source-plans/import", headers={"Idempotency-Key": "local-stale"}, json=local)
+        corrected = client.post("/api/v1/source-plans/import", headers={"Idempotency-Key": "ls-authoritative"}, json=visible)
+        task = client.get("/api/v1/source-plans/tasks?targetSlug=sefaz_ce").json()["items"][0]
+
+    assert first.status_code == 201, first.text
+    assert corrected.status_code == 201, corrected.text
+    assert task["spentMinutes"] == 20
+    assert task["estimatedMinutes"] == 20
+    assert task["scheduledDate"] == "2026-07-14"
+    assert task["status"] == "completed"
+    assert task["performanceBp"] == 9300

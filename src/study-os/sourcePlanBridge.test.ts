@@ -287,6 +287,48 @@ test('SQLite restoration cannot regress a completed pinned task', () => {
   assert.equal(merged.spentMinutes, 55);
 });
 
+test('authoritative source completion replaces a newer stale local pending state', () => {
+  const local = {
+    id: 'ls-sefaz-ce-meta-47-task-9', number: 9, metaNumber: 47, discipline: 'Direito Financeiro',
+    format: 'Revisão', description: 'Princípios', spentMinutes: 0, estimatedMinutes: 30,
+    performance: null, status: 'pending' as const, relevance: 7, durationMinutes: 30,
+    source: 'ls-meta-text' as const, plannerSourceKind: 'ls' as const,
+    scheduledDate: '2026-07-17', createdAt: '2026-07-15T08:00:00.000Z', updatedAt: '2026-07-15T09:00:00.000Z',
+  };
+  const persisted = {
+    ...local, status: 'completed' as const, spentMinutes: 30, performance: 80,
+    scheduledDate: '2026-07-14', completedAt: '2026-07-14T12:00:00-03:00',
+    lastOutcome: 'completed' as const, scheduleOrigin: 'source' as const,
+    createdAt: '2026-07-14T12:00:00-03:00', updatedAt: '2026-07-14T12:00:00-03:00',
+  };
+  const [merged] = mergeRestoredSourcePlanTasks([local], [persisted]);
+  assert.equal(merged.status, 'completed');
+  assert.equal(merged.scheduledDate, '2026-07-14');
+  assert.equal(merged.spentMinutes, 30);
+  assert.equal(merged.performance, 80);
+});
+
+test('authoritative source completion corrects an unpinned completed local schedule', () => {
+  const local = {
+    id: 'ls-sefaz-ce-meta-47-task-5', number: 5, metaNumber: 47, discipline: 'Direito Administrativo',
+    format: 'Revisão', description: 'Jurisprudência', spentMinutes: 20, estimatedMinutes: 20,
+    performance: 93, status: 'completed' as const, relevance: 7, durationMinutes: 20,
+    source: 'ls-meta-text' as const, plannerSourceKind: 'ls' as const,
+    scheduledDate: '2026-07-17', startTime: '09:45', completedAt: '2026-07-15T09:00:00.000Z',
+    updatedAt: '2026-07-15T09:00:00.000Z', createdAt: '2026-07-15T08:00:00.000Z',
+  };
+  const persisted = {
+    ...local, scheduledDate: '2026-07-14', completedAt: '2026-07-14T12:00:00-03:00',
+    lastOutcome: 'completed' as const, scheduleOrigin: 'source' as const,
+    updatedAt: '2026-07-14T12:00:00-03:00', createdAt: '2026-07-14T12:00:00-03:00',
+  };
+
+  const [merged] = mergeRestoredSourcePlanTasks([local], [persisted]);
+
+  assert.equal(merged.scheduledDate, '2026-07-14');
+  assert.equal(merged.scheduleOrigin, 'source');
+});
+
 test('LS task identity is deterministic across browser imports', () => {
   assert.equal(externalSourceTaskId({
     id: 'old-random-browser-id',
