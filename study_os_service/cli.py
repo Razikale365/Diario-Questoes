@@ -13,6 +13,7 @@ from study_os_service.db.connection import connect_database
 from study_os_service.db.migrations import MigrationRunner
 from study_os_service.db.portable import (
     create_portable_archive,
+    inspect_schema_version,
     restore_portable_archive,
 )
 
@@ -55,7 +56,7 @@ def _health(settings: StudyOsSettings) -> dict[str, Any]:
 def _backup(settings: StudyOsSettings) -> dict[str, Any]:
     connection = connect_database(settings.database_path)
     try:
-        schema_version = MigrationRunner(connection).migrate()
+        schema_version = inspect_schema_version(connection)
         created_path = create_backup(connection, settings.backup_dir)
     finally:
         connection.close()
@@ -75,7 +76,7 @@ def _backup(settings: StudyOsSettings) -> dict[str, Any]:
 def _export(settings: StudyOsSettings, output: Path) -> dict[str, Any]:
     connection = connect_database(settings.database_path)
     try:
-        schema_version = MigrationRunner(connection).migrate()
+        schema_version = inspect_schema_version(connection)
         result = create_portable_archive(connection, output, schema_version)
     finally:
         connection.close()

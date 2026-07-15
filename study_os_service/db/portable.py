@@ -14,7 +14,7 @@ from typing import Any, BinaryIO
 import zipfile
 
 from study_os_service.db.backup import create_backup
-from study_os_service.db.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS
+from study_os_service.db.migrations import MIGRATIONS
 
 
 ARCHIVE_FORMAT = "study-os-portable"
@@ -24,6 +24,9 @@ DATABASE_MEMBER = "study-os.sqlite3"
 ALLOWED_MEMBERS = (MANIFEST_MEMBER, DATABASE_MEMBER)
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_DATABASE_BYTES = 2 * 1024 * 1024 * 1024
+SUPPORTED_SCHEMA_VERSIONS = frozenset(
+    version for version, _statements in MIGRATIONS
+)
 
 
 class PortableArchiveError(ValueError):
@@ -51,6 +54,10 @@ class _ValidatedManifest:
     schema_version: int
     database_sha256: str
     database_size: int
+
+
+def _is_supported_schema_version(value: object) -> bool:
+    return type(value) is int and value in SUPPORTED_SCHEMA_VERSIONS
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -98,7 +105,7 @@ def _hash_file(path: Path) -> tuple[str, int]:
         return _hash_stream(source)
 
 
-def _database_schema(connection: sqlite3.Connection) -> int:
+def inspect_schema_version(connection: sqlite3.Connection) -> int:
     expected_versions = tuple(version for version, _statements in MIGRATIONS)
     try:
         applied_versions = tuple(
@@ -111,7 +118,11 @@ def _database_schema(connection: sqlite3.Connection) -> int:
         raise PortableArchiveError(
             "database does not contain Study OS migration history"
         ) from exc
-    if applied_versions != expected_versions:
+    if (
+        not applied_versions
+        or len(applied_versions) > len(expected_versions)
+        or applied_versions != expected_versions[: len(applied_versions)]
+    ):
         raise PortableArchiveError(
             "database migration history does not match the supported schema"
         )
@@ -142,7 +153,7 @@ def _validate_sqlite(path: Path, expected_schema: int) -> None:
             raise PortableArchiveError(
                 f"portable database integrity check failed: {detail}"
             )
-        schema_version = _database_schema(connection)
+        schema_version = inspect_schema_version(connection)
         if schema_version != expected_schema:
             raise PortableArchiveError(
                 "portable database schema does not match its manifest"
@@ -181,11 +192,11 @@ def create_portable_archive(
     *,
     now: datetime | None = None,
 ) -> PortableArchiveResult:
-    if schema_version != CURRENT_SCHEMA_VERSION:
+    if not _is_supported_schema_version(schema_version):
         raise PortableArchiveError(
             f"unsupported Study OS schema version {schema_version}"
         )
-    actual_schema = _database_schema(connection)
+    actual_schema = inspect_schema_version(connection)
     if actual_schema != schema_version:
         raise PortableArchiveError("database schema does not match export request")
 
@@ -282,7 +293,7 @@ def _manifest(archive: zipfile.ZipFile) -> _ValidatedManifest:
     except ValueError as exc:
         raise PortableArchiveError("portable manifest timestamp is invalid") from exc
     schema_version = payload.get("schemaVersion")
-    if isinstance(schema_version, bool) or schema_version != CURRENT_SCHEMA_VERSION:
+    if not _is_supported_schema_version(schema_version):
         raise PortableArchiveError(
             f"unsupported Study OS schema version {schema_version}"
         )
