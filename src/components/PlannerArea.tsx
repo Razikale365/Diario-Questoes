@@ -1,5 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   Archive,
   AlertTriangle,
   Ban,
@@ -65,6 +81,18 @@ import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
 import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../utils/taskResultDraft';
 import { plannerTaskActionAvailability } from '../utils/plannerExecutionUi';
+import {
+  DEFAULT_PLANNER_TASK_COLUMNS,
+  DEFAULT_PLANNER_TASK_TABLE_PREFERENCES,
+  movePlannerTaskColumn,
+  nextPlannerTaskSort,
+  parsePlannerTaskTablePreferences,
+  PLANNER_TASK_TABLE_PREFERENCES_KEY,
+  setPlannerTaskColumnHidden,
+  sortPlannerTasks,
+  type PlannerTaskColumnId,
+  type PlannerTaskTablePreferences,
+} from '../utils/plannerTaskTablePreferences';
 import { TaskExecutionFields } from './TaskExecutionFields';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
@@ -344,6 +372,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [taskSearch, setTaskSearch] = useState(taskQuery);
   const [taskQuickView, setTaskQuickView] = useState<TaskQuickView>('all');
   const [taskDiscipline, setTaskDiscipline] = useState('');
+  const [taskTablePreferences, setTaskTablePreferences] = useState<PlannerTaskTablePreferences>(() =>
+    parsePlannerTaskTablePreferences(localStorage.getItem(PLANNER_TASK_TABLE_PREFERENCES_KEY)),
+  );
   const lastSourceSync = useRef('');
   const sourcePlanHydrationInFlight = useRef(false);
   const cutover = useStudyOsCutover();
@@ -376,6 +407,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(metaHistory));
   }, [metaHistory]);
+
+  useEffect(() => {
+    localStorage.setItem(PLANNER_TASK_TABLE_PREFERENCES_KEY, JSON.stringify(taskTablePreferences));
+  }, [taskTablePreferences]);
 
   useEffect(() => {
     if (metaSummary && plannerTasks.length > 0 && metaHistory.length === 0) {
@@ -584,6 +619,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     view: taskQuickView,
     today: toIsoDate(new Date()),
   }), [taskDiscipline, taskQuickView, taskSearch, visibleListTasks]);
+
+  const sortedDiscoveredTasks = useMemo(
+    () => sortPlannerTasks(discoveredTasks, taskTablePreferences.sort),
+    [discoveredTasks, taskTablePreferences.sort],
+  );
 
   const plannerInsights = useMemo(
     () => buildPlannerInsights(activePlannerTasks, metaHistory, metaSummary?.id),
@@ -1669,7 +1709,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           <TaskTable
             title="Tarefas"
             icon={Table2}
-            tasks={discoveredTasks}
+            tasks={sortedDiscoveredTasks}
+            preferences={taskTablePreferences}
+            onPreferencesChange={setTaskTablePreferences}
             onOpen={setSelectedTaskId}
             onExecute={createOrOpenStudyTask}
             onClearSchedule={clearSchedule}
@@ -1698,7 +1740,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                   </span>
                 </div>
                 <TaskRows
-                  tasks={group.tasks}
+                  tasks={sortPlannerTasks(group.tasks, taskTablePreferences.sort)}
+                  preferences={taskTablePreferences}
+                  onPreferencesChange={setTaskTablePreferences}
                   onExecute={createOrOpenStudyTask}
                   onClearSchedule={clearSchedule}
                   onArchive={archivePlannerTask}
@@ -1716,7 +1760,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         <TaskTable
           title="Tarefas Pendentes"
           icon={Target}
-          tasks={visibleListTasks}
+          tasks={sortPlannerTasks(visibleListTasks, taskTablePreferences.sort)}
+          preferences={taskTablePreferences}
+          onPreferencesChange={setTaskTablePreferences}
           onExecute={createOrOpenStudyTask}
           onClearSchedule={clearSchedule}
           onArchive={archivePlannerTask}
@@ -1728,7 +1774,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         <TaskTable
           title="Tarefas Ignoradas"
           icon={Ban}
-          tasks={visibleListTasks}
+          tasks={sortPlannerTasks(visibleListTasks, taskTablePreferences.sort)}
+          preferences={taskTablePreferences}
+          onPreferencesChange={setTaskTablePreferences}
           onExecute={createOrOpenStudyTask}
           onClearSchedule={clearSchedule}
           onArchive={archivePlannerTask}
@@ -1740,7 +1788,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         <TaskTable
           title="Tarefas Arquivadas"
           icon={Archive}
-          tasks={visibleListTasks}
+          tasks={sortPlannerTasks(visibleListTasks, taskTablePreferences.sort)}
+          preferences={taskTablePreferences}
+          onPreferencesChange={setTaskTablePreferences}
           onExecute={createOrOpenStudyTask}
           onClearSchedule={clearSchedule}
           onArchive={archivePlannerTask}
@@ -2044,12 +2094,25 @@ const TaskTable: React.FC<{
   title: string;
   icon: React.ElementType;
   tasks: PlannerTask[];
+  preferences: PlannerTaskTablePreferences;
+  onPreferencesChange: React.Dispatch<React.SetStateAction<PlannerTaskTablePreferences>>;
   onExecute: (task: PlannerTask) => void;
   onClearSchedule: (taskId: string) => void;
   onArchive: (taskId: string) => void;
   onRestore: (taskId: string) => void;
   onOpen?: (taskId: string) => void;
-}> = ({ title, icon: Icon, tasks, onExecute, onClearSchedule, onArchive, onRestore, onOpen }) => (
+}> = ({
+  title,
+  icon: Icon,
+  tasks,
+  preferences,
+  onPreferencesChange,
+  onExecute,
+  onClearSchedule,
+  onArchive,
+  onRestore,
+  onOpen,
+}) => (
   <section className="rounded-lg border border-[#404040] bg-[#262626] p-4">
     <div className="mb-4 flex items-center gap-2">
       <Icon className="h-5 w-5 text-[#84cc16]" />
@@ -2061,6 +2124,8 @@ const TaskTable: React.FC<{
     {tasks.length > 0 ? (
       <TaskRows
         tasks={tasks}
+        preferences={preferences}
+        onPreferencesChange={onPreferencesChange}
         onExecute={onExecute}
         onClearSchedule={onClearSchedule}
         onArchive={onArchive}
@@ -2073,106 +2138,301 @@ const TaskTable: React.FC<{
   </section>
 );
 
+type PlannerTaskColumnDefinition = {
+  id: PlannerTaskColumnId;
+  label: string;
+  headerClassName?: string;
+  sortValue: (task: PlannerTask) => string | number | null;
+  render: (task: PlannerTask) => React.ReactNode;
+};
+
+const PLANNER_TASK_COLUMN_REGISTRY: Record<PlannerTaskColumnId, PlannerTaskColumnDefinition> = {
+  number: {
+    id: 'number',
+    label: 'Nº',
+    sortValue: (task) => task.number,
+    render: (task) => <span className="font-black text-white">{task.number}</span>,
+  },
+  discipline: {
+    id: 'discipline',
+    label: 'Disciplina',
+    sortValue: (task) => task.discipline,
+    render: (task) => <span className="font-bold text-white">{task.discipline}</span>,
+  },
+  format: {
+    id: 'format',
+    label: 'Formato',
+    sortValue: (task) => task.format,
+    render: (task) => <span className="text-gray-400">{task.format}</span>,
+  },
+  description: {
+    id: 'description',
+    label: 'Descrição',
+    headerClassName: 'min-w-52',
+    sortValue: (task) => task.description,
+    render: (task) => <span className="line-clamp-2 max-w-sm text-gray-300">{task.description}</span>,
+  },
+  duration: {
+    id: 'duration',
+    label: 'Tempo',
+    sortValue: (task) => task.durationMinutes,
+    render: (task) => <span className="font-bold text-gray-300">{formatMinutes(task.durationMinutes)}</span>,
+  },
+  performance: {
+    id: 'performance',
+    label: 'Desemp.',
+    sortValue: (task) => task.performance,
+    render: (task) => <span className="font-bold text-gray-300">{task.performance ?? 0}%</span>,
+  },
+  status: {
+    id: 'status',
+    label: 'Status',
+    sortValue: (task) => task.status,
+    render: (task) => (
+      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${statusClass[task.status]}`}>
+        {statusLabel[task.status]}
+      </span>
+    ),
+  },
+  relevance: {
+    id: 'relevance',
+    label: 'Rel.',
+    sortValue: (task) => task.relevance,
+    render: (task) => <span className="font-black text-purple-300">{task.relevance}</span>,
+  },
+  schedule: {
+    id: 'schedule',
+    label: 'Agenda',
+    sortValue: (task) => task.scheduledDate ? `${task.scheduledDate}T${task.startTime || '00:00'}` : null,
+    render: (task) => (
+      <span className="text-xs font-bold text-gray-400">
+        {task.scheduledDate ? `${task.scheduledDate}${task.startTime ? ` ${task.startTime}` : ''}` : '-'}
+      </span>
+    ),
+  },
+};
+
+const SortableTaskColumnHeader: React.FC<{
+  column: PlannerTaskColumnDefinition;
+  sort: PlannerTaskTablePreferences['sort'];
+  onSort: (column: PlannerTaskColumnId) => void;
+}> = ({ column, sort, onSort }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: column.id });
+  const sortIndicator = sort?.column === column.id
+    ? (sort.direction === 'asc' ? '↑' : '↓')
+    : '↕';
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+      }}
+      className={`sticky top-0 z-10 bg-[#262626] px-3 py-3 ${column.headerClassName || ''}`}
+    >
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onSort(column.id)}
+          className="flex min-h-7 items-center gap-1 rounded text-left hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400"
+          aria-label={`Ordenar por ${column.label}`}
+          title={sort?.column === column.id ? `Ordem ${sort.direction === 'asc' ? 'crescente' : 'decrescente'}` : `Ordenar por ${column.label}`}
+        >
+          <span>{column.label}</span>
+          <span aria-hidden="true" className="text-purple-300">{sortIndicator}</span>
+        </button>
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          onClick={(event) => event.stopPropagation()}
+          className="cursor-grab rounded p-1 text-gray-600 hover:bg-white/10 hover:text-gray-300 active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400"
+          aria-label={`Reordenar coluna ${column.label}`}
+          title="Arraste para reordenar"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </th>
+  );
+};
+
 const TaskRows: React.FC<{
   tasks: PlannerTask[];
+  preferences: PlannerTaskTablePreferences;
+  onPreferencesChange: React.Dispatch<React.SetStateAction<PlannerTaskTablePreferences>>;
   onExecute: (task: PlannerTask) => void;
   onClearSchedule: (taskId: string) => void;
   onArchive: (taskId: string) => void;
   onRestore: (taskId: string) => void;
   onOpen?: (taskId: string) => void;
-}> = ({ tasks, onExecute, onClearSchedule, onArchive, onRestore, onOpen }) => (
-  <div className="overflow-x-auto">
-    <table className="w-full min-w-[880px] border-collapse text-left">
-      <thead>
-        <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
-          <th className="px-3 py-3">Nº</th>
-          <th className="px-3 py-3">Disciplina</th>
-          <th className="px-3 py-3">Formato</th>
-          <th className="px-3 py-3">Descrição</th>
-          <th className="px-3 py-3">Tempo</th>
-          <th className="px-3 py-3">Desemp.</th>
-          <th className="px-3 py-3">Status</th>
-          <th className="px-3 py-3">Rel.</th>
-          <th className="px-3 py-3">Agenda</th>
-          <th className="px-3 py-3 text-right">Ação</th>
-        </tr>
-      </thead>
-      <tbody>
-        {tasks.map((task) => (
-          <tr
-            key={task.id}
-            tabIndex={onOpen ? 0 : undefined}
-            onClick={() => onOpen?.(task.id)}
-            onKeyDown={(event) => {
-              if (onOpen && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                onOpen(task.id);
-              }
-            }}
-            className={`border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400 ${onOpen ? 'cursor-pointer' : ''}`}
+}> = ({ tasks, preferences, onPreferencesChange, onExecute, onClearSchedule, onArchive, onRestore, onOpen }) => {
+  const [isColumnsMenuOpen, setIsColumnsMenuOpen] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const visibleColumns = preferences.order
+    .filter((column) => !preferences.hidden.includes(column))
+    .map((column) => PLANNER_TASK_COLUMN_REGISTRY[column]);
+  const visibleCount = visibleColumns.length;
+
+  const handleSort = (column: PlannerTaskColumnId) => {
+    onPreferencesChange((current) => ({
+      ...current,
+      sort: nextPlannerTaskSort(current.sort, column),
+    }));
+  };
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const activeColumn = active.id as PlannerTaskColumnId;
+    const overColumn = over.id as PlannerTaskColumnId;
+    onPreferencesChange((current) => movePlannerTaskColumn(current, activeColumn, overColumn));
+  };
+
+  const setColumnVisibility = (column: PlannerTaskColumnId, visible: boolean) => {
+    onPreferencesChange((current) => setPlannerTaskColumnHidden(current, column, !visible));
+  };
+
+  return (
+    <div>
+      <div className="mb-3 flex justify-end">
+        <div className="relative">
+          <button
+            type="button"
+            aria-expanded={isColumnsMenuOpen}
+            onClick={() => setIsColumnsMenuOpen((open) => !open)}
+            className="rounded border border-white/10 bg-black/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10 hover:text-white"
           >
-            <td className="px-3 py-3 font-black text-white">{task.number}</td>
-            <td className="px-3 py-3 font-bold text-white">{task.discipline}</td>
-            <td className="px-3 py-3 text-gray-400">{task.format}</td>
-            <td className="max-w-sm px-3 py-3 text-gray-300">
-              <span className="line-clamp-2">{task.description}</span>
-            </td>
-            <td className="px-3 py-3 font-bold text-gray-300">{formatMinutes(task.durationMinutes)}</td>
-            <td className="px-3 py-3 font-bold text-gray-300">{task.performance ?? 0}%</td>
-            <td className="px-3 py-3">
-              <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${statusClass[task.status]}`}>
-                {statusLabel[task.status]}
-              </span>
-            </td>
-            <td className="px-3 py-3 font-black text-purple-300">{task.relevance}</td>
-            <td className="px-3 py-3 text-xs font-bold text-gray-400">
-              {task.scheduledDate ? `${task.scheduledDate}${task.startTime ? ` ${task.startTime}` : ''}` : '-'}
-            </td>
-            <td className="px-3 py-3">
-              <div className="flex justify-end gap-2">
-                {task.scheduledDate && task.status !== 'archived' && (
-                  <button
-                    type="button"
-                    onClick={(event) => { event.stopPropagation(); onClearSchedule(task.id); }}
-                    className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
-                  >
-                    Soltar
-                  </button>
-                )}
-                {task.status === 'archived' ? (
-                  <button
-                    type="button"
-                    onClick={(event) => { event.stopPropagation(); onRestore(task.id); }}
-                    className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20"
-                  >
-                    Restaurar
-                  </button>
-                ) : plannerTaskActionAvailability(task.status).canExecute ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={(event) => { event.stopPropagation(); onArchive(task.id); }}
-                      className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
-                    >
-                      Arquivar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => { event.stopPropagation(); onExecute(task); }}
-                      className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
-                    >
-                      Executar
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-);
+            Colunas
+          </button>
+          {isColumnsMenuOpen && (
+            <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-white/10 bg-[#1a1a1a] p-2 shadow-2xl">
+              <p className="px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-500">Exibir dados</p>
+              {preferences.order.map((column) => {
+                const visible = !preferences.hidden.includes(column);
+                return (
+                  <label key={column} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-xs font-bold text-gray-300 hover:bg-white/5">
+                    <input
+                      type="checkbox"
+                      checked={visible}
+                      disabled={visible && visibleCount === 1}
+                      onChange={() => setColumnVisibility(column, visible)}
+                      className="h-4 w-4 accent-[#84cc16]"
+                    />
+                    {PLANNER_TASK_COLUMN_REGISTRY[column].label}
+                  </label>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => onPreferencesChange({
+                  version: DEFAULT_PLANNER_TASK_TABLE_PREFERENCES.version,
+                  order: [...DEFAULT_PLANNER_TASK_COLUMNS],
+                  hidden: [],
+                  sort: null,
+                })}
+                className="mt-2 w-full rounded border border-white/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-gray-300 transition hover:bg-white/10 hover:text-white"
+              >
+                Restaurar padrão
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <table className="w-full min-w-[880px] border-collapse text-left">
+            <thead>
+              <SortableContext items={visibleColumns.map((column) => column.id)} strategy={horizontalListSortingStrategy}>
+                <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  {visibleColumns.map((column) => (
+                    <SortableTaskColumnHeader
+                      key={column.id}
+                      column={column}
+                      sort={preferences.sort}
+                      onSort={handleSort}
+                    />
+                  ))}
+                  <th className="sticky top-0 right-0 z-20 bg-[#262626] px-3 py-3 text-right">Ações</th>
+                </tr>
+              </SortableContext>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr
+                  key={task.id}
+                  tabIndex={onOpen ? 0 : undefined}
+                  onClick={() => onOpen?.(task.id)}
+                  onKeyDown={(event) => {
+                    if (onOpen && (event.key === 'Enter' || event.key === ' ')) {
+                      event.preventDefault();
+                      onOpen(task.id);
+                    }
+                  }}
+                  className={`border-b border-white/5 text-sm text-gray-300 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400 ${onOpen ? 'cursor-pointer' : ''}`}
+                >
+                  {visibleColumns.map((column) => (
+                    <td key={column.id} className="px-3 py-3">{column.render(task)}</td>
+                  ))}
+                  <td className="sticky right-0 z-10 bg-[#262626] px-3 py-3">
+                    <div className="flex justify-end gap-2">
+                      {task.scheduledDate && task.status !== 'archived' && (
+                        <button
+                          type="button"
+                          onClick={(event) => { event.stopPropagation(); onClearSchedule(task.id); }}
+                          className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
+                        >
+                          Soltar
+                        </button>
+                      )}
+                      {task.status === 'archived' ? (
+                        <button
+                          type="button"
+                          onClick={(event) => { event.stopPropagation(); onRestore(task.id); }}
+                          className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20"
+                        >
+                          Restaurar
+                        </button>
+                      ) : plannerTaskActionAvailability(task.status).canExecute ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(event) => { event.stopPropagation(); onArchive(task.id); }}
+                            className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
+                          >
+                            Arquivar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => { event.stopPropagation(); onExecute(task); }}
+                            className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
+                          >
+                            Executar
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DndContext>
+      </div>
+    </div>
+  );
+};
 
 const EmptyPanel: React.FC<{ icon: React.ElementType; title: string }> = ({ icon: Icon, title }) => (
   <div className="rounded border border-dashed border-white/10 bg-[#1a1a1a] p-8 text-center">
