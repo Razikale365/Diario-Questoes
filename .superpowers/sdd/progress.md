@@ -184,7 +184,7 @@ Plan: `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
 | Task | Status | Base | Head | Verification | Review |
 | --- | --- | --- | --- | --- | --- |
 | 1. Pure task import planner | complete | `eebae95` | `a84d81a` | 9 focused; 38 task/bank regressions; lint; diff-check | spec compliant; quality approved after one fix round |
-| 2. Atomic task and bank persistence | pending | pending | pending | pending | pending |
+| 2. Atomic task and bank persistence | complete | `54999ef` | `e92db97` | 7 focused; 37 task/bank regressions; lint; diff-check | spec compliant; quality approved after one test-evidence round |
 | 3. Pure preview composition | pending | pending | pending | pending | pending |
 | 4. Shared import modal | pending | pending | pending | pending | pending |
 | 5. Existing-task entry points | pending | pending | pending | pending | pending |
