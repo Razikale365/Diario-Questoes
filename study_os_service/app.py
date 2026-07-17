@@ -52,6 +52,11 @@ from study_os_service.api.sprint_calendar import (
     calendar_api_error_handler,
     router as sprint_calendar_router,
 )
+from study_os_service.api.task_executions import (
+    TaskExecutionApiError,
+    task_execution_api_error_handler,
+    router as task_executions_router,
+)
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
 from study_os_service.db.migrations import MigrationRunner
@@ -92,6 +97,7 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.add_exception_handler(CutoverApiError, cutover_api_error_handler)
     app.add_exception_handler(SprintApiError, sprint_api_error_handler)
     app.add_exception_handler(CalendarApiError, calendar_api_error_handler)
+    app.add_exception_handler(TaskExecutionApiError, task_execution_api_error_handler)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(inventory_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
@@ -103,4 +109,5 @@ def create_app(settings: StudyOsSettings | None = None) -> FastAPI:
     app.include_router(cutover_router, prefix="/api/v1")
     app.include_router(sprints_router, prefix="/api/v1")
     app.include_router(sprint_calendar_router, prefix="/api/v1")
+    app.include_router(task_executions_router, prefix="/api/v1")
     return app

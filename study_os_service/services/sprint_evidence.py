@@ -12,6 +12,8 @@ from study_os_service.domain.sprint import ExamSubjectProfile
 from study_os_service.domain.sprint_evidence import SprintPerformanceObservation
 from study_os_service.repositories.sprint_evidence import SprintEvidenceRepository
 from study_os_service.repositories.sprint import SprintRepository
+from study_os_service.domain.task_execution import TaskExecution
+from study_os_service.domain.sprint import SourcePlanTask
 from study_os_service.services.sprint import (
     SprintProfileService,
     SprintTargetNotFoundError,
@@ -554,6 +556,90 @@ class SprintEvidenceService:
             duplicate_count=0,
             conflict_count=0,
             report=report,
+        )
+        return saved
+
+    def append_task_execution_in_transaction(
+        self, execution: TaskExecution, source_task: SourcePlanTask
+    ) -> SprintPerformanceObservation | None:
+        """Persist exactly one evidence observation per immutable execution."""
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active evidence transaction")
+        if execution.questions_total == 0:
+            return None
+        source_record_id = f"task-execution:{execution.id}"
+        existing = self.repository.find_revision(
+            execution.target_slug, "task_execution", source_record_id, "v1"
+        )
+        if existing is not None:
+            return existing
+        measurement_type = (
+            "sectional_mock" if source_task.task_kind == "simulation"
+            else "error_review" if source_task.task_kind == "review"
+            else "sprint_action"
+        )
+        provisional = SprintPerformanceObservation(
+            id=None,
+            target_slug=execution.target_slug,
+            batch_id=source_record_id,
+            subject_profile_id=None,
+            subject_key=source_task.subject_key,
+            discipline=source_task.discipline,
+            topic_hint=source_task.topic_hint,
+            observed_on=execution.performed_on,
+            origin="task_execution",
+            source_record_id=source_record_id,
+            source_revision="v1",
+            source_updated_at=execution.recorded_at,
+            measurement_type=measurement_type,
+            exam_board="FCC",
+            correct_count=execution.correct_count,
+            wrong_count=execution.wrong_count,
+            doubt_count=execution.doubt_count,
+            percentage_bp=execution.performance_bp,
+            transfer_scope="content",
+            transferability_bp=(0 if source_task.task_kind == "simulation" else 10000),
+            content_hash="0" * 64,
+            provenance={
+                "provider": "task_execution",
+                "sourceTaskId": str(source_task.id),
+                "sourceKind": source_task.source_kind,
+            },
+        )
+        observation = replace(
+            provisional,
+            content_hash=_sha256(_observation_hash_document(provisional)),
+        )
+        payload_hash = _batch_hash(
+            observation.target_slug, source_record_id, observation.origin,
+            (observation,),
+        )
+        self.repository.create_batch_in_transaction(
+            batch_id=source_record_id,
+            target_slug=observation.target_slug,
+            origin=observation.origin,
+            payload_hash=payload_hash,
+            item_count=1,
+            imported_at=execution.recorded_at,
+        )
+        saved = self.repository.append_observation_in_transaction(observation)
+        self.repository.finalize_batch_in_transaction(
+            batch_id=source_record_id,
+            inserted_count=1,
+            duplicate_count=0,
+            conflict_count=0,
+            report={
+                "batchId": source_record_id,
+                "targetSlug": observation.target_slug,
+                "origin": observation.origin,
+                "dryRun": False,
+                "replayed": False,
+                "insertedCount": 1,
+                "duplicateCount": 0,
+                "conflictCount": 0,
+                "unresolvedCount": int(observation.subject_key is None),
+                "items": [{"sourceRecordId": source_record_id, "outcome": "inserted"}],
+            },
         )
         return saved
 

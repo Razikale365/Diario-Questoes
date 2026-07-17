@@ -144,6 +144,20 @@ def test_exact_calendar_assignment_materializes_and_completion_is_global(
         source_status = stored.execute(
             "SELECT status FROM source_plan_tasks WHERE id=?", (source_id,)
         ).fetchone()[0]
+        execution = stored.execute(
+            """
+            SELECT id, outcome, performed_on, task_minutes, questions_total
+            FROM task_executions WHERE sprint_action_id=?
+            """,
+            (action["id"],),
+        ).fetchone()
+        execution_evidence = stored.execute(
+            """
+            SELECT observed_on, source_record_id
+            FROM sprint_performance_observations
+            WHERE origin='task_execution'
+            """
+        ).fetchone()
         head = http.get(
             "/api/v1/sprints/calendar",
             params={"targetSlug": "sefaz_ce", "startDate": "2026-07-14"},
@@ -189,6 +203,11 @@ def test_exact_calendar_assignment_materializes_and_completion_is_global(
     assert item_after["completed_at"] is not None
     assert item_after["version"] == item_before["version"] + 1
     assert source_status == "completed"
+    assert tuple(execution)[1:] == ("completed", "2026-07-14", 55, 10)
+    assert tuple(execution_evidence) == (
+        "2026-07-14",
+        f"task-execution:{execution['id']}",
+    )
     assert visible["state"] == "completed"
     assert visible["completedAt"] == item_after["completed_at"]
     assert reflow_item["state"] == "completed"

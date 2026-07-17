@@ -379,13 +379,20 @@ class SourcePlanService:
         existing_is_ls_history = (
             existing.provenance.get("origin") == "ls-visible-history"
         )
-        if local_sync and existing_is_ls_history:
+        terminal_execution = existing.provenance.get("lastOutcome") in {
+            "completed", "failed", "skipped"
+        }
+        if terminal_execution:
+            task["status"] = existing.status
+            task["spent_minutes"] = existing.spent_minutes
+            task["performance_bp"] = existing.performance_bp
+        elif local_sync and existing_is_ls_history:
             task["status"] = existing.status
             task["performance_bp"] = existing.performance_bp
         elif task["performance_bp"] is None:
             task["performance_bp"] = existing.performance_bp
 
-        if not incoming_is_ls_history:
+        if not incoming_is_ls_history and not terminal_execution:
             task["spent_minutes"] = max(
                 existing.spent_minutes,
                 task["spent_minutes"],

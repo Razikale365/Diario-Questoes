@@ -685,7 +685,6 @@ class SprintCalendarRepository:
                 version=version+1,
                 updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
             WHERE source_plan_task_id=? AND kind='source_task'
-              AND state NOT IN ('ignored','archived')
             """,
             (_canonical_json(result), stored_at, source_task_id),
         )
@@ -724,5 +723,50 @@ class SprintCalendarRepository:
             SELECT * FROM sprint_calendar_items
             WHERE source_plan_task_id=?
             """,
+            (source_task_id,),
+        ).fetchone()
+
+    def ensure_source_item_in_transaction(self, source_task: object) -> sqlite3.Row:
+        self._require_transaction()
+        self.connection.execute(
+            """
+            INSERT OR IGNORE INTO sprint_calendar_items (
+              target_slug, item_key, origin, kind, source_plan_task_id,
+              subject_profile_id, title, expected_meta_number, state
+            ) VALUES (?, ?, 'source', 'source_task', ?, NULL, ?, ?, 'pending')
+            """,
+            (
+                source_task.target_slug,
+                f"source-task:{source_task.id}",
+                source_task.id,
+                source_task.description,
+                source_task.meta_number,
+            ),
+        )
+        row = self.connection.execute(
+            "SELECT * FROM sprint_calendar_items WHERE source_plan_task_id=?",
+            (source_task.id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("source calendar item was not visible")
+        return row
+
+    def project_execution_for_source_in_transaction(
+        self, source_task_id: int, *, execution: object
+    ) -> sqlite3.Row | None:
+        """Project a canonical execution to the one calendar item for its source."""
+        self._require_transaction()
+        outcome = getattr(execution, "outcome")
+        if outcome == "completed":
+            return self.complete_item_for_source_in_transaction(
+                source_task_id, result=execution,
+                completed_at=getattr(execution, "recorded_at"),
+            )
+        if outcome == "failed":
+            return self.fail_item_for_source_in_transaction(
+                source_task_id, result=execution
+            )
+        return self.connection.execute(
+            "SELECT * FROM sprint_calendar_items WHERE source_plan_task_id=?",
             (source_task_id,),
         ).fetchone()

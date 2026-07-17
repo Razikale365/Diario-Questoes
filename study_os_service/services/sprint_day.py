@@ -407,6 +407,60 @@ class SprintDayService:
                 )
             return json.loads(receipt["response_json"]) | {"replayed": True}
 
+        # Terminal source-backed action results are canonical task executions.
+        # Decision-only edits retain the historical sprint-day mutation path.
+        if (
+            action["source_plan_task_id"] is not None
+            and payload.get("decision") == "accepted"
+            and payload.get("state") in {"completed", "failed", "skipped"}
+        ):
+            values, refs, expected_version = self._prepare_action_result(payload)
+            from study_os_service.services.task_execution import TaskExecutionService
+
+            execution_payload = {
+                "outcome": values["state"],
+                "performedOn": payload.get("performedOn", action["plan_date"]),
+                "taskMinutes": payload.get(
+                    "taskMinutes",
+                    values["actual_minutes"] if values["actual_minutes"] is not None else 0,
+                ),
+                "exerciseMinutes": payload.get("exerciseMinutes", 0),
+                "questionsTotal": payload.get("questionsTotal", values["questions_done"]),
+                "correctCount": payload.get("correctCount", values["correct_count"]),
+                "wrongCount": payload.get("wrongCount", values["wrong_count"]),
+                "doubtCount": payload.get("doubtCount", values["doubt_count"]),
+                "energyAfter": payload.get("energyAfter", values["energy_after"]),
+                "notes": payload.get("notes", ""),
+            }
+            recorded = TaskExecutionService(self.connection).record(
+                action["source_plan_task_id"],
+                execution_payload,
+                idempotency_key=f"legacy-action:{action_id}:{key}",
+                sprint_action_id=action_id,
+                expected_version=expected_version,
+                append_legacy_action_evidence=True,
+                question_refs=refs,
+            )
+            saved = self.repository.get_action(action_id)
+            if saved is None:
+                raise RuntimeError("reconciled sprint action disappeared")
+            response = self._action_document(saved) | {"replayed": recorded["replayed"]}
+            self.connection.execute("BEGIN IMMEDIATE")
+            try:
+                self.repository.save_receipt(
+                    idempotency_key=receipt_key,
+                    mutation_kind="sprint_action_update",
+                    target_slug=saved["target_slug"],
+                    entity_ref=str(action_id),
+                    payload_hash=payload_hash,
+                    response=response,
+                )
+                self.connection.commit()
+            except Exception:
+                self.connection.rollback()
+                raise
+            return response
+
         values, refs, expected_version = self._prepare_action_result(payload)
         self.connection.execute("BEGIN IMMEDIATE")
         try:

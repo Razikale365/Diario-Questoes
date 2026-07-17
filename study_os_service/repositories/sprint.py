@@ -677,6 +677,120 @@ class SprintRepository:
             raise RuntimeError("completed source plan task disappeared")
         return _source_task(row)
 
+    def get_source_task(self, source_task_id: int) -> SourcePlanTask | None:
+        row = self.connection.execute(
+            "SELECT * FROM source_plan_tasks WHERE id=?", (source_task_id,)
+        ).fetchone()
+        return _source_task(row) if row is not None else None
+
+    def update_source_task_result_in_transaction(
+        self, source_task_id: int, *, execution: Any
+    ) -> SourcePlanTask:
+        """Apply the immutable execution facts without replacing source metadata."""
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active sprint transaction")
+        current = self.get_source_task(source_task_id)
+        if current is None:
+            raise KeyError(source_task_id)
+        status = {
+            "started": "started",
+            "completed": "completed",
+            # A failed or skipped occurrence remains eligible for later recovery.
+            "failed": current.status,
+            "skipped": current.status,
+        }[execution.outcome]
+        provenance = dict(current.provenance) | {
+            "observedOn": execution.performed_on.isoformat(),
+            "lastOutcome": execution.outcome,
+            "questionsTotal": execution.questions_total,
+            "correctCount": execution.correct_count,
+            "wrongCount": execution.wrong_count,
+            "doubtCount": execution.doubt_count,
+            "exerciseMinutes": execution.exercise_minutes,
+        }
+        if execution.outcome == "completed":
+            provenance["completedAt"] = execution.recorded_at.isoformat(
+                timespec="microseconds"
+            ).replace("+00:00", "Z")
+        self.connection.execute(
+            """
+            UPDATE source_plan_tasks
+            SET status=?, spent_minutes=?, performance_bp=?, provenance_json=?,
+                version=version+1,
+                updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+            WHERE id=?
+            """,
+            (
+                status,
+                execution.task_minutes,
+                execution.performance_bp,
+                json.dumps(provenance, ensure_ascii=True, sort_keys=True),
+                source_task_id,
+            ),
+        )
+        saved = self.get_source_task(source_task_id)
+        if saved is None:
+            raise RuntimeError("updated source plan task disappeared")
+        return saved
+
+    def reconcile_actions_for_source_in_transaction(
+        self,
+        source_task_id: int,
+        *,
+        execution: Any,
+        expected_action_id: int | None = None,
+        expected_version: int | None = None,
+    ) -> sqlite3.Row | None:
+        if not self.connection.in_transaction:
+            raise RuntimeError("caller must own an active sprint transaction")
+        if expected_action_id is not None and expected_version is not None:
+            action = self.get_action(expected_action_id)
+            if action is None or action["source_plan_task_id"] != source_task_id:
+                raise KeyError(expected_action_id)
+            values = {
+                "decision": "rejected" if execution.outcome == "skipped" else "accepted",
+                "state": execution.outcome,
+                "actual_minutes": execution.task_minutes,
+                "questions_done": execution.questions_total,
+                "correct_count": execution.correct_count,
+                "wrong_count": execution.wrong_count,
+                "doubt_count": execution.doubt_count,
+                "energy_after": execution.energy_after,
+            }
+            primary = self.update_action(
+                expected_action_id, expected_version=expected_version, values=values
+            )
+        else:
+            primary = None
+        state = execution.outcome
+        decision = "rejected" if state == "skipped" else "accepted"
+        self.connection.execute(
+            """
+            UPDATE sprint_actions
+            SET decision=?, state=?, actual_minutes=?, questions_done=?,
+                correct_count=?, wrong_count=?, doubt_count=?, energy_after=?,
+                version=version+1,
+                updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+            WHERE source_plan_task_id=? AND state IN ('pending','active')
+            """,
+            (
+                decision, state, execution.task_minutes, execution.questions_total,
+                execution.correct_count, execution.wrong_count, execution.doubt_count,
+                execution.energy_after, source_task_id,
+            ),
+        )
+        if primary is not None:
+            return primary
+        row = self.connection.execute(
+            """
+            SELECT id FROM sprint_actions WHERE source_plan_task_id=?
+            ORDER BY CASE WHEN state IN ('pending','active') THEN 0 ELSE 1 END, id
+            LIMIT 1
+            """,
+            (source_task_id,),
+        ).fetchone()
+        return self.get_action(row["id"]) if row is not None else None
+
     def resolved_source_task_ids_for_day(
         self, target_slug: str, plan_date: date
     ) -> set[int]:

@@ -53,6 +53,7 @@ CALENDAR_STATE_TABLES = (
     "sprint_calendar_materializations",
     "sprint_calendar_day_overrides",
     "sprint_calendar_item_overrides",
+    "task_executions",
 )
 
 
@@ -146,7 +147,7 @@ def _assert_valid_historical_database(path: Path) -> None:
         assert connection.execute(
             """
             SELECT COUNT(*) FROM sqlite_master
-            WHERE type='table' AND name='sprint_calendar_runs'
+                WHERE type='table' AND name='task_executions'
             """
         ).fetchone()[0] == 0
     finally:
@@ -489,7 +490,7 @@ def _assert_calendar_state(
     ]
 
 
-def test_cli_backup_snapshots_v11_without_migrating_source(tmp_path: Path):
+def test_cli_backup_snapshots_v12_without_migrating_source(tmp_path: Path):
     data_dir = tmp_path / "backup-source"
     database_path = data_dir / "study-os.sqlite3"
     _install_migration_prefix(database_path, HISTORICAL_SCHEMA_VERSION)
@@ -504,10 +505,10 @@ def test_cli_backup_snapshots_v11_without_migrating_source(tmp_path: Path):
     _assert_valid_historical_database(Path(payload["createdPath"]))
 
 
-def test_cli_export_round_trips_v11_without_migrating_source(tmp_path: Path):
+def test_cli_export_round_trips_v12_without_migrating_source(tmp_path: Path):
     data_dir = tmp_path / "export-source"
     database_path = data_dir / "study-os.sqlite3"
-    archive_path = tmp_path / "exports" / "pre-calendar-v11.zip"
+    archive_path = tmp_path / "exports" / "pre-ledger-v12.zip"
     restored_path = tmp_path / "restored" / "study-os.sqlite3"
     _install_migration_prefix(database_path, HISTORICAL_SCHEMA_VERSION)
 

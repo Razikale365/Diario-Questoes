@@ -74,7 +74,7 @@ def seed_draft_run(connection: sqlite3.Connection) -> int:
     ).lastrowid
 
 
-def test_v12_adds_calendar_tables_without_changing_v11_state(tmp_path: Path):
+def test_current_migrations_preserve_v11_state_while_adding_calendar_and_ledger(tmp_path: Path):
     connection = connect_database(tmp_path / "study.sqlite3")
     try:
         install_version_eleven(connection)
@@ -85,7 +85,7 @@ def test_v12_adds_calendar_tables_without_changing_v11_state(tmp_path: Path):
             ).fetchall()
         )
 
-        assert MigrationRunner(connection).migrate() == 12
+        assert MigrationRunner(connection).migrate() == 13
         after = tuple(
             connection.execute(
                 "SELECT target_slug, display_name, version FROM exam_targets ORDER BY target_slug"

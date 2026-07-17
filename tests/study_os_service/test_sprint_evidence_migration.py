@@ -168,7 +168,7 @@ def test_version_ten_upgrades_additively_and_preserves_source_plan_state(tmp_pat
             ).fetchone()
         )
 
-        assert MigrationRunner(connection).migrate() == 12
+        assert MigrationRunner(connection).migrate() == 13
         tables = {
             row["name"]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -232,8 +232,8 @@ def test_version_eleven_updates_only_untouched_sefaz_default_goals(tmp_path: Pat
         connection.close()
 
 
-def test_current_schema_version_is_eleven():
-    assert CURRENT_SCHEMA_VERSION == 12
+def test_current_schema_version_includes_task_execution_ledger():
+    assert CURRENT_SCHEMA_VERSION == 13
 
 
 @pytest.mark.parametrize(

@@ -573,3 +573,137 @@ def test_authoritative_ls_history_corrects_stale_local_minutes(tmp_path: Path):
     assert task["scheduledDate"] == "2026-07-14"
     assert task["status"] == "completed"
     assert task["performanceBp"] == 9300
+
+
+def test_terminal_execution_survives_newer_pending_reimport_and_never_requeues(
+    tmp_path: Path,
+):
+    initial = {
+        "targetSlug": "sefaz_ce",
+        "sourceKind": "ls",
+        "planLabel": "Meta execução monotônica",
+        "metaNumber": 47,
+        "cycle": {
+            "releasedAt": "2026-07-11T11:00:00Z",
+            "startsOn": "2026-07-12",
+            "endsOn": "2026-07-15",
+        },
+        "tasks": [
+            {
+                "externalTaskId": "execution-reimport-task",
+                "scheduledDate": "2026-07-14",
+                "sourceOrder": 1,
+                "discipline": "Legis. Tribut. Estadual (ICMS)",
+                "topicHint": "ICMS Ceará",
+                "taskKind": "questions",
+                "description": "Descrição original",
+                "materialHint": "TEC original",
+                "estimatedMinutes": 60,
+                "status": "pending",
+                "provenance": {
+                    "origin": "ls-visible-history",
+                    "browserUpdatedAt": "2026-07-15T20:00:00Z",
+                },
+            }
+        ],
+    }
+    pending_reimport = initial | {
+        "cycle": None,
+        "tasks": [
+            initial["tasks"][0]
+            | {
+                "description": "Descrição atualizada pelo navegador",
+                "materialHint": "TEC atualizado",
+                "spentMinutes": 0,
+                "status": "pending",
+                "performanceBp": None,
+                "provenance": {
+                    "origin": "planner-local-sync",
+                    "browserUpdatedAt": "2026-07-17T12:00:00Z",
+                },
+            }
+        ],
+    }
+    pending_reimport.pop("cycle")
+
+    with _client(tmp_path) as client:
+        _seed_sefaz(client)
+        assert client.get(
+            "/api/v1/sprints/config?targetSlug=sefaz_ce"
+        ).status_code == 200
+        imported = client.post(
+            "/api/v1/source-plans/import",
+            headers={"Idempotency-Key": "execution-reimport-initial"},
+            json=initial,
+        )
+        assert imported.status_code == 201, imported.text
+        source_id = client.get(
+            "/api/v1/source-plans/tasks?targetSlug=sefaz_ce"
+        ).json()["items"][0]["id"]
+        executed = client.post(
+            f"/api/v1/source-plans/tasks/{source_id}/executions",
+            headers={"Idempotency-Key": "execution-before-reimport"},
+            json={
+                "outcome": "completed",
+                "performedOn": "2026-07-16",
+                "taskMinutes": 60,
+                "exerciseMinutes": 35,
+                "questionsTotal": 20,
+                "correctCount": 16,
+                "wrongCount": 4,
+                "doubtCount": 2,
+                "energyAfter": 3,
+                "notes": "Execução canônica",
+            },
+        )
+        reimported = client.post(
+            "/api/v1/source-plans/import",
+            headers={"Idempotency-Key": "execution-reimport-newer-browser"},
+            json=pending_reimport,
+        )
+        task = client.get(
+            "/api/v1/source-plans/tasks?targetSlug=sefaz_ce"
+        ).json()["items"][0]
+        preview = client.post(
+            "/api/v1/sprints/calendar/preview",
+            headers={"Idempotency-Key": "execution-reimport-preview"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "startDate": "2026-07-16",
+                "endDate": "2026-07-20",
+                "expectedRunId": None,
+            },
+        )
+        day = client.post(
+            "/api/v1/sprints/generate-day",
+            headers={"Idempotency-Key": "execution-reimport-day"},
+            json={
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-16",
+                "energyLevel": 3,
+            },
+        )
+
+    assert executed.status_code == 201, executed.text
+    assert reimported.status_code == 201, reimported.text
+    assert task["description"] == "Descrição atualizada pelo navegador"
+    assert task["materialHint"] == "TEC atualizado"
+    assert task["status"] == "completed"
+    assert task["spentMinutes"] == 60
+    assert task["performanceBp"] == 8000
+    assert task["provenance"]["lastOutcome"] == "completed"
+    assert task["provenance"]["observedOn"] == "2026-07-16"
+    assert task["provenance"]["browserUpdatedAt"] == "2026-07-17T12:00:00Z"
+    assert preview.status_code == 201, preview.text
+    preview_items = {
+        row["id"]: row for row in preview.json()["items"]
+    }
+    assert not any(
+        preview_items[row["itemId"]]["sourcePlanTaskId"] == source_id
+        and preview_items[row["itemId"]]["state"] in {"pending", "active", "failed"}
+        for row in preview.json()["assignments"]
+    )
+    assert day.status_code == 201, day.text
+    assert not any(
+        row["sourcePlanTaskId"] == source_id for row in day.json()["actions"]
+    )
