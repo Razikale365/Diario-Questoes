@@ -187,7 +187,7 @@ Plan: `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
 | 2. Atomic task and bank persistence | complete | `54999ef` | `e92db97` | 7 focused; 37 task/bank regressions; lint; diff-check | spec compliant; quality approved after one test-evidence round |
 | 3. Pure preview composition | complete | `105165a` | `1e9ca9d` | 18 feature utility tests; lint; diff-check | spec compliant; quality approved |
 | 4. Shared import modal | complete | `a29756e` | `4806057` | 6 focused; 283 full frontend; lint; build; diff-check | spec compliant; quality approved after stale-parse hardening |
-| 5. Existing-task entry points | pending | pending | pending | pending | pending |
+| 5. Existing-task entry points | complete | `d9d013d` | `6ae7998` | 4 focused; 285 full frontend; lint; build; diff-check | spec compliant; quality approved after explicit history-identity fix |
 | 6. Browser acceptance and final gate | pending | pending | pending | pending | pending |
 
 ## Sprint V2: Evidence and Real Calibration
