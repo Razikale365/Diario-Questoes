@@ -197,7 +197,7 @@ Plan: `docs/superpowers/plans/2026-07-17-planner-task-table-qol.md`
 | Task | Status | Base | Head | Verification | Review |
 | --- | --- | --- | --- | --- | --- |
 | 1. Pure column preferences and stable sort | complete | `dd52aae` | `77ccff2` | 7 focused; lint; diff-check | spec compliant; quality approved |
-| 2. Configurable task table UI | pending | pending | pending | pending | pending |
+| 2. Configurable task table UI | complete | `0caef04` | `cc08d21` | 9 focused; 294 full frontend; lint; build; diff-check | spec compliant; quality approved after storage-resilience fix |
 
 ## Sprint V2: Evidence and Real Calibration
 
