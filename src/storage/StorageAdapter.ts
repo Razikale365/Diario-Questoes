@@ -1,4 +1,5 @@
 import { StudyTask } from '../types';
+import { STUDY_TASKS_STORAGE_KEY } from '../utils/taskQuestionImportStorage';
 
 export interface StorageAdapter {
   readTasks(): StudyTask[];
@@ -10,7 +11,7 @@ export interface StorageAdapter {
 export class LocalStorageAdapter implements StorageAdapter {
   readTasks(): StudyTask[] {
     try {
-      const saved = localStorage.getItem('ls_tasks_v2');
+      const saved = localStorage.getItem(STUDY_TASKS_STORAGE_KEY);
       return saved ? (JSON.parse(saved) as StudyTask[]) : [];
     } catch {
       return [];
@@ -19,7 +20,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   writeTasks(tasks: StudyTask[]): void {
     try {
-      localStorage.setItem('ls_tasks_v2', JSON.stringify(tasks));
+      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(tasks));
     } catch (e) {
       console.error('[LocalStorageAdapter] Failed to save tasks', e);
     }

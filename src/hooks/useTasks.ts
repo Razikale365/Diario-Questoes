@@ -1,8 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { StudyTask, ActivityBlock, Question } from '../types';
+import { StudyTask, ActivityBlock, Question, QuestionBankItem } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
 import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
-import { syncStoredQuestionBankContent, syncStoredQuestionBankProgress } from '../utils/questionBank';
+import {
+  QUESTION_BANK_UPDATED_EVENT,
+  syncStoredQuestionBankContent,
+  syncStoredQuestionBankProgress,
+} from '../utils/questionBank';
+import {
+  persistTaskQuestionImportSnapshot,
+  STUDY_TASKS_STORAGE_KEY,
+} from '../utils/taskQuestionImportStorage';
 import {
   applyQuestionUpdate,
   QuestionDraft,
@@ -15,7 +23,7 @@ const now = () => new Date().toISOString();
 export const useTasks = () => {
   const [tasks, setTasks] = useState<StudyTask[]>(() => {
     try {
-      const saved = localStorage.getItem('ls_tasks_v2');
+      const saved = localStorage.getItem(STUDY_TASKS_STORAGE_KEY);
       return saved ? (JSON.parse(saved) as StudyTask[]) : [];
     } catch {
       console.error('[Diário LS] Failed to load tasks from localStorage');
@@ -33,7 +41,7 @@ export const useTasks = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('ls_tasks_v2', JSON.stringify(tasks));
+      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(tasks));
     } catch (e) {
       console.error('[Diário LS] Failed to save tasks', e);
     }
@@ -55,6 +63,33 @@ export const useTasks = () => {
 
   const addTask = (task: StudyTask) => {
     setTasks(prev => [...prev, { ...normalizeTaskBlocksLayout(task), updatedAt: now() }]);
+  };
+
+  const commitTaskQuestionImport = (
+    nextTask: StudyTask,
+    nextQuestionBank: QuestionBankItem[],
+  ): { ok: true } | { ok: false; message: string } => {
+    if (!tasks.some((task) => task.id === nextTask.id)) {
+      return { ok: false, message: 'Tarefa não encontrada.' };
+    }
+
+    const nextTasks = tasks.map((task) => task.id === nextTask.id ? nextTask : task);
+    const persisted = persistTaskQuestionImportSnapshot({
+      storage: localStorage,
+      tasks: nextTasks,
+      questionBank: nextQuestionBank,
+    });
+    if (!persisted.ok) {
+      console.error('[Diário LS] Failed to commit PDF question import', persisted.error);
+      return {
+        ok: false,
+        message: 'Não foi possível salvar a importação. Os dados anteriores foram restaurados.',
+      };
+    }
+
+    setTasks(nextTasks);
+    window.dispatchEvent(new CustomEvent(QUESTION_BANK_UPDATED_EVENT));
+    return { ok: true };
   };
 
   const updateTask = (taskId: string, updates: Partial<StudyTask>) => {
@@ -537,6 +572,7 @@ export const useTasks = () => {
     inProgressTasks,
     pauseTask,
     addTask,
+    commitTaskQuestionImport,
     updateTask,
     deleteTask,
     updateQuestion,
