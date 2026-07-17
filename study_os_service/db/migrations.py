@@ -1753,6 +1753,45 @@ CREATE TABLE planner_blocks (
             """,
         ),
     ),
+    (
+        13,
+        (
+            """
+            CREATE TABLE task_executions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idempotency_key TEXT NOT NULL UNIQUE CHECK (length(trim(idempotency_key)) > 0),
+              request_hash TEXT NOT NULL CHECK (length(request_hash)=64),
+              target_slug TEXT NOT NULL REFERENCES exam_targets(target_slug) ON DELETE RESTRICT,
+              source_plan_task_id INTEGER NOT NULL,
+              sprint_action_id INTEGER,
+              outcome TEXT NOT NULL CHECK (outcome IN ('started','completed','failed','skipped')),
+              performed_on TEXT NOT NULL CHECK (length(performed_on)=10 AND date(performed_on)=performed_on),
+              task_minutes INTEGER NOT NULL CHECK (task_minutes BETWEEN 0 AND 720),
+              exercise_minutes INTEGER NOT NULL CHECK (exercise_minutes BETWEEN 0 AND task_minutes),
+              questions_total INTEGER NOT NULL CHECK (questions_total BETWEEN 0 AND 10000),
+              correct_count INTEGER NOT NULL CHECK (correct_count BETWEEN 0 AND questions_total),
+              wrong_count INTEGER NOT NULL CHECK (wrong_count BETWEEN 0 AND questions_total),
+              doubt_count INTEGER NOT NULL CHECK (doubt_count BETWEEN 0 AND questions_total),
+              performance_bp INTEGER CHECK (performance_bp IS NULL OR performance_bp BETWEEN 0 AND 10000),
+              energy_after INTEGER CHECK (energy_after IS NULL OR energy_after BETWEEN 1 AND 5),
+              notes TEXT NOT NULL DEFAULT '',
+              recorded_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')),
+              version INTEGER NOT NULL DEFAULT 1 CHECK (version=1),
+              UNIQUE (id, target_slug),
+              CHECK (correct_count + wrong_count <= questions_total),
+              CHECK ((correct_count + wrong_count)=0 OR performance_bp=ROUND(10000.0*correct_count/(correct_count+wrong_count))),
+              FOREIGN KEY (source_plan_task_id, target_slug)
+                REFERENCES source_plan_tasks(id, target_slug) ON DELETE RESTRICT,
+              FOREIGN KEY (sprint_action_id)
+                REFERENCES sprint_actions(id) ON DELETE RESTRICT
+            );
+            """,
+            """
+            CREATE INDEX idx_task_executions_source_date
+              ON task_executions(target_slug, source_plan_task_id, performed_on DESC, id DESC);
+            """,
+        ),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
