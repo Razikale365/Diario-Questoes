@@ -1779,7 +1779,10 @@ CREATE TABLE planner_blocks (
               version INTEGER NOT NULL DEFAULT 1 CHECK (version=1),
               UNIQUE (id, target_slug),
               CHECK (correct_count + wrong_count <= questions_total),
-              CHECK ((correct_count + wrong_count)=0 OR performance_bp=ROUND(10000.0*correct_count/(correct_count+wrong_count))),
+              CHECK (
+                ((correct_count + wrong_count)=0 AND performance_bp IS NULL) OR
+                ((correct_count + wrong_count)>0 AND performance_bp=ROUND(10000.0*correct_count/(correct_count+wrong_count)))
+              ),
               FOREIGN KEY (source_plan_task_id, target_slug)
                 REFERENCES source_plan_tasks(id, target_slug) ON DELETE RESTRICT,
               FOREIGN KEY (sprint_action_id)
@@ -1789,6 +1792,28 @@ CREATE TABLE planner_blocks (
             """
             CREATE INDEX idx_task_executions_source_date
               ON task_executions(target_slug, source_plan_task_id, performed_on DESC, id DESC);
+            """,
+            """
+            CREATE TRIGGER trg_task_executions_sprint_action_target_insert
+            BEFORE INSERT ON task_executions
+            WHEN NEW.sprint_action_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1 FROM sprint_actions
+              WHERE id=NEW.sprint_action_id AND target_slug=NEW.target_slug
+            )
+            BEGIN
+              SELECT RAISE(ABORT, 'task execution sprint action target mismatch');
+            END;
+            """,
+            """
+            CREATE TRIGGER trg_task_executions_sprint_action_target_update
+            BEFORE UPDATE OF sprint_action_id, target_slug ON task_executions
+            WHEN NEW.sprint_action_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1 FROM sprint_actions
+              WHERE id=NEW.sprint_action_id AND target_slug=NEW.target_slug
+            )
+            BEGIN
+              SELECT RAISE(ABORT, 'task execution sprint action target mismatch');
+            END;
             """,
         ),
     ),

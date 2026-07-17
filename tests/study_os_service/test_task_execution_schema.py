@@ -55,17 +55,18 @@ def _install_version_twelve(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
-def _seed_target_and_source_task(connection: sqlite3.Connection) -> int:
+def _seed_target_and_source_task(
+    connection: sqlite3.Connection, target_slug: str = "sefaz_ce"
+) -> int:
     connection.execute(
         """
         INSERT INTO exam_targets (
           target_slug, display_name, institution, role, banca, phase,
           deadline, daily_quota, priority_score, source_urls_json
-        ) VALUES (
-          'sefaz_ce', 'SEFAZ CE', 'SEFAZ CE', 'Auditor Fiscal', 'FCC',
-          'pos_edital', '2026-08-01', 4, 100, '["https://example.test/edital"]'
-        )
-        """
+        ) VALUES (?, ?, ?, 'Auditor Fiscal', 'FCC',
+                  'pos_edital', '2026-08-01', 4, 100, '["https://example.test/edital"]')
+        """,
+        (target_slug, target_slug, target_slug),
     )
     return int(
         connection.execute(
@@ -74,12 +75,36 @@ def _seed_target_and_source_task(connection: sqlite3.Connection) -> int:
               target_slug, source_kind, external_task_id, plan_label,
               source_order, discipline, topic_hint, task_kind, description,
               estimated_minutes, relevance, status
-            ) VALUES (
-              'sefaz_ce', 'ls', 'meta-47-task-1', 'Meta 47', 1,
-              'Legislação Tributária', 'ICMS', 'questions', 'Resolver bateria',
-              60, 10, 'pending'
-            )
+            ) VALUES (?, 'ls', ?, 'Meta 47', 1,
+                      'Legislação Tributária', 'ICMS', 'questions', 'Resolver bateria',
+                      60, 10, 'pending')
+            """,
+            (target_slug, f"{target_slug}-meta-47-task-1"),
+        ).lastrowid
+    )
+
+
+def _seed_sprint_action(
+    connection: sqlite3.Connection, target_slug: str, source_plan_task_id: int
+) -> int:
+    run_id = connection.execute(
+        """
+        INSERT INTO sprint_day_runs (
+          idempotency_key, target_slug, plan_date, days_remaining,
+          ls_budget_minutes, extra_budget_minutes, algorithm_version, input_hash, status
+        ) VALUES (?, ?, '2026-07-16', 16, 240, 0, 'sprint-v1', 'input-hash', 'generated')
+        """,
+        (f"{target_slug}-sprint-run", target_slug),
+    ).lastrowid
+    return int(
+        connection.execute(
             """
+            INSERT INTO sprint_actions (
+              run_id, target_slug, position, action_kind, recommendation,
+              source_plan_task_id, title, duration_minutes
+            ) VALUES (?, ?, 1, 'ls_execute', 'execute', ?, 'Resolver bateria', 60)
+            """,
+            (run_id, target_slug, source_plan_task_id),
         ).lastrowid
     )
 
@@ -220,6 +245,53 @@ def test_execution_ledger_schema_rejects_answer_counts_above_total(tmp_path: Pat
         connection.close()
 
 
+def test_execution_ledger_schema_requires_null_performance_without_answers(tmp_path: Path):
+    connection = connect_database(tmp_path / "study.sqlite3")
+    try:
+        MigrationRunner(connection).migrate()
+        _seed_target_and_source_task(connection)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_execution(
+                connection,
+                questions_total=0,
+                correct_count=0,
+                wrong_count=0,
+                doubt_count=0,
+                performance_bp=0,
+            )
+        _insert_execution(
+            connection,
+            questions_total=0,
+            correct_count=0,
+            wrong_count=0,
+            doubt_count=0,
+            performance_bp=None,
+        )
+    finally:
+        connection.close()
+
+
+def test_execution_ledger_schema_rejects_sprint_action_from_other_target(tmp_path: Path):
+    connection = connect_database(tmp_path / "study.sqlite3")
+    try:
+        MigrationRunner(connection).migrate()
+        _seed_target_and_source_task(connection, "sefaz_ce")
+        other_source_id = _seed_target_and_source_task(connection, "other_target")
+        other_action_id = _seed_sprint_action(connection, "other_target", other_source_id)
+
+        with pytest.raises(sqlite3.IntegrityError, match="target mismatch"):
+            _insert_execution(connection, sprint_action_id=other_action_id)
+
+        _insert_execution(connection, idempotency_key="execution-without-action")
+        with pytest.raises(sqlite3.IntegrityError, match="target mismatch"):
+            connection.execute(
+                "UPDATE task_executions SET sprint_action_id=? WHERE id=1",
+                (other_action_id,),
+            )
+    finally:
+        connection.close()
+
+
 def test_counts_derive_performance_without_inventing_empty_evidence():
     assert valid_input().performance_bp == 8000
     assert valid_input(correct_count=0, wrong_count=20).performance_bp == 0
@@ -232,6 +304,14 @@ def test_counts_derive_performance_without_inventing_empty_evidence():
         ).performance_bp
         is None
     )
+    with pytest.raises(ValueError, match="empty answers"):
+        valid_input(
+            questions_total=0,
+            correct_count=0,
+            wrong_count=0,
+            doubt_count=0,
+            supplied_performance_bp=0,
+        )
 
 
 def test_input_accepts_backdated_result_and_rejects_future_date():

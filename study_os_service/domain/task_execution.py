@@ -107,6 +107,8 @@ class TaskExecutionInput:
             else _basis_points(self.supplied_performance_bp, "supplied performance")
         )
         expected = _derived_performance_bp(correct_count, wrong_count)
+        if supplied is not None and expected is None:
+            raise ValueError("supplied performance is not allowed with empty answers")
         if supplied is not None and expected is not None and supplied != expected:
             raise ValueError("supplied performance does not match aggregate counts")
         object.__setattr__(self, "supplied_performance_bp", supplied)
