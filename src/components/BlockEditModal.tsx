@@ -1,28 +1,33 @@
 import React from 'react';
-import { Edit2, Plus, X, Save } from 'lucide-react';
+import { Edit2, Plus, X, Save, FileUp } from 'lucide-react';
 import { ActivityBlock } from '../types';
 
+export interface BlockEditModalState {
+  isOpen: boolean;
+  taskId: string;
+  id: string;
+  title: string;
+  lesson: string;
+  pages: string;
+  bank: string;
+  questionsText: string;
+  layout: { columns: number; rows: number; type: 'grid' | 'columns' };
+}
+
 interface BlockEditModalProps {
-  modalState: {
-    isOpen: boolean;
-    id: string;
-    title: string;
-    lesson: string;
-    pages: string;
-    bank: string;
-    questionsText: string;
-    layout: { columns: number; rows: number; type: 'grid' | 'columns' };
-  };
+  modalState: BlockEditModalState;
   onClose: () => void;
   onSave: () => void;
-  setModalState: (state: any) => void;
+  setModalState: (state: BlockEditModalState) => void;
+  onImportPdf?: (state: BlockEditModalState) => void;
 }
 
 export const BlockEditModal: React.FC<BlockEditModalProps> = ({
   modalState,
   onClose,
   onSave,
-  setModalState
+  setModalState,
+  onImportPdf,
 }) => {
   if (!modalState.isOpen) return null;
 
@@ -169,6 +174,14 @@ export const BlockEditModal: React.FC<BlockEditModalProps> = ({
         <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-[#404040]">
           <button onClick={onClose} className="px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
             Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => onImportPdf?.(modalState)}
+            className="border border-[#f59e0b]/40 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
+          >
+            <FileUp className="w-5 h-5" />
+            {modalState.id ? 'Importar questões neste bloco' : 'Importar questões'}
           </button>
           <button 
             onClick={onSave} 

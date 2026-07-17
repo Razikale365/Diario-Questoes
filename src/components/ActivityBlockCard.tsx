@@ -1,11 +1,12 @@
 import React, { memo, useRef, forwardRef, useState, useEffect } from 'react';
-import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare, Star, Plus } from 'lucide-react';
+import { Lock, Unlock, Edit2, Trash2, CheckSquare, Check, X, Flag, Eye, EyeOff, GripVertical, LayoutGrid, Columns, Target, BookOpen, MessageSquare, Star, Plus, FileUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ActivityBlock, Question } from '../types';
 import { useSnapResizer } from '../hooks/useSnapResizer';
 import { QuestionEditorModal } from './QuestionEditorModal';
+import type { TaskQuestionImportDestination } from '../utils/taskQuestionImport';
 import {
   buildAnswerSelectionUpdate,
   QuestionDraft,
@@ -46,6 +47,7 @@ interface ActivityBlockCardProps {
   onToggleGabarito: (blockId: string) => void;
   onToggleSectionLock?: (sectionTitle: string) => void;
   onToggleSectionStats?: (sectionTitle: string) => void;
+  onImportQuestionsFromPdf?: (destination: TaskQuestionImportDestination) => void;
   sectionStats?: PerformanceStats;
 }
 
@@ -106,6 +108,7 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     onRenameSection,
     onToggleSectionLock,
     onToggleSectionStats,
+    onImportQuestionsFromPdf,
     onToggleGabarito,
     globalShowStats,
     sectionStats
@@ -303,6 +306,15 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               >
                 <Edit2 className="w-4 h-4" />
                 Editar Seção
+              </button>
+              <button
+                type="button"
+                onClick={() => onImportQuestionsFromPdf?.({ kind: 'new_block', sectionTitle: block.title })}
+                className="p-2 text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-xl transition-all"
+                title="Importar PDF nesta seção"
+                aria-label="Importar PDF nesta seção"
+              >
+                <FileUp className="w-5 h-5" />
               </button>
               <button 
                 onClick={() => onDeleteBlock(block.id)}
@@ -636,6 +648,15 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               title="Importar Gabarito"
             >
               <CheckSquare className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onImportQuestionsFromPdf?.({ kind: 'existing_block', blockId: block.id })}
+              className="p-1.5 text-gray-600 hover:text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-colors"
+              title="Importar PDF neste bloco"
+              aria-label="Importar PDF neste bloco"
+            >
+              <FileUp className="w-4 h-4" />
             </button>
             <button onClick={() => onEditBlock(block)} className="p-1.5 text-gray-600 hover:text-white hover:bg-white/5 rounded-lg transition-colors" title="Editar bloco"><Edit2 className="w-4 h-4" /></button>
             <button onClick={() => onDeleteBlock(block.id)} className="p-1.5 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Excluir bloco"><Trash2 className="w-4 h-4" /></button>

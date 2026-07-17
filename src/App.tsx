@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight } from 'lucide-react';
+import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight, FileUp } from 'lucide-react';
 
 import { ActivityBlock, StudyTask, Question } from './types';
 import { useTasks } from './hooks/useTasks';
@@ -15,8 +15,9 @@ import { QuestionCardDeck } from './components/QuestionCardDeck';
 import { TaskWorkModeTabs } from './components/TaskWorkModeTabs';
 import { TaskHeader } from './components/TaskHeader';
 import { GabaritoModal } from './components/GabaritoModal';
-import { BlockEditModal } from './components/BlockEditModal';
+import { BlockEditModal, type BlockEditModalState } from './components/BlockEditModal';
 import { SectionEditModal } from './components/SectionEditModal';
+import { TaskQuestionPdfImportModal } from './components/TaskQuestionPdfImportModal';
 import { PasteBackupModal } from './components/PasteBackupModal';
 import { AuthModal, AuthModalMode } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
@@ -36,6 +37,7 @@ import { loadStoredExternalAnswerBatches, persistExternalAnswerBatches } from '.
 import { TaskWorkTab, getDefaultTaskWorkTab, normalizeTaskWorkTabForTask } from './utils/taskWorkModes';
 import { mergeStudyTaskBackup, parseStudyTaskBackup } from './utils/taskBackup';
 import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
+import type { TaskQuestionImportDestination } from './utils/taskQuestionImport';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
 import { SyncState, SyncStatus } from './types/sync';
@@ -74,6 +76,7 @@ function App() {
     inProgressTasks,
     pauseTask,
     addTask,
+    commitTaskQuestionImport,
     updateTask,
     deleteTask,
     updateQuestion,
@@ -229,9 +232,13 @@ function App() {
 
   const [sectionModal, setSectionModal] = useState<{
     isOpen: boolean;
+    mode: 'create' | 'edit';
+    taskId: string;
     title: string;
   }>({
     isOpen: false,
+    mode: 'edit',
+    taskId: '',
     title: ''
   });
 
@@ -256,17 +263,12 @@ function App() {
     blocks: []
   });
 
-  const [blockEditModal, setBlockEditModal] = useState<{
-    isOpen: boolean;
-    id: string;
-    title: string;
-    lesson: string;
-    pages: string;
-    bank: string;
-    questionsText: string;
-    layout: { columns: number; rows: number; type: 'grid' | 'columns' };
-  } | null>(null);
+  const [blockEditModal, setBlockEditModal] = useState<BlockEditModalState | null>(null);
   
+  const [taskPdfImportRequest, setTaskPdfImportRequest] = useState<{
+    taskId: string;
+    destination: TaskQuestionImportDestination;
+  } | null>(null);
   const [gabaritoModal, setGabaritoModal] = useState<string | null>(null);
   const [viewingTaskId, setViewingTaskId] = useState<string | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
@@ -321,11 +323,17 @@ function App() {
     }
   };
 
-  const openEditBlock = (block?: ActivityBlock) => {
+  const openTaskPdfImport = (
+    taskId: string,
+    destination: TaskQuestionImportDestination,
+  ) => setTaskPdfImportRequest({ taskId, destination });
+
+  const openEditBlock = (taskId: string, block?: ActivityBlock) => {
     const defaultLayout = DEFAULT_ACTIVITY_LAYOUT;
     if (block) {
       setBlockEditModal({ 
         isOpen: true, 
+        taskId,
         id: block.id, 
         title: block.title, 
         lesson: block.lesson, 
@@ -336,17 +344,16 @@ function App() {
       });
     } else {
       setBlockEditModal({ 
-        isOpen: true, id: '', title: '', lesson: '', pages: '', bank: '', questionsText: '', layout: defaultLayout 
+        isOpen: true, taskId, id: '', title: '', lesson: '', pages: '', bank: '', questionsText: '', layout: defaultLayout
       });
     }
   };
 
   const saveBlockEdit = () => {
     if (!blockEditModal) return;
-    const targetId = viewingTaskId || activeTaskId;
-    if (!targetId) return;
+    if (!blockEditModal.taskId) return;
     
-    saveBlock(targetId, blockEditModal.id || null, {
+    saveBlock(blockEditModal.taskId, blockEditModal.id || null, {
       title: blockEditModal.title,
       lesson: blockEditModal.lesson,
       pages: blockEditModal.pages,
@@ -367,23 +374,43 @@ function App() {
     }
   };
 
-  const handleEditSection = (title: string) => {
-    setSectionModal({ isOpen: true, title });
+  const handleEditSection = (taskId: string, title: string) => {
+    setSectionModal({ isOpen: true, mode: 'edit', taskId, title });
   };
 
   const handleSaveSectionLayout = (layout: { width: number; rowSpan: number }, newTitle: string) => {
-    if (activeTaskId) {
-      updateSectionBlocksLayout(activeTaskId, sectionModal.title, layout, newTitle);
-      setSectionModal({ isOpen: false, title: '' });
+    if (!sectionModal.taskId || !newTitle.trim()) return;
+    if (sectionModal.mode === 'create') {
+      addSectionHeader(sectionModal.taskId, newTitle.trim());
+      showToast('Seção criada!');
+    } else {
+      updateSectionBlocksLayout(sectionModal.taskId, sectionModal.title, layout, newTitle);
       showToast('Seção atualizada!');
+    }
+    setSectionModal({ isOpen: false, mode: 'edit', taskId: '', title: '' });
+  };
+
+  const handleRenameSection = (taskId: string, oldTitle: string, newTitle: string) => {
+    if (taskId) {
+      updateSectionBlocksLayout(taskId, oldTitle, {}, newTitle);
+      showToast('Seção renomeada!');
     }
   };
 
-  const handleRenameSection = (oldTitle: string, newTitle: string) => {
-    if (activeTaskId) {
-      updateSectionBlocksLayout(activeTaskId, oldTitle, {}, newTitle);
-      showToast('Seção renomeada!');
+  const openBlockImport = (state: BlockEditModalState) => {
+    const task = tasks.find((item) => item.id === state.taskId);
+    if (!task) return;
+    if (state.id) {
+      openTaskPdfImport(state.taskId, { kind: 'existing_block', blockId: state.id });
+    } else {
+      const section = task.blocks.find((block) =>
+        block.isSection && block.title.trim().toLowerCase() === state.lesson.trim().toLowerCase(),
+      );
+      openTaskPdfImport(state.taskId, section
+        ? { kind: 'new_block', sectionTitle: section.title }
+        : { kind: 'new_section', sectionTitle: '' });
     }
+    setBlockEditModal(null);
   };
 
   const exportBackup = () => {
@@ -693,7 +720,7 @@ function App() {
                                   onUpdateQuestion={(blockId, qNumber, updates) => updateQuestion(activeTaskId!, blockId, qNumber, updates)}
                                   onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(activeTaskId!, blockId, draft, editingQuestionNumber)}
                                   onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
-                                  onEditBlock={openEditBlock}
+                                  onEditBlock={(editedBlock) => openEditBlock(activeTask.id, editedBlock)}
                                   onDeleteBlock={handleDeleteBlock}
                                   onImportGabarito={setGabaritoModal}
                                   onToggleLayout={(blockId) => toggleBlockLayout(activeTaskId!, blockId)}
@@ -701,10 +728,11 @@ function App() {
                                   onToggleSectionLock={(title) => toggleSectionLock(activeTaskId!, title)}
                                   onToggleSectionStats={(title) => toggleSectionStats(activeTaskId!, title)}
                                   onUpdateLayout={(blockId, layout) => updateBlockLayout(activeTaskId!, blockId, layout)}
-                                  onEditSection={handleEditSection}
+                                  onEditSection={(title) => handleEditSection(activeTask.id, title)}
                                   onAutoSnap={() => autoSnapBlocks(activeTaskId!)}
-                                  onRenameSection={handleRenameSection}
+                                  onRenameSection={(oldTitle, newTitle) => handleRenameSection(activeTask.id, oldTitle, newTitle)}
                                   onToggleGabarito={(blockId) => toggleBlockGabarito(activeTaskId!, blockId)}
+                                  onImportQuestionsFromPdf={(destination) => openTaskPdfImport(activeTask.id, destination)}
                                 />
                               );
                             })}
@@ -714,20 +742,21 @@ function App() {
                     )}
                   </div>
                   <div className="flex justify-center gap-4 py-8">
-                    <button onClick={() => openEditBlock()} className="flex items-center gap-2 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all border border-dashed border-white/10 hover:border-purple-500/50 font-black uppercase tracking-widest text-xs group">
+                    <button onClick={() => openEditBlock(activeTask.id)} className="flex items-center gap-2 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all border border-dashed border-white/10 hover:border-purple-500/50 font-black uppercase tracking-widest text-xs group">
                       <Plus className="w-5 h-5 group-hover:scale-110 transition-transform text-purple-500" /> Adicionar Bloco
                     </button>
-                    <button 
-                      onClick={() => {
-                        const title = prompt('Título da Seção (ex: Aula 01):');
-                        if (title && activeTaskId) {
-                          addSectionHeader(activeTaskId, title);
-                          showToast('Seção criada!');
-                        }
-                      }} 
+                    <button
+                      onClick={() => setSectionModal({ isOpen: true, mode: 'create', taskId: activeTask.id, title: '' })}
                       className="flex items-center gap-2 px-8 py-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-2xl transition-all border border-dashed border-purple-500/30 hover:border-purple-500 font-black uppercase tracking-widest text-xs group"
                     >
                       <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" /> Criar Seção
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openTaskPdfImport(activeTask.id, { kind: 'new_section', sectionTitle: '' })}
+                      className="flex items-center gap-2 px-8 py-4 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] rounded-2xl transition-all border border-dashed border-[#f59e0b]/30 hover:border-[#f59e0b] font-black uppercase tracking-widest text-xs group"
+                    >
+                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões
                     </button>
                   </div>
                 </div>
@@ -821,18 +850,43 @@ function App() {
                             onUpdateQuestion={(bid, qn, upd) => updateQuestion(viewingTask.id, bid, qn, upd)}
                             onSaveQuestion={(blockId, draft, editingQuestionNumber) => saveQuestion(viewingTask.id, blockId, draft, editingQuestionNumber)}
                             onToggleLock={(bid) => toggleLock(viewingTask.id, bid)}
-                            onEditBlock={openEditBlock}
+                            onEditBlock={(editedBlock) => openEditBlock(viewingTask.id, editedBlock)}
                             onDeleteBlock={handleDeleteBlock}
                             onImportGabarito={setGabaritoModal}
                             onToggleLayout={(bid) => toggleBlockLayout(viewingTask.id, bid)}
                             onToggleStats={(bid) => toggleBlockStats(viewingTask.id, bid)}
+                            onToggleSectionLock={(title) => toggleSectionLock(viewingTask.id, title)}
+                            onToggleSectionStats={(title) => toggleSectionStats(viewingTask.id, title)}
                             onUpdateLayout={(bid, layout) => updateBlockLayout(viewingTask.id, bid, layout)}
+                            onEditSection={(title) => handleEditSection(viewingTask.id, title)}
+                            onAutoSnap={() => autoSnapBlocks(viewingTask.id)}
+                            onRenameSection={(oldTitle, newTitle) => handleRenameSection(viewingTask.id, oldTitle, newTitle)}
                             onToggleGabarito={(bid) => toggleBlockGabarito(viewingTask.id, bid)}
+                            onImportQuestionsFromPdf={(destination) => openTaskPdfImport(viewingTask.id, destination)}
                           />
                         );
                       })}
                     </div>
                   )}
+                  <div className="flex justify-center gap-4 py-8">
+                    <button onClick={() => openEditBlock(viewingTask.id)} className="flex items-center gap-2 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all border border-dashed border-white/10 hover:border-purple-500/50 font-black uppercase tracking-widest text-xs group">
+                      <Plus className="w-5 h-5 group-hover:scale-110 transition-transform text-purple-500" /> Adicionar Bloco
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSectionModal({ isOpen: true, mode: 'create', taskId: viewingTask.id, title: '' })}
+                      className="flex items-center gap-2 px-8 py-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-2xl transition-all border border-dashed border-purple-500/30 hover:border-purple-500 font-black uppercase tracking-widest text-xs group"
+                    >
+                      <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" /> Criar Seção
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openTaskPdfImport(viewingTask.id, { kind: 'new_section', sectionTitle: '' })}
+                      className="flex items-center gap-2 px-8 py-4 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] rounded-2xl transition-all border border-dashed border-[#f59e0b]/30 hover:border-[#f59e0b] font-black uppercase tracking-widest text-xs group"
+                    >
+                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <HistoryList 
@@ -850,13 +904,32 @@ function App() {
       </main>
 
       {/* Modals */}
-      {blockEditModal?.isOpen && <BlockEditModal modalState={blockEditModal} onClose={() => setBlockEditModal(null)} onSave={saveBlockEdit} setModalState={setBlockEditModal} />}
+      {blockEditModal?.isOpen && <BlockEditModal modalState={blockEditModal} onClose={() => setBlockEditModal(null)} onSave={saveBlockEdit} setModalState={setBlockEditModal} onImportPdf={openBlockImport} />}
       
       <SectionEditModal
         isOpen={sectionModal.isOpen}
-        onClose={() => setSectionModal({ ...sectionModal, isOpen: false })}
+        onClose={() => setSectionModal({ isOpen: false, mode: 'edit', taskId: '', title: '' })}
         onSave={handleSaveSectionLayout}
         sectionTitle={sectionModal.title}
+        mode={sectionModal.mode}
+        onImportPdf={(sectionTitle) => {
+          if (!sectionModal.taskId) return;
+          openTaskPdfImport(sectionModal.taskId, { kind: 'new_section', sectionTitle });
+          setSectionModal({ isOpen: false, mode: 'edit', taskId: '', title: '' });
+        }}
+      />
+
+      <TaskQuestionPdfImportModal
+        isOpen={Boolean(taskPdfImportRequest)}
+        task={tasks.find((task) => task.id === taskPdfImportRequest?.taskId) || null}
+        initialDestination={taskPdfImportRequest?.destination || null}
+        onClose={() => setTaskPdfImportRequest(null)}
+        onCommit={commitTaskQuestionImport}
+        onImported={(summary) => {
+          setTaskWorkTab('questoes');
+          const conflicts = summary.contentConflicts + summary.answerKeyConflicts;
+          showToast(`${summary.enriched} enriquecidas; ${summary.appended} adicionadas; ${summary.duplicates} já presentes; ${conflicts} conflito(s).`);
+        }}
       />
 
       {gabaritoModal && (

@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Edit2, Layout, Maximize2, Check, X } from 'lucide-react';
+import { Edit2, Layout, Maximize2, Check, X, FileUp } from 'lucide-react';
 
 interface SectionEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (layout: { width: number; rowSpan: number }, newTitle: string) => void;
   sectionTitle: string;
+  mode: 'create' | 'edit';
+  onImportPdf?: (sectionTitle: string) => void;
 }
 
 export const SectionEditModal: React.FC<SectionEditModalProps> = ({
   isOpen,
   onClose,
   onSave,
-  sectionTitle
+  sectionTitle,
+  mode,
+  onImportPdf,
 }) => {
   const [width, setWidth] = useState(12);
   const [rowSpan, setRowSpan] = useState(1);
@@ -38,10 +42,10 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
             <div>
               <h3 className="text-2xl font-black text-white flex items-center gap-3 uppercase tracking-tight">
                 <Layout className="w-8 h-8 text-purple-500" />
-                Ajustar Seção
+                {mode === 'create' ? 'Criar Seção' : 'Ajustar Seção'}
               </h3>
               <p className="text-gray-400 text-sm mt-1 font-medium">
-                Configurações globais para esta aula
+                {mode === 'create' ? 'Crie uma seção antes de importar ou organizar blocos' : 'Configurações globais para esta aula'}
               </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-gray-500 hover:text-white transition-all">
@@ -52,7 +56,7 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
           <div className="space-y-8">
             {/* Title Editor */}
             <div className="space-y-3">
-              <label className="text-sm font-black text-gray-400 uppercase tracking-widest">Renomear Seção</label>
+              <label className="text-sm font-black text-gray-400 uppercase tracking-widest">{mode === 'create' ? 'Título da Seção' : 'Renomear Seção'}</label>
               <div className="relative group">
                 <Edit2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-purple-500/50 group-focus-within:text-purple-500 transition-colors" />
                 <input
@@ -63,13 +67,12 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
                   className="w-full bg-[#262626] border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white font-bold focus:outline-none focus:border-purple-500/50 transition-all placeholder:text-gray-600"
                 />
               </div>
-              <p className="text-[10px] text-gray-500 italic px-2">
+              {mode === 'edit' && <p className="text-[10px] text-gray-500 italic px-2">
                 * Ao renomear, todos os blocos desta seção também serão atualizados.
-              </p>
+              </p>}
             </div>
 
-            {/* Width Selector */}
-            <div className="space-y-4">
+            {mode === 'edit' && <><div className="space-y-4">
               <div className="flex justify-between items-end">
                 <label className="text-sm font-black text-gray-400 uppercase tracking-widest">Largura dos Blocos</label>
                 <span className="text-2xl font-black text-purple-400">{width} Cols</span>
@@ -91,7 +94,6 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
               </div>
             </div>
 
-            {/* RowSpan Selector */}
             <div className="space-y-4">
               <div className="flex justify-between items-end">
                 <label className="text-sm font-black text-gray-400 uppercase tracking-widest">Altura dos Blocos</label>
@@ -114,7 +116,7 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
                 <span>5</span>
                 <span>6+</span>
               </div>
-            </div>
+            </div></>}
 
             <div className="flex gap-4 pt-4">
               <button
@@ -125,11 +127,21 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
               </button>
               <button
                 onClick={() => onSave({ width, rowSpan }, newTitle)}
-                className="flex-[1.5] px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl font-black shadow-xl shadow-purple-500/20 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+                disabled={!newTitle.trim()}
+                className="flex-[1.5] px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl font-black shadow-xl shadow-purple-500/20 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Check className="w-5 h-5" />
-                SALVAR ALTERAÇÕES
+                {mode === 'create' ? 'CRIAR SEÇÃO' : 'SALVAR ALTERAÇÕES'}
               </button>
+              {mode === 'create' && <button
+                type="button"
+                onClick={() => onImportPdf?.(newTitle.trim())}
+                disabled={!newTitle.trim()}
+                className="flex-[1.5] px-6 py-4 bg-[#f59e0b]/15 hover:bg-[#f59e0b]/25 text-[#fcd34d] rounded-2xl font-black shadow-xl shadow-black/20 flex items-center justify-center gap-2 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileUp className="w-5 h-5" />
+                Criar e importar questões
+              </button>}
             </div>
           </div>
         </div>
