@@ -407,18 +407,33 @@ class SprintDayService:
                 )
             return json.loads(receipt["response_json"]) | {"replayed": True}
 
-        # Terminal source-backed action results are canonical task executions.
-        # Decision-only edits retain the historical sprint-day mutation path.
-        if (
+        # Rich execution fields cannot be silently discarded by the legacy
+        # action path. Source-backed accepted active results map to `started`.
+        rich_execution = bool(
+            {"performedOn", "taskMinutes", "exerciseMinutes", "questionsTotal", "notes"}
+            & set(payload)
+        )
+        terminal_result = (
             action["source_plan_task_id"] is not None
             and payload.get("decision") == "accepted"
             and payload.get("state") in {"completed", "failed", "skipped"}
-        ):
-            values, refs, expected_version = self._prepare_action_result(payload)
+        )
+        if rich_execution or terminal_result:
+            if action["source_plan_task_id"] is None:
+                raise ValueError("rich execution payload requires a source-backed action")
+            if payload.get("decision") != "accepted" or payload.get("state") not in {
+                "active", "completed", "failed", "skipped"
+            }:
+                raise ValueError("rich execution payload requires an accepted executable state")
+            normalized_payload = dict(payload) | {
+                "actualMinutes": payload.get("taskMinutes", payload.get("actualMinutes")),
+                "questionsDone": payload.get("questionsTotal", payload.get("questionsDone", 0)),
+            }
+            values, refs, expected_version = self._prepare_action_result(normalized_payload)
             from study_os_service.services.task_execution import TaskExecutionService
 
             execution_payload = {
-                "outcome": values["state"],
+                "outcome": "started" if values["state"] == "active" else values["state"],
                 "performedOn": payload.get("performedOn", action["plan_date"]),
                 "taskMinutes": payload.get(
                     "taskMinutes",

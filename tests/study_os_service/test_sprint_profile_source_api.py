@@ -625,6 +625,23 @@ def test_terminal_execution_survives_newer_pending_reimport_and_never_requeues(
         ],
     }
     pending_reimport.pop("cycle")
+    second_pending_reimport = pending_reimport | {
+        "tasks": [
+            pending_reimport["tasks"][0]
+            | {
+                "description": "Outra atualização do navegador",
+                "provenance": {
+                    "origin": "ls-visible-history",
+                    "browserUpdatedAt": "2026-07-18T12:00:00Z",
+                    "lastOutcome": "started",
+                    "observedOn": "2026-07-18",
+                    "completedAt": "not-canonical",
+                    "questionsTotal": 0,
+                    "exerciseMinutes": 0,
+                },
+            }
+        ]
+    }
 
     with _client(tmp_path) as client:
         _seed_sefaz(client)
@@ -661,6 +678,11 @@ def test_terminal_execution_survives_newer_pending_reimport_and_never_requeues(
             headers={"Idempotency-Key": "execution-reimport-newer-browser"},
             json=pending_reimport,
         )
+        reimported_again = client.post(
+            "/api/v1/source-plans/import",
+            headers={"Idempotency-Key": "execution-reimport-second-browser"},
+            json=second_pending_reimport,
+        )
         task = client.get(
             "/api/v1/source-plans/tasks?targetSlug=sefaz_ce"
         ).json()["items"][0]
@@ -683,21 +705,28 @@ def test_terminal_execution_survives_newer_pending_reimport_and_never_requeues(
                 "energyLevel": 3,
             },
         )
+        stored = connect_database(client.app.state.settings.database_path)
+        calendar_state = stored.execute(
+            "SELECT state FROM sprint_calendar_items WHERE source_plan_task_id=?",
+            (source_id,),
+        ).fetchone()[0]
+        stored.close()
 
     assert executed.status_code == 201, executed.text
     assert reimported.status_code == 201, reimported.text
-    assert task["description"] == "Descrição atualizada pelo navegador"
+    assert reimported_again.status_code == 201, reimported_again.text
+    assert task["description"] == "Outra atualização do navegador"
     assert task["materialHint"] == "TEC atualizado"
     assert task["status"] == "completed"
     assert task["spentMinutes"] == 60
     assert task["performanceBp"] == 8000
     assert task["provenance"]["lastOutcome"] == "completed"
     assert task["provenance"]["observedOn"] == "2026-07-16"
-    assert task["provenance"]["browserUpdatedAt"] == "2026-07-17T12:00:00Z"
+    assert task["provenance"]["completedAt"] != "not-canonical"
+    assert task["provenance"]["browserUpdatedAt"] == "2026-07-18T12:00:00Z"
     assert preview.status_code == 201, preview.text
-    preview_items = {
-        row["id"]: row for row in preview.json()["items"]
-    }
+    preview_items = {row["id"]: row for row in preview.json()["items"]}
+    assert calendar_state == "completed"
     assert not any(
         preview_items[row["itemId"]]["sourcePlanTaskId"] == source_id
         and preview_items[row["itemId"]]["state"] in {"pending", "active", "failed"}

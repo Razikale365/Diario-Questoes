@@ -384,3 +384,77 @@ def test_calendar_failure_rolls_back_execution_and_every_projection(
         )
 
     assert _transaction_snapshot(client, seeded_source_task) == before
+
+
+def test_rich_legacy_started_action_records_canonical_execution(
+    client: TestClient, seeded_source_task: int
+):
+    day = materialize_day(client, key="legacy-started-day")
+    action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+
+    response = client.put(
+        f"/api/v1/sprints/actions/{action['id']}",
+        headers={"Idempotency-Key": "legacy-started-execution"},
+        json={
+            "expectedVersion": action["version"],
+            "decision": "accepted",
+            "state": "active",
+            "performedOn": "2026-07-16",
+            "taskMinutes": 45,
+            "exerciseMinutes": 20,
+            "questionsTotal": 10,
+            "correctCount": 7,
+            "wrongCount": 3,
+            "doubtCount": 1,
+        },
+    )
+    stored = connect_database(client.app.state.settings.database_path)
+    execution = stored.execute(
+        "SELECT outcome, performed_on, task_minutes FROM task_executions"
+    ).fetchone()
+    stored.close()
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "active"
+    assert tuple(execution) == ("started", "2026-07-16", 45)
+
+
+def test_rich_legacy_payload_rejects_incompatible_or_source_less_actions(
+    client: TestClient, seeded_source_task: int
+):
+    day = materialize_day(client, key="legacy-rich-validation-day")
+    source_action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+    source_less_action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] is None
+    )
+    incompatible = client.put(
+        f"/api/v1/sprints/actions/{source_action['id']}",
+        headers={"Idempotency-Key": "legacy-rich-incompatible"},
+        json={
+            "expectedVersion": source_action["version"],
+            "decision": "rejected",
+            "state": "skipped",
+            "performedOn": "2026-07-16",
+            "taskMinutes": 20,
+        },
+    )
+    source_less = client.put(
+        f"/api/v1/sprints/actions/{source_less_action['id']}",
+        headers={"Idempotency-Key": "legacy-rich-source-less"},
+        json={
+            "expectedVersion": source_less_action["version"],
+            "decision": "accepted",
+            "state": "active",
+            "performedOn": "2026-07-16",
+            "taskMinutes": 20,
+        },
+    )
+
+    assert incompatible.status_code == 422
+    assert incompatible.json()["code"] == "invalid_sprint_action"
+    assert source_less.status_code == 422
+    assert source_less.json()["code"] == "invalid_sprint_action"

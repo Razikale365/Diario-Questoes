@@ -700,6 +700,7 @@ class SprintRepository:
             "skipped": current.status,
         }[execution.outcome]
         provenance = dict(current.provenance) | {
+            "taskExecutionId": execution.id,
             "observedOn": execution.performed_on.isoformat(),
             "lastOutcome": execution.outcome,
             "questionsTotal": execution.questions_total,
@@ -749,7 +750,7 @@ class SprintRepository:
                 raise KeyError(expected_action_id)
             values = {
                 "decision": "rejected" if execution.outcome == "skipped" else "accepted",
-                "state": execution.outcome,
+                "state": "active" if execution.outcome == "started" else execution.outcome,
                 "actual_minutes": execution.task_minutes,
                 "questions_done": execution.questions_total,
                 "correct_count": execution.correct_count,
@@ -762,7 +763,7 @@ class SprintRepository:
             )
         else:
             primary = None
-        state = execution.outcome
+        state = "active" if execution.outcome == "started" else execution.outcome
         decision = "rejected" if state == "skipped" else "accepted"
         self.connection.execute(
             """

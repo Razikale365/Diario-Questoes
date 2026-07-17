@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from study_os_service.domain.sprint import ExamSprintConfig, SourcePlanTask
 from study_os_service.repositories.sprint import SprintRepository
+from study_os_service.repositories.task_execution import TaskExecutionRepository
 from study_os_service.services.subject_matching import match_subject
 from study_os_service.services.source_plan_cycles import (
     SourcePlanCycleService,
@@ -321,7 +322,12 @@ class SourcePlanService:
                     task["external_task_id"],
                 )
                 if existing is not None:
-                    self._merge_existing_evidence(task, existing)
+                    terminal_execution = TaskExecutionRepository(
+                        self.connection
+                    ).latest_terminal_for_source_task(target_slug, existing.id)
+                    self._merge_existing_evidence(
+                        task, existing, terminal_execution=terminal_execution
+                    )
                 saved, created = self.repository.upsert_source_task(task)
                 saved_ids.append(saved.id)
                 created_count += int(created)
@@ -369,7 +375,10 @@ class SourcePlanService:
 
     @staticmethod
     def _merge_existing_evidence(
-        task: dict[str, Any], existing: SourcePlanTask
+        task: dict[str, Any],
+        existing: SourcePlanTask,
+        *,
+        terminal_execution: Any | None,
     ) -> None:
         incoming_provenance = task["provenance"]
         local_sync = incoming_provenance.get("origin") == "planner-local-sync"
@@ -379,20 +388,21 @@ class SourcePlanService:
         existing_is_ls_history = (
             existing.provenance.get("origin") == "ls-visible-history"
         )
-        terminal_execution = existing.provenance.get("lastOutcome") in {
-            "completed", "failed", "skipped"
-        }
-        if terminal_execution:
-            task["status"] = existing.status
-            task["spent_minutes"] = existing.spent_minutes
-            task["performance_bp"] = existing.performance_bp
+        if terminal_execution is not None:
+            task["status"] = (
+                "completed"
+                if terminal_execution.outcome == "completed"
+                else existing.status
+            )
+            task["spent_minutes"] = terminal_execution.task_minutes
+            task["performance_bp"] = terminal_execution.performance_bp
         elif local_sync and existing_is_ls_history:
             task["status"] = existing.status
             task["performance_bp"] = existing.performance_bp
         elif task["performance_bp"] is None:
             task["performance_bp"] = existing.performance_bp
 
-        if not incoming_is_ls_history and not terminal_execution:
+        if not incoming_is_ls_history and terminal_execution is None:
             task["spent_minutes"] = max(
                 existing.spent_minutes,
                 task["spent_minutes"],
@@ -409,9 +419,33 @@ class SourcePlanService:
             task["source_cycle_id"] = existing.source_cycle_id
 
         merged_provenance = dict(existing.provenance)
+        canonical_keys = {
+            "taskExecutionId", "lastOutcome", "observedOn", "completedAt",
+            "questionsTotal", "correctCount", "wrongCount", "doubtCount",
+            "exerciseMinutes",
+        }
         for key, value in incoming_provenance.items():
-            if value is not None and value != "":
+            if (
+                key not in canonical_keys
+                and value is not None
+                and value != ""
+            ):
                 merged_provenance[key] = value
+        if terminal_execution is not None:
+            merged_provenance |= {
+                "taskExecutionId": terminal_execution.id,
+                "lastOutcome": terminal_execution.outcome,
+                "observedOn": terminal_execution.performed_on.isoformat(),
+                "questionsTotal": terminal_execution.questions_total,
+                "correctCount": terminal_execution.correct_count,
+                "wrongCount": terminal_execution.wrong_count,
+                "doubtCount": terminal_execution.doubt_count,
+                "exerciseMinutes": terminal_execution.exercise_minutes,
+            }
+            if terminal_execution.outcome == "completed":
+                merged_provenance["completedAt"] = terminal_execution.recorded_at.isoformat(
+                    timespec="microseconds"
+                ).replace("+00:00", "Z")
         if local_sync and existing_is_ls_history:
             merged_provenance["origin"] = "ls-visible-history"
             merged_provenance["lastSyncOrigin"] = "planner-local-sync"

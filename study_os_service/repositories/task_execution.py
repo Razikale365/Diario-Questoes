@@ -69,6 +69,21 @@ class TaskExecutionRepository:
         )
         return tuple(_execution(row) for row in rows)
 
+    def latest_terminal_for_source_task(
+        self, target_slug: str, source_plan_task_id: int
+    ) -> TaskExecution | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM task_executions
+            WHERE target_slug=? AND source_plan_task_id=?
+              AND outcome IN ('completed', 'failed', 'skipped')
+            ORDER BY performed_on DESC, id DESC
+            LIMIT 1
+            """,
+            (target_slug, source_plan_task_id),
+        ).fetchone()
+        return _execution(row) if row is not None else None
+
     def insert_or_replay(
         self,
         task_input: TaskExecutionInput,
