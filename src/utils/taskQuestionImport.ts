@@ -1,5 +1,5 @@
 import { ActivityBlock, Question, QuestionBankItem, StudyTask } from '../types';
-import { DEFAULT_SECTION_LAYOUT } from './layout';
+import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT } from './layout';
 import { ImportedObjectiveQuestion } from './objectiveQuestionParser';
 import { questionBankItemToQuestion } from './questionBank';
 
@@ -66,11 +66,19 @@ const emptySummary = (detected: number): TaskQuestionImportSummary => ({
   conflicts: [],
 });
 
+const failureMessages: Record<TaskQuestionImportFailureCode, string> = {
+  empty_batch: 'Nenhuma questão objetiva foi detectada.',
+  batch_mismatch: 'O lote processado não corresponde aos itens canônicos do banco.',
+  missing_block: 'Selecione um bloco existente para receber as questões.',
+  missing_section: 'Selecione uma seção existente para criar a atividade.',
+  locked_destination: 'Desbloqueie o bloco ou a seção antes de importar.',
+  duplicate_section: 'Já existe uma seção com este título; escolha Nova atividade para acrescentar outro lote.',
+};
+
 const failure = (
   code: TaskQuestionImportFailureCode,
-  message: string,
   summary: TaskQuestionImportSummary,
-): TaskQuestionImportResult => ({ ok: false, code, message, summary });
+): TaskQuestionImportResult => ({ ok: false, code, message: failureMessages[code], summary });
 
 const hasCompleteContent = (question: Question) => Boolean(
   question.statement?.trim()
@@ -125,7 +133,6 @@ const isCanonicalQuestion = (question: Question, item: QuestionBankItem) => (
   question.localId === item.id
   && question.sourceQuestionNumber === item.sourceQuestionNumber
   && hasSameContent(question, item)
-  && (!item.correctAnswer || question.correctAnswer === item.correctAnswer)
 );
 
 const importIntoQuestions = (
@@ -194,7 +201,7 @@ const childMatches = (block: ActivityBlock, title: string) => (
 );
 
 const containsWholeBatch = (block: ActivityBlock, items: QuestionBankItem[]) => (
-  items.every((item) => findMatchIndex(block.questions, item) >= 0)
+  items.every((item) => block.questions.some((question) => question.localId === item.id))
 );
 
 const makeActivityBlock = (
@@ -208,8 +215,16 @@ const makeActivityBlock = (
   pages: defaults.pages,
   bank: defaults.bank,
   questions,
+  showStats: true,
   showGabarito: false,
-  layout: { columns: 1, rows: Math.max(1, questions.length), type: 'columns', width: 12 },
+  layout: {
+    ...DEFAULT_ACTIVITY_LAYOUT,
+    columns: 1,
+    rows: Math.min(Math.max(questions.length, 1), 8),
+    type: 'grid',
+    width: 12,
+    rowSpan: 4,
+  },
 });
 
 const makeSection = (id: string, title: string): ActivityBlock => ({
@@ -230,17 +245,18 @@ const withUpdatedTask = (task: StudyTask, blocks: ActivityBlock[], now: () => st
 
 export const planTaskQuestionImport = (input: PlanTaskQuestionImportInput): TaskQuestionImportResult => {
   const summary = emptySummary(input.sourceQuestions.length);
-  if (input.sourceQuestions.length === 0 || input.canonicalItems.length === 0) {
-    return failure('empty_batch', 'Nenhuma questão objetiva foi detectada.', summary);
+  if (input.sourceQuestions.length === 0) {
+    return failure('empty_batch', summary);
   }
   if (
-    input.sourceQuestions.length !== input.canonicalItems.length
+    input.canonicalItems.length === 0
+    || input.sourceQuestions.length !== input.canonicalItems.length
     || input.sourceQuestions.some((question, index) => (
       input.canonicalItems[index].sourceQuestionNumber !== undefined
       && input.canonicalItems[index].sourceQuestionNumber !== question.number
     ))
   ) {
-    return failure('batch_mismatch', 'O lote analisado não corresponde ao lote canônico.', summary);
+    return failure('batch_mismatch', summary);
   }
 
   const idFactory = input.idFactory || (() => crypto.randomUUID());
@@ -249,9 +265,9 @@ export const planTaskQuestionImport = (input: PlanTaskQuestionImportInput): Task
 
   if (destination.kind === 'existing_block') {
     const index = task.blocks.findIndex((block) => block.id === destination.blockId && !block.isSection);
-    if (index < 0) return failure('missing_block', 'Bloco de destino não encontrado.', summary);
+    if (index < 0) return failure('missing_block', summary);
     if (task.blocks[index].isLocked) {
-      return failure('locked_destination', 'Desbloqueie o bloco para importar questões.', summary);
+      return failure('locked_destination', summary);
     }
     const imported = importIntoQuestions(task.blocks[index].questions, canonicalItems, summary);
     if (!imported.changed) return { ok: true, task, summary, changed: false };
@@ -265,23 +281,19 @@ export const planTaskQuestionImport = (input: PlanTaskQuestionImportInput): Task
   const sectionIndex = task.blocks.findIndex((block) => sectionMatches(block, sectionTitle));
 
   if (destination.kind === 'new_block') {
-    if (sectionIndex < 0) return failure('missing_section', 'Seção de destino não encontrada.', summary);
+    if (sectionIndex < 0) return failure('missing_section', summary);
     if (task.blocks[sectionIndex].isLocked) {
-      return failure('locked_destination', 'Desbloqueie a seção para importar questões.', summary);
+      return failure('locked_destination', summary);
     }
     const repeatedIndex = task.blocks.findIndex((block) => (
       childMatches(block, sectionTitle) && containsWholeBatch(block, canonicalItems)
     ));
     if (repeatedIndex >= 0) {
       if (task.blocks[repeatedIndex].isLocked) {
-        return failure('locked_destination', 'Desbloqueie o bloco para importar questões.', summary);
+        return failure('locked_destination', summary);
       }
-      const imported = importIntoQuestions(task.blocks[repeatedIndex].questions, canonicalItems, summary);
-      if (!imported.changed) return { ok: true, task, summary, changed: false };
-      const blocks = task.blocks.map((block, index) => (
-        index === repeatedIndex ? { ...block, questions: imported.questions } : block
-      ));
-      return { ok: true, task: withUpdatedTask(task, blocks, now), summary, changed: true };
+      summary.duplicates = canonicalItems.length;
+      return { ok: true, task, summary, changed: false };
     }
     const imported = importIntoQuestions([], canonicalItems, summary);
     const block = makeActivityBlock(idFactory(), { ...input.blockDefaults, lesson: sectionTitle }, imported.questions);
@@ -296,23 +308,19 @@ export const planTaskQuestionImport = (input: PlanTaskQuestionImportInput): Task
   if (sectionIndex >= 0) {
     const section = task.blocks[sectionIndex];
     if (section.isLocked) {
-      return failure('locked_destination', 'Desbloqueie a seção para importar questões.', summary);
+      return failure('locked_destination', summary);
     }
     const repeatedIndex = task.blocks.findIndex((block) => (
       childMatches(block, sectionTitle) && containsWholeBatch(block, canonicalItems)
     ));
     if (repeatedIndex < 0) {
-      return failure('duplicate_section', 'Já existe uma seção com este nome.', summary);
+      return failure('duplicate_section', summary);
     }
     if (task.blocks[repeatedIndex].isLocked) {
-      return failure('locked_destination', 'Desbloqueie o bloco para importar questões.', summary);
+      return failure('locked_destination', summary);
     }
-    const imported = importIntoQuestions(task.blocks[repeatedIndex].questions, canonicalItems, summary);
-    if (!imported.changed) return { ok: true, task, summary, changed: false };
-    const blocks = task.blocks.map((block, index) => (
-      index === repeatedIndex ? { ...block, questions: imported.questions } : block
-    ));
-    return { ok: true, task: withUpdatedTask(task, blocks, now), summary, changed: true };
+    summary.duplicates = canonicalItems.length;
+    return { ok: true, task, summary, changed: false };
   }
 
   const imported = importIntoQuestions([], canonicalItems, summary);

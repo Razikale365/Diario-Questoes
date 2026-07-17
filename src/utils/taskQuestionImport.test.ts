@@ -137,6 +137,20 @@ test('preserves a conflicting manual key and imports non-conflicting content', (
   assert.equal(result.task.blocks[0].questions[0].correctAnswer, 'A');
   assert.equal(result.task.blocks[0].questions[1].correctAnswer, 'B');
   assert.equal(result.summary.answerKeyConflicts, 1);
+
+  const repeated = planTaskQuestionImport({
+    task: result.task,
+    sourceQuestions: [parsed(1, 'B'), parsed(2, 'B')],
+    canonicalItems: [canonical(1, 'B'), canonical(2, 'B')],
+    destination: { kind: 'existing_block', blockId: 'block-1' },
+    blockDefaults: defaults,
+  });
+  assert.equal(repeated.ok, true);
+  if (!repeated.ok) return;
+  assert.equal(repeated.changed, false);
+  assert.equal(repeated.task, result.task);
+  assert.equal(repeated.summary.answerKeyConflicts, 1);
+  assert.equal(repeated.summary.duplicates, 2);
 });
 
 test('appends unmatched questions with unique internal numbers and source numbers', () => {
@@ -184,12 +198,37 @@ test('rejects empty, mismatched, missing, and locked destinations', () => {
     destination: { kind: 'existing_block' as const, blockId: 'block-1' },
     blockDefaults: defaults,
   };
-  assert.equal(planTaskQuestionImport({ ...base, sourceQuestions: [], canonicalItems: [] }).ok, false);
-  assert.equal(planTaskQuestionImport({ ...base, sourceQuestions: [parsed(1)], canonicalItems: [] }).ok, false);
-  assert.equal(planTaskQuestionImport({ ...base, destination: { kind: 'existing_block', blockId: 'missing' }, sourceQuestions: [parsed(1)], canonicalItems: [canonical(1)] }).ok, false);
+  const empty = planTaskQuestionImport({ ...base, sourceQuestions: [], canonicalItems: [] });
+  assert.deepEqual(empty.ok ? null : [empty.code, empty.message], [
+    'empty_batch',
+    'Nenhuma questão objetiva foi detectada.',
+  ]);
+  const mismatch = planTaskQuestionImport({ ...base, sourceQuestions: [parsed(1)], canonicalItems: [] });
+  assert.deepEqual(mismatch.ok ? null : [mismatch.code, mismatch.message], [
+    'batch_mismatch',
+    'O lote processado não corresponde aos itens canônicos do banco.',
+  ]);
+  const missing = planTaskQuestionImport({ ...base, destination: { kind: 'existing_block', blockId: 'missing' }, sourceQuestions: [parsed(1)], canonicalItems: [canonical(1)] });
+  assert.deepEqual(missing.ok ? null : [missing.code, missing.message], [
+    'missing_block',
+    'Selecione um bloco existente para receber as questões.',
+  ]);
   const locked = planTaskQuestionImport({ ...base, task: taskWith([], true), sourceQuestions: [parsed(1)], canonicalItems: [canonical(1)] });
-  assert.equal(locked.ok, false);
-  if (!locked.ok) assert.equal(locked.code, 'locked_destination');
+  assert.deepEqual(locked.ok ? null : [locked.code, locked.message], [
+    'locked_destination',
+    'Desbloqueie o bloco ou a seção antes de importar.',
+  ]);
+
+  const missingSection = planTaskQuestionImport({
+    ...base,
+    destination: { kind: 'new_block', sectionTitle: 'Ausente' },
+    sourceQuestions: [parsed(1)],
+    canonicalItems: [canonical(1)],
+  });
+  assert.deepEqual(missingSection.ok ? null : [missingSection.code, missingSection.message], [
+    'missing_section',
+    'Selecione uma seção existente para criar a atividade.',
+  ]);
 });
 
 test('keeps complete conflicting content while importing another question', () => {
@@ -231,6 +270,10 @@ test('creates a responsive section and treats a repeated batch as idempotent', (
   assert.equal(first.task.blocks.at(-2)?.isSection, true);
   assert.equal(first.task.blocks.at(-1)?.layout?.width, 12);
   assert.equal(first.task.blocks.at(-1)?.layout?.columns, 1);
+  assert.equal(first.task.blocks.at(-1)?.layout?.rows, 2);
+  assert.equal(first.task.blocks.at(-1)?.layout?.type, 'grid');
+  assert.equal(first.task.blocks.at(-1)?.layout?.rowSpan, 4);
+  assert.equal(first.task.blocks.at(-1)?.showStats, true);
   assert.equal(first.task.blocks.at(-1)?.showGabarito, false);
 
   const repeated = planTaskQuestionImport({
@@ -244,6 +287,45 @@ test('creates a responsive section and treats a repeated batch as idempotent', (
   if (!repeated.ok) return;
   assert.equal(repeated.changed, false);
   assert.equal(repeated.summary.duplicates, 2);
+
+  const differentBatch = planTaskQuestionImport({
+    task: first.task,
+    sourceQuestions: [parsed(3)],
+    canonicalItems: [canonical(3)],
+    destination: { kind: 'new_section', sectionTitle: 'Aula 02 - ITCD' },
+    blockDefaults: defaults,
+  });
+  assert.deepEqual(differentBatch.ok ? null : [differentBatch.code, differentBatch.message], [
+    'duplicate_section',
+    'Já existe uma seção com este título; escolha Nova atividade para acrescentar outro lote.',
+  ]);
+});
+
+test('does not treat a conflicting same-number manual question as an equivalent section batch', () => {
+  const manualBlock: StudyTask['blocks'][number] = {
+    id: 'manual-block',
+    title: 'Manual',
+    lesson: 'Aula 02 - ITCD',
+    pages: '',
+    questions: [{
+      number: 1,
+      sourceQuestionNumber: 1,
+      statement: 'Conteúdo manual diferente',
+      alternatives: [{ label: 'A', text: 'Manual A' }, { label: 'B', text: 'Manual B' }],
+      answer: '',
+      isCorrect: null,
+      hasDoubt: false,
+    }],
+  };
+  const result = planTaskQuestionImport({
+    task: taskWithSection([manualBlock]),
+    sourceQuestions: [parsed(1)],
+    canonicalItems: [canonical(1)],
+    destination: { kind: 'new_section', sectionTitle: 'Aula 02 - ITCD' },
+    blockDefaults: defaults,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'duplicate_section');
 });
 
 test('creates one block in an existing unlocked section and rejects a locked section', () => {
