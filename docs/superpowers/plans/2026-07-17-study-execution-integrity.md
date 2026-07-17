@@ -53,7 +53,6 @@ def valid_input(**overrides):
         correct_count=16,
         wrong_count=4,
         doubt_count=2,
-        supplied_performance_bp=None,
         energy_after=3,
         notes="Revisão de ontem",
     )
@@ -98,7 +97,10 @@ CREATE TABLE task_executions (
   version INTEGER NOT NULL DEFAULT 1 CHECK (version=1),
   UNIQUE (id, target_slug),
   CHECK (correct_count + wrong_count <= questions_total),
-  CHECK ((correct_count + wrong_count)=0 OR performance_bp=ROUND(10000.0*correct_count/(correct_count+wrong_count))),
+  CHECK (
+    ((correct_count + wrong_count)=0 AND performance_bp IS NULL) OR
+    ((correct_count + wrong_count)>0 AND performance_bp=ROUND(10000.0*correct_count/(correct_count+wrong_count)))
+  ),
   FOREIGN KEY (source_plan_task_id, target_slug)
     REFERENCES source_plan_tasks(id, target_slug) ON DELETE RESTRICT,
   FOREIGN KEY (sprint_action_id)
@@ -264,7 +266,6 @@ export interface TaskExecutionDraft {
   correctCount: string;
   wrongCount: string;
   doubtCount: string;
-  suppliedPerformance: string;
   energyAfter: number;
   notes: string;
 }

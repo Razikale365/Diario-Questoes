@@ -29,7 +29,7 @@ Add an append-only `task_executions` record owned by the local service. Each acc
 - `performedOn` (local calendar date) and `recordedAt` (UTC timestamp);
 - total task minutes and exercise-only minutes;
 - total, correct, wrong, and doubt question counts;
-- derived performance when correct/wrong evidence exists, otherwise an explicitly supplied percentage or no percentage;
+- derived performance when correct/wrong evidence exists; otherwise no performance evidence is stored;
 - energy after execution and optional notes;
 - idempotency key and immutable payload hash.
 
@@ -40,7 +40,7 @@ Validation rules:
 - exercise minutes cannot exceed task minutes;
 - correct + wrong cannot exceed total questions;
 - doubt count cannot exceed total questions;
-- when correct + wrong is greater than zero, performance is derived and cannot contradict the counts;
+- when correct + wrong is greater than zero, performance is derived and cannot contradict the counts; when no answers exist, performance must be null;
 - idempotency replay returns the existing execution; reusing the key with another payload is a conflict.
 
 ## Transactional Projection
