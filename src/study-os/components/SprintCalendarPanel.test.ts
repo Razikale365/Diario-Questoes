@@ -25,6 +25,9 @@ test('calendar panel exposes the preview/apply flow and precision legend', () =>
   assert.equal(source.includes('document.run.shortfalls'), true);
   assert.equal(source.includes('aria-label={`Prioridade ${priorityLabel[day.hottestPriority]}`}'), true);
   assert.equal(source.includes('<article'), true);
+  assert.equal(source.includes('onClick={() => void createPreview(true)}'), true, 'visible auto-organize must fetch the applied head');
+  const applyPreview = source.slice(source.indexOf('const applyPreview = async'), source.indexOf('\n  return ('));
+  assert.equal(applyPreview.includes('requestGateRef.current!.begin(controller.signal)'), true, 'apply must invalidate and gate pre-apply heads');
 });
 
 test('Planner owns the shared calendar while the command center consumes the day projection', () => {

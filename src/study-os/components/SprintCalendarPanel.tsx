@@ -192,9 +192,11 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
 
   const applyPreview = async () => {
     if (!document || document.run.decision !== 'draft') return;
+    requestGateRef.current!.invalidate();
     mutationControllerRef.current?.abort();
     const controller = new AbortController();
     mutationControllerRef.current = controller;
+    const applyRequest = requestGateRef.current!.begin(controller.signal);
     setBusy('apply');
     setError(null);
     try {
@@ -203,8 +205,10 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
         expectedOverrideVersions: document.overrideVersions,
       }, mutationKey('calendar-apply'), controller.signal);
       if (mutationControllerRef.current === controller && !controller.signal.aborted) {
-        setDocument(applied);
-        onNotice?.('Organização aplicada. Concluídas e pins foram preservados.');
+        requestGateRef.current!.applyIfCurrent(applyRequest, () => {
+          setDocument(applied);
+          onNotice?.('Organização aplicada. Concluídas e pins foram preservados.');
+        });
       }
     } catch (applyError) {
       if (mutationControllerRef.current === controller && !controller.signal.aborted) {
@@ -239,7 +243,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void createPreview()}
+            onClick={() => void createPreview(true)}
             disabled={busy !== null || loading}
             className="inline-flex h-9 items-center gap-2 rounded border border-[#84cc16]/35 bg-[#84cc16]/10 px-3 text-[10px] font-black uppercase text-[#d9f99d] transition-colors hover:bg-[#84cc16]/20 disabled:opacity-50"
           >

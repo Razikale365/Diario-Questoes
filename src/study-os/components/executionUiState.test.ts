@@ -9,6 +9,7 @@ import {
   resultRefreshNotice,
   subscribeStudyOsDataChanged,
 } from './executionUiState';
+import { createCalendarRequestGate } from './SprintCalendarControl';
 
 test('IA Hoje canonical execution input binds the saved source action version', () => {
   const action = { id: 41, version: 9 } as SprintAction;
@@ -55,4 +56,23 @@ test('data change subscription filters target/resources and stops after unsubscr
   unsubscribe();
   dispatch({ targetSlug: 'sefaz_ce', resources: ['sprint-day'] });
   assert.equal(reloads, 1);
+});
+
+test('an old IA Hoje event load cannot overwrite a recalculated day and cleanup aborts it', async () => {
+  const gate = createCalendarRequestGate();
+  const lifecycle = new AbortController();
+  const oldEventLoad = gate.begin(lifecycle.signal);
+  let day = 'saved-local-action';
+  let resolveOld!: (value: string) => void;
+  const oldResponse = new Promise<string>((resolve) => { resolveOld = resolve; });
+  const applyOld = oldResponse.then((value) => gate.applyIfCurrent(oldEventLoad, () => { day = value; }));
+
+  const recalculation = gate.begin();
+  gate.applyIfCurrent(recalculation, () => { day = 'recalculated-day'; });
+  lifecycle.abort();
+  resolveOld('stale-event-day');
+  await applyOld;
+
+  assert.equal(oldEventLoad.signal.aborted, true);
+  assert.equal(day, 'recalculated-day');
 });

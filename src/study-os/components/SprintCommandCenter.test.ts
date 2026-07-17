@@ -44,6 +44,7 @@ test('sprint command center keeps the tactical workflow visible and score detail
   assert.equal(source.includes('fetchSprintTrajectory'), true);
   assert.equal(source.includes('fetchSprintEvidence'), true);
   assert.equal(source.includes('<details'), true);
+  assert.equal(source.includes('createCalendarRequestGate'), true, 'day loads must use the tested request gate');
 });
 
 test('PlannerArea mounts the SEFAZ sprint first and persists imported LS tasks', () => {

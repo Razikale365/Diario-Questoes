@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -25,6 +25,7 @@ import {
   resultRefreshNotice,
   subscribeStudyOsDataChanged,
 } from './executionUiState';
+import { createCalendarRequestGate } from './SprintCalendarControl';
 import {
   fetchOptionalSprintDay,
   fetchSourcePlanTasks,
@@ -210,6 +211,8 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   const [resultDraft, setResultDraft] = useState<ResultDraft | null>(null);
   const [executionDraft, setExecutionDraft] = useState<TaskExecutionDraft | null>(null);
   const [executionErrors, setExecutionErrors] = useState<Partial<Record<keyof TaskExecutionDraft, string>>>({});
+  const dayRequestGateRef = useRef<ReturnType<typeof createCalendarRequestGate> | null>(null);
+  if (!dayRequestGateRef.current) dayRequestGateRef.current = createCalendarRequestGate();
 
   const refreshAuditState = useCallback(async () => {
     const [nextTrajectory, nextEvidence, nextSourceTasks] = await Promise.all([
@@ -222,42 +225,44 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
     setSourceTasks(nextSourceTasks.items);
   }, [targetSlug]);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (parentSignal?: AbortSignal) => {
+    const request = dayRequestGateRef.current!.begin(parentSignal);
     setLoading(true);
     setError(null);
     try {
       const [nextConfig, nextDay, nextProjection, nextTrajectory, nextEvidence, nextSourceTasks] = await Promise.all([
-        fetchSprintConfig(targetSlug, signal),
-        fetchOptionalSprintDay(targetSlug, date, signal),
-        fetchSprintProjection(targetSlug, date, signal),
-        fetchSprintTrajectory(targetSlug, signal),
-        fetchSprintEvidence(targetSlug, signal),
-        fetchSourcePlanTasks(targetSlug, undefined, true, signal),
+        fetchSprintConfig(targetSlug, request.signal),
+        fetchOptionalSprintDay(targetSlug, date, request.signal),
+        fetchSprintProjection(targetSlug, date, request.signal),
+        fetchSprintTrajectory(targetSlug, request.signal),
+        fetchSprintEvidence(targetSlug, request.signal),
+        fetchSourcePlanTasks(targetSlug, undefined, true, request.signal),
       ]);
-      if (signal?.aborted) return;
-      setConfig(nextConfig);
-      setDay(nextDay);
-      setProjection(nextDay?.projection ?? nextProjection);
-      setTrajectory(nextTrajectory);
-      setEvidence(nextEvidence);
-      setSourceTasks(nextSourceTasks.items);
-      setLsBudgetMinutes(nextDay?.capacity.lsBudgetMinutes ?? nextConfig.lsBudgetMinutes);
-      setExtraBudgetMinutes(nextDay?.capacity.extraBudgetMinutes ?? nextConfig.extraBudgetMinutes);
-      if (nextDay) {
-        setEnergy(nextDay.capacity.energyLevel);
-        const isManual = nextDay.projectionOrigin === 'manual';
-        setManualOverride(isManual);
-        setOverrideP1(isManual ? nextDay.projections.p1 : null);
-        setOverrideP2(isManual ? nextDay.projections.p2 : null);
-      } else {
-        setManualOverride(false);
-        setOverrideP1(null);
-        setOverrideP2(null);
-      }
+      dayRequestGateRef.current!.applyIfCurrent(request, () => {
+        setConfig(nextConfig);
+        setDay(nextDay);
+        setProjection(nextDay?.projection ?? nextProjection);
+        setTrajectory(nextTrajectory);
+        setEvidence(nextEvidence);
+        setSourceTasks(nextSourceTasks.items);
+        setLsBudgetMinutes(nextDay?.capacity.lsBudgetMinutes ?? nextConfig.lsBudgetMinutes);
+        setExtraBudgetMinutes(nextDay?.capacity.extraBudgetMinutes ?? nextConfig.extraBudgetMinutes);
+        if (nextDay) {
+          setEnergy(nextDay.capacity.energyLevel);
+          const isManual = nextDay.projectionOrigin === 'manual';
+          setManualOverride(isManual);
+          setOverrideP1(isManual ? nextDay.projections.p1 : null);
+          setOverrideP2(isManual ? nextDay.projections.p2 : null);
+        } else {
+          setManualOverride(false);
+          setOverrideP1(null);
+          setOverrideP2(null);
+        }
+      });
     } catch (loadError) {
-      if (!signal?.aborted) setError(errorMessage(loadError));
+      dayRequestGateRef.current!.applyIfCurrent(request, () => setError(errorMessage(loadError)));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      dayRequestGateRef.current!.applyIfCurrent(request, () => setLoading(false));
     }
   }, [date, targetSlug]);
 
@@ -295,10 +300,14 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
     return subscribeStudyOsDataChanged(window, targetSlug, ['sprint-day'], () => void load());
   }, [load, targetSlug]);
 
+  useEffect(() => () => dayRequestGateRef.current?.dispose(), [targetSlug]);
+
   const createDay = async (
     refresh: boolean,
     announce = true,
   ): Promise<SprintDay | null> => {
+    const mutationRequest = dayRequestGateRef.current!.begin();
+    setLoading(false);
     setBusy(refresh ? 'refresh' : 'generate');
     setError(null);
     try {
@@ -315,6 +324,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       const next = refresh
         ? await refreshSprintDay(input, mutationKey('refresh-sprint', date))
         : await generateSprintDay(input, mutationKey('generate-sprint', date));
+      if (!dayRequestGateRef.current!.isCurrent(mutationRequest)) return null;
       setDay(next);
       setProjection(next.projection ?? projection);
       setMinimumMode(false);
@@ -381,11 +391,6 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       setExecutionDraft(null);
       setExecutionErrors({});
       setEnergy(parsed.value.energyAfter);
-      announceStudyOsDataChanged({
-        targetSlug,
-        taskId: action.sourcePlanTaskId,
-        resources: ['source-plan', 'sprint-day', 'calendar', 'evidence'],
-      });
       const refreshed = await createDay(true, false);
       if (!refreshed) {
         try {
@@ -394,6 +399,11 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
           setError(`Resultado salvo; recálculo e auditoria pendentes: ${errorMessage(auditError)}`);
         }
       }
+      announceStudyOsDataChanged({
+        targetSlug,
+        taskId: action.sourcePlanTaskId,
+        resources: ['source-plan', 'sprint-day', 'calendar', 'evidence'],
+      });
       showToast(resultRefreshNotice(Boolean(refreshed)));
     } catch (mutationError) {
       setError(errorMessage(mutationError));
