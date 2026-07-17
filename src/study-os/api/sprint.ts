@@ -377,7 +377,7 @@ export interface TaskExecution {
 export interface TaskExecutionSourceTask {
   id: number;
   targetSlug: string;
-  status: TaskExecutionOutcome;
+  status: SprintSourceTaskStatus;
   spentMinutes: number;
   performanceBp: number | null;
   provenance: Record<string, unknown>;
@@ -392,7 +392,7 @@ export interface TaskExecutionSprintAction {
 
 export interface TaskExecutionCalendarItem {
   id: number;
-  state: SprintActionState;
+  state: 'pending' | 'active' | 'completed' | 'failed' | 'ignored' | 'archived';
   completedAt: string | null;
   version: number;
 }
@@ -911,7 +911,7 @@ const parseTaskExecutionSourceTask = (value: unknown): TaskExecutionSourceTask =
   if (!isRecord(value)
     || !isPositive(value.id)
     || !isText(value.targetSlug)
-    || !oneOf(value.status, executionOutcomes)
+    || !oneOf(value.status, ['pending', 'started', 'completed', 'ignored', 'archived'] as const)
     || !isNonNegative(value.spentMinutes)
     || !(value.performanceBp === null || isBasisPoints(value.performanceBp))
     || !isRecord(value.provenance)) invalid('task execution source task');
@@ -930,7 +930,7 @@ const parseTaskExecutionSprintAction = (value: unknown): TaskExecutionSprintActi
 const parseTaskExecutionCalendarItem = (value: unknown): TaskExecutionCalendarItem => {
   if (!isRecord(value)
     || !isPositive(value.id)
-    || !oneOf(value.state, ['pending', 'active', 'completed', 'skipped', 'failed'] as const)
+    || !oneOf(value.state, ['pending', 'active', 'completed', 'failed', 'ignored', 'archived'] as const)
     || !(value.completedAt === null || isTimestamp(value.completedAt))
     || !isPositive(value.version)) invalid('task execution calendar item');
   return value as unknown as TaskExecutionCalendarItem;

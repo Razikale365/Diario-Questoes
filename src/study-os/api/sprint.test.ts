@@ -375,8 +375,33 @@ test('source execution request uses the authoritative URL, payload, and idempote
   });
 });
 
-test('source execution parser rejects malformed terminal response fields', () => {
+test('source execution parser accepts failed and skipped executions without inventing source terminal state', () => {
   assert.deepEqual(parseTaskExecutionResult(executionResult), executionResult);
+  assert.deepEqual(parseTaskExecutionResult({
+    ...executionResult,
+    execution: { ...executionResult.execution, outcome: 'failed' },
+    sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+    calendarItem: { ...executionResult.calendarItem, state: 'failed', completedAt: null },
+  }), {
+    ...executionResult,
+    execution: { ...executionResult.execution, outcome: 'failed' },
+    sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+    calendarItem: { ...executionResult.calendarItem, state: 'failed', completedAt: null },
+  });
+  assert.deepEqual(parseTaskExecutionResult({
+    ...executionResult,
+    execution: { ...executionResult.execution, outcome: 'skipped' },
+    sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+    calendarItem: { ...executionResult.calendarItem, state: 'archived', completedAt: null },
+  }), {
+    ...executionResult,
+    execution: { ...executionResult.execution, outcome: 'skipped' },
+    sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+    calendarItem: { ...executionResult.calendarItem, state: 'archived', completedAt: null },
+  });
+});
+
+test('source execution parser rejects malformed source and calendar terminal states', () => {
   assert.throws(
     () => parseTaskExecutionResult({
       ...executionResult,
@@ -387,7 +412,14 @@ test('source execution parser rejects malformed terminal response fields', () =>
   assert.throws(
     () => parseTaskExecutionResult({
       ...executionResult,
-      sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+      sourceTask: { ...executionResult.sourceTask, status: 'saved' },
+    }),
+    /task execution/i,
+  );
+  assert.throws(
+    () => parseTaskExecutionResult({
+      ...executionResult,
+      calendarItem: { ...executionResult.calendarItem, state: 'skipped' },
     }),
     /task execution/i,
   );
