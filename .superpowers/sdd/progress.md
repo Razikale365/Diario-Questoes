@@ -1,5 +1,18 @@
 # Study OS SDD Progress
 
+## Study Flow Integrity (2026-07-17)
+
+Plans:
+- `docs/superpowers/plans/2026-07-17-study-execution-integrity.md`
+- `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
+- `docs/superpowers/plans/2026-07-17-planner-task-table-qol.md`
+
+Task progress is appended below only after task-scoped spec and quality review is clean.
+
+| Plan / Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| Execution 1. Schema-v13 execution ledger | complete | `bdbbcc4` | `d218510` | 27 focused schema + migration tests | spec compliant; quality approved after two fix rounds |
+
 Plan: `docs/superpowers/plans/2026-07-10-study-os-m1-local-service-foundation.md`
 
 | Task | Status | Base | Head | Verification | Review |
