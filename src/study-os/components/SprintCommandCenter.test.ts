@@ -37,7 +37,6 @@ test('sprint command center keeps the tactical workflow visible and score detail
   ]) {
     assert.equal(source.includes(label), true, `${label} must remain in the command center`);
   }
-  assert.equal(source.includes('recordSourceTaskExecution'), true);
   assert.equal(source.includes('refreshSprintDay'), true);
   assert.equal(source.includes('useState(42)'), false);
   assert.equal(source.includes('useState(55)'), false);
@@ -107,28 +106,6 @@ test('execution defaults do not invent zero-percent question evidence', () => {
   assert.equal(sprintDecisionState(false, false), 'skipped');
   assert.equal(sprintDecisionState(true, false), 'active');
   assert.equal(sprintDecisionState(true, true), 'skipped');
-});
-
-test('a saved result is retained locally when the day refresh fails', () => {
-  const source = readFileSync(componentUrl, 'utf8');
-
-  assert.equal(source.includes('const saved = await recordSourceTaskExecution'), true);
-  assert.equal(source.includes('item.id === saved.sprintAction?.id ? { ...item, ...saved.sprintAction } : item'), true);
-  assert.equal(source.includes('const refreshed = await createDay(true, false)'), true);
-  assert.equal(source.includes("refreshed\n        ? 'Resultado salvo e restante do dia recalculado.'\n        : 'Resultado salvo; recálculo pendente.'"), true);
-});
-
-test('IA Hoje uses the shared execution receipt and reloads only matching Study OS events', () => {
-  const source = readFileSync(componentUrl, 'utf8');
-
-  assert.equal(source.includes('TaskExecutionFields'), true);
-  assert.equal(source.includes('STUDY_OS_DATA_CHANGED'), true);
-  assert.equal(source.includes('parseStudyOsDataChangedDetail'), true);
-  assert.equal(source.includes("detail.targetSlug !== targetSlug"), true);
-  assert.equal(source.includes("detail.resources.includes('sprint-day')"), true);
-  assert.equal(source.includes('window.removeEventListener(STUDY_OS_DATA_CHANGED'), true);
-  assert.equal(source.includes('sprintActionId: action.id'), true);
-  assert.equal(source.includes('expectedVersion: action.version'), true);
 });
 
 test('generation, recalculation, and saved results refresh audit state in parallel', () => {

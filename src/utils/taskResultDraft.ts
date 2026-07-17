@@ -91,28 +91,3 @@ export const parseTaskExecutionDraft = (draft: TaskExecutionDraft): ParsedTaskEx
     },
   };
 };
-
-/**
- * Transitional compatibility for PlannerArea until Task 4 adopts TaskExecutionDraft.
- * It is deliberately not part of the execution request contract: durable execution
- * performance is derived only from answered counts above.
- */
-export interface TaskResultDraft {
-  spentMinutes: string;
-  performance: string;
-}
-
-export type ParsedTaskResultDraft =
-  | { ok: true; value: { spentMinutes: number; performance: number } }
-  | { ok: false; errors: Partial<Record<keyof TaskResultDraft, string>> };
-
-export const parseTaskResultDraft = (draft: TaskResultDraft): ParsedTaskResultDraft => {
-  const errors: Partial<Record<keyof TaskResultDraft, string>> = {};
-  const spentMinutes = integer(draft.spentMinutes);
-  const performance = integer(draft.performance);
-  if (spentMinutes === null || spentMinutes > 240) errors.spentMinutes = 'Use minutos entre 0 e 240';
-  if (performance === null || performance > 100) errors.performance = 'Use um percentual entre 0 e 100';
-  return Object.keys(errors).length > 0
-    ? { ok: false, errors }
-    : { ok: true, value: { spentMinutes: spentMinutes!, performance: performance! } };
-};

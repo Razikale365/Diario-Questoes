@@ -64,6 +64,7 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
 import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../utils/taskResultDraft';
+import { plannerTaskActionAvailability } from '../utils/plannerExecutionUi';
 import { TaskExecutionFields } from './TaskExecutionFields';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
@@ -328,7 +329,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [monthDate, setMonthDate] = useState(() => new Date());
   const [weekDate, setWeekDate] = useState(() => new Date());
   const [disciplineFilter, setDisciplineFilter] = useState('');
-  const [hideDone, setHideDone] = useState(true);
+  const [hideDone, setHideDone] = useState(false);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [maxTasksPerDay, setMaxTasksPerDay] = useState(4);
   const [maxHoursPerDay, setMaxHoursPerDay] = useState(4);
@@ -348,6 +349,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const cutover = useStudyOsCutover();
   const studyOsTarget = cutover.activeTargetSlug;
   const [hydratedSourcePlanTarget, setHydratedSourcePlanTarget] = useState<string | null>(null);
+  const [calendarAutoOrganizeRequestToken, setCalendarAutoOrganizeRequestToken] = useState(0);
 
   useEffect(() => {
     if (section) setActiveSection(section);
@@ -738,9 +740,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   };
 
   const startCalendarAutoOrganize = () => {
-    window.location.hash = '#/calendar';
     setActiveSection('calendar');
-    window.setTimeout(() => window.dispatchEvent(new Event('study-os:auto-organize')), 0);
+    setCalendarAutoOrganizeRequestToken((token) => token + 1);
   };
 
   const applyTaskResult = async (
@@ -990,7 +991,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       {!compact && (
         <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2">
           <span className="text-[10px] font-bold text-white/50">{statusLabel[task.status]}</span>
-          <div className="flex items-center gap-1">
+          {plannerTaskActionAvailability(task.status).canExecute && <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={(event) => {
@@ -1023,7 +1024,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                 Soltar
               </button>
             )}
-          </div>
+          </div>}
         </div>
       )}
     </div>
@@ -1092,7 +1093,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        {plannerTaskActionAvailability(task.status).canExecute && <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <button
             type="button"
             onClick={(event) => {
@@ -1113,7 +1114,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           >
             Prompt IA
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -1403,6 +1404,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           targetSlug={studyOsTarget}
           startDate={toIsoDate(new Date())}
           endDate={toIsoDate(shiftDate(new Date(), 14))}
+          autoOrganizeRequestToken={calendarAutoOrganizeRequestToken}
           onNotice={showToast}
         />
       )}
@@ -1799,6 +1801,7 @@ const PlannerTaskDetailModal: React.FC<{
   onClearSchedule: () => void;
   onArchive: () => void;
 }> = ({ task, onClose, onExecute, onCopyChatPrompt, onApplyResult, onClearSchedule, onArchive }) => {
+  const actionAvailability = plannerTaskActionAvailability(task.status);
   const draftForTask = (current: PlannerTask): TaskExecutionDraft => ({
     performedOn: toIsoDate(new Date()),
     taskMinutes: `${current.spentMinutes || current.durationMinutes || 60}`,
@@ -1955,14 +1958,10 @@ const PlannerTaskDetailModal: React.FC<{
             </div>
             <div className="rounded-lg border border-white/10 bg-[#262626] p-3">
               <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-gray-500">Resultado</p>
-              <TaskExecutionFields draft={draft} errors={draftErrors} onChange={setDraft} />
-              {submitError ? <p role="alert" className="mt-3 border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{submitError}</p> : null}
-              {task.status === 'completed' ? (
-                <div className="mt-3 rounded-lg border border-[#84cc16]/25 bg-[#84cc16]/10 p-3">
-                  <p className="text-xs font-bold text-[#d9f99d]">Concluída e mantida no calendário como evidência.</p>
-                  <button type="button" disabled={submitting} onClick={() => void submitResult('started')} className="mt-2 rounded border border-white/10 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-white/5 disabled:opacity-50">Reabrir tarefa</button>
-                </div>
-              ) : <div className="mt-3 grid grid-cols-2 gap-2">
+              {actionAvailability.canRecordResult ? <>
+                <TaskExecutionFields draft={draft} errors={draftErrors} onChange={setDraft} />
+                {submitError ? <p role="alert" className="mt-3 border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{submitError}</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   disabled={submitting}
@@ -1995,6 +1994,9 @@ const PlannerTaskDetailModal: React.FC<{
                 >
                   <Ban className="h-3.5 w-3.5" /> Pular
                 </button>
+                </div>
+              </> : <div className="rounded-lg border border-[#84cc16]/25 bg-[#84cc16]/10 p-3">
+                <p className="text-xs font-bold text-[#d9f99d]">Concluída e mantida no calendário como evidência.</p>
               </div>}
             </div>
           </aside>
@@ -2002,7 +2004,7 @@ const PlannerTaskDetailModal: React.FC<{
       </div>
 
       <div className="flex shrink-0 flex-wrap justify-end gap-2 rounded-b-2xl border-t border-white/10 bg-[#1a1a1a] p-5">
-        {task.scheduledDate && (
+        {actionAvailability.canExecute && task.scheduledDate && (
           <button
             type="button"
             onClick={onClearSchedule}
@@ -2011,27 +2013,27 @@ const PlannerTaskDetailModal: React.FC<{
             Soltar
           </button>
           )}
-        <button
+        {actionAvailability.canExecute && <button
           type="button"
           onClick={onArchive}
           className="rounded border border-yellow-400/20 bg-yellow-400/10 px-4 py-2 text-xs font-black uppercase text-yellow-300 transition hover:bg-yellow-400/20"
         >
           Arquivar
-        </button>
-        <button
+        </button>}
+        {actionAvailability.canExecute && <button
           type="button"
           onClick={onCopyChatPrompt}
           className="flex items-center gap-2 rounded border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-xs font-black uppercase text-purple-200 transition hover:bg-purple-500/20"
         >
           <Sparkles className="h-4 w-4" /> Prompt IA
-        </button>
-        <button
+        </button>}
+        {actionAvailability.canExecute && <button
           type="button"
           onClick={onExecute}
           className="rounded bg-[#84cc16] px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-[#65a30d]"
         >
           Executar
-        </button>
+        </button>}
       </div>
     </div>
   </div>
@@ -2145,7 +2147,7 @@ const TaskRows: React.FC<{
                   >
                     Restaurar
                   </button>
-                ) : (
+                ) : plannerTaskActionAvailability(task.status).canExecute ? (
                   <>
                     <button
                       type="button"
@@ -2162,7 +2164,7 @@ const TaskRows: React.FC<{
                       Executar
                     </button>
                   </>
-                )}
+                ) : null}
               </div>
             </td>
           </tr>

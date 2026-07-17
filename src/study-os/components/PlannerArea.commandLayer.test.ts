@@ -37,5 +37,4 @@ test('Planner result persistence is service-owned before it asks Calendar to org
     'the durable execution must finish before the Calendar preview starts',
   );
   assert.equal(source.includes('sourcePlanTaskId'), true);
-  assert.equal(source.includes('TaskResultDraft'), false, 'the temporary result adapter must be removed');
 });

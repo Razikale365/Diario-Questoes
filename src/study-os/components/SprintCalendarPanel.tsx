@@ -21,13 +21,15 @@ import {
   type SprintCalendarDocument,
 } from '../api/sprintCalendar';
 import { buildSprintCalendarView } from '../domain/sprintCalendarView';
-import { STUDY_OS_DATA_CHANGED, parseStudyOsDataChangedDetail } from '../dataChanged';
+import { createCalendarAutoOrganizeIntentGate, createCalendarRequestGate } from './SprintCalendarControl';
+import { subscribeStudyOsDataChanged } from './executionUiState';
 
 
 interface SprintCalendarPanelProps {
   targetSlug: string;
   startDate: string;
   endDate: string;
+  autoOrganizeRequestToken?: number;
   onNotice?: (message: string) => void;
 }
 
@@ -83,6 +85,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   targetSlug,
   startDate,
   endDate,
+  autoOrganizeRequestToken = 0,
   onNotice,
 }) => {
   const [document, setDocument] = useState<SprintCalendarDocument | null>(null);
@@ -90,17 +93,22 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   const [busy, setBusy] = useState<'preview' | 'apply' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mutationControllerRef = useRef<AbortController | null>(null);
+  const requestGateRef = useRef<ReturnType<typeof createCalendarRequestGate> | null>(null);
+  const intentGateRef = useRef<ReturnType<typeof createCalendarAutoOrganizeIntentGate> | null>(null);
+  if (!requestGateRef.current) requestGateRef.current = createCalendarRequestGate();
+  if (!intentGateRef.current) intentGateRef.current = createCalendarAutoOrganizeIntentGate();
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (parentSignal?: AbortSignal) => {
+    const request = requestGateRef.current!.begin(parentSignal);
     setLoading(true);
     setError(null);
     try {
-      const head = await fetchSprintCalendarHead(targetSlug, startDate, signal);
-      if (!signal?.aborted) setDocument(head);
+      const head = await fetchSprintCalendarHead(targetSlug, startDate, request.signal);
+      requestGateRef.current!.applyIfCurrent(request, () => setDocument(head));
     } catch (loadError) {
-      if (!signal?.aborted) setError(messageForError(loadError));
+      requestGateRef.current!.applyIfCurrent(request, () => setError(messageForError(loadError)));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      requestGateRef.current!.applyIfCurrent(request, () => setLoading(false));
     }
   }, [startDate, targetSlug]);
 
@@ -111,13 +119,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   }, [load]);
 
   useEffect(() => {
-    const handleDataChanged = (event: Event) => {
-      const detail = parseStudyOsDataChangedDetail((event as CustomEvent<unknown>).detail);
-      if (!detail || detail.targetSlug !== targetSlug || !detail.resources.includes('calendar')) return;
-      void load();
-    };
-    window.addEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
-    return () => window.removeEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+    return subscribeStudyOsDataChanged(window, targetSlug, ['calendar'], () => void load());
   }, [load, targetSlug]);
 
   useEffect(() => {
@@ -125,6 +127,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     return () => {
       mutationControllerRef.current?.abort();
       mutationControllerRef.current = null;
+      requestGateRef.current?.dispose();
     };
   }, [endDate, startDate, targetSlug]);
 
@@ -143,6 +146,8 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   ])] : [], [document]);
 
   const createPreview = useCallback(async (refreshHead = false) => {
+    requestGateRef.current!.invalidate();
+    setLoading(false);
     mutationControllerRef.current?.abort();
     const controller = new AbortController();
     mutationControllerRef.current = controller;
@@ -181,10 +186,9 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   }, [document, endDate, onNotice, startDate, targetSlug]);
 
   useEffect(() => {
-    const handleAutoOrganize = () => void createPreview(true);
-    window.addEventListener('study-os:auto-organize', handleAutoOrganize);
-    return () => window.removeEventListener('study-os:auto-organize', handleAutoOrganize);
-  }, [createPreview]);
+    if (!intentGateRef.current!.consume(autoOrganizeRequestToken)) return;
+    void createPreview(true);
+  }, [autoOrganizeRequestToken, createPreview]);
 
   const applyPreview = async () => {
     if (!document || document.run.decision !== 'draft') return;

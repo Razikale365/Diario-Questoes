@@ -18,7 +18,13 @@ import {
 import { StudyOsApiError } from '../api/client';
 import { TaskExecutionFields } from '../../components/TaskExecutionFields';
 import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../../utils/taskResultDraft';
-import { STUDY_OS_DATA_CHANGED, parseStudyOsDataChangedDetail, announceStudyOsDataChanged } from '../dataChanged';
+import { announceStudyOsDataChanged } from '../dataChanged';
+import {
+  buildSprintActionExecutionInput,
+  mergeSavedSprintAction,
+  resultRefreshNotice,
+  subscribeStudyOsDataChanged,
+} from './executionUiState';
 import {
   fetchOptionalSprintDay,
   fetchSourcePlanTasks,
@@ -286,13 +292,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   }, [load]);
 
   useEffect(() => {
-    const handleDataChanged = (event: Event) => {
-      const detail = parseStudyOsDataChangedDetail((event as CustomEvent<unknown>).detail);
-      if (!detail || detail.targetSlug !== targetSlug || !detail.resources.includes('sprint-day')) return;
-      void load();
-    };
-    window.addEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
-    return () => window.removeEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+    return subscribeStudyOsDataChanged(window, targetSlug, ['sprint-day'], () => void load());
   }, [load, targetSlug]);
 
   const createDay = async (
@@ -370,16 +370,12 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
     setBusy(`result-${action.id}`);
     try {
       const { performanceBp: _derivedPerformanceBp, ...executionInput } = parsed.value;
-      const saved = await recordSourceTaskExecution(action.sourcePlanTaskId, {
-        outcome: resultDraft.state,
-        ...executionInput,
-        sprintActionId: action.id,
-        expectedVersion: action.version,
-      }, mutationKey(`result-${action.id}`, date));
-      setDay((current) => current ? {
-        ...current,
-        actions: current.actions.map((item) => item.id === saved.sprintAction?.id ? { ...item, ...saved.sprintAction } : item),
-      } : current);
+      const saved = await recordSourceTaskExecution(
+        action.sourcePlanTaskId,
+        buildSprintActionExecutionInput(action, resultDraft.state, executionInput),
+        mutationKey(`result-${action.id}`, date),
+      );
+      setDay((current) => current ? mergeSavedSprintAction(current, saved) : current);
       setResultActionId(null);
       setResultDraft(null);
       setExecutionDraft(null);
@@ -398,9 +394,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
           setError(`Resultado salvo; recálculo e auditoria pendentes: ${errorMessage(auditError)}`);
         }
       }
-      showToast(refreshed
-        ? 'Resultado salvo e restante do dia recalculado.'
-        : 'Resultado salvo; recálculo pendente.');
+      showToast(resultRefreshNotice(Boolean(refreshed)));
     } catch (mutationError) {
       setError(errorMessage(mutationError));
     } finally {

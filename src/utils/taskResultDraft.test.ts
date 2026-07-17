@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   parseTaskExecutionDraft,
-  parseTaskResultDraft,
   type TaskExecutionDraft,
 } from './taskResultDraft';
 
@@ -76,12 +75,5 @@ test('execution drafts reject future dates and time or count overflows', () => {
     correctCount: 'Use uma contagem válida',
     wrongCount: 'Use uma contagem válida',
     doubtCount: 'Use uma contagem válida',
-  });
-});
-
-test('legacy PlannerArea draft parsing remains isolated during the rich-draft migration', () => {
-  assert.deepEqual(parseTaskResultDraft({ spentMinutes: '45', performance: '91' }), {
-    ok: true,
-    value: { spentMinutes: 45, performance: 91 },
   });
 });
