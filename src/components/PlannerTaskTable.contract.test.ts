@@ -27,3 +27,18 @@ test('planner task tables share configurable data columns while actions stay fix
   assert.doesNotMatch(source, /movePlannerTaskColumn\([^)]*['"]actions/);
   assert.doesNotMatch(source, /setPlannerTaskColumnHidden\([^)]*['"]actions/);
 });
+
+test('task table preference storage failures cannot block PlannerArea rendering', () => {
+  assert.match(
+    source,
+    /const loadPlannerTaskTablePreferences = \(\).*?try \{.*?localStorage\.getItem\(PLANNER_TASK_TABLE_PREFERENCES_KEY\).*?\} catch \{.*?parsePlannerTaskTablePreferences\(null\).*?\}/s,
+  );
+  assert.match(
+    source,
+    /const persistPlannerTaskTablePreferences = \(preferences: PlannerTaskTablePreferences\).*?try \{.*?localStorage\.setItem\(PLANNER_TASK_TABLE_PREFERENCES_KEY, JSON\.stringify\(preferences\)\).*?\} catch.*?console\.(?:warn|error).*?\}/s,
+  );
+  assert.doesNotMatch(
+    source,
+    /useState<PlannerTaskTablePreferences>\(\(\) =>\s*parsePlannerTaskTablePreferences\(localStorage\.getItem/,
+  );
+});

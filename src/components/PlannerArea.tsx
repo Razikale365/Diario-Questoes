@@ -136,6 +136,22 @@ const TASKS_KEY = 'ls_planner_tasks_v1';
 const META_KEY = 'ls_planner_meta_v1';
 const HISTORY_KEY = 'ls_planner_meta_history_v1';
 
+const loadPlannerTaskTablePreferences = () => {
+  try {
+    return parsePlannerTaskTablePreferences(localStorage.getItem(PLANNER_TASK_TABLE_PREFERENCES_KEY));
+  } catch {
+    return parsePlannerTaskTablePreferences(null);
+  }
+};
+
+const persistPlannerTaskTablePreferences = (preferences: PlannerTaskTablePreferences) => {
+  try {
+    localStorage.setItem(PLANNER_TASK_TABLE_PREFERENCES_KEY, JSON.stringify(preferences));
+  } catch (storageError) {
+    console.warn('[Diário LS] Planner task table preferences were not persisted.', storageError);
+  }
+};
+
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const HOUR_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
 
@@ -372,9 +388,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const [taskSearch, setTaskSearch] = useState(taskQuery);
   const [taskQuickView, setTaskQuickView] = useState<TaskQuickView>('all');
   const [taskDiscipline, setTaskDiscipline] = useState('');
-  const [taskTablePreferences, setTaskTablePreferences] = useState<PlannerTaskTablePreferences>(() =>
-    parsePlannerTaskTablePreferences(localStorage.getItem(PLANNER_TASK_TABLE_PREFERENCES_KEY)),
-  );
+  const [taskTablePreferences, setTaskTablePreferences] = useState<PlannerTaskTablePreferences>(loadPlannerTaskTablePreferences);
   const lastSourceSync = useRef('');
   const sourcePlanHydrationInFlight = useRef(false);
   const cutover = useStudyOsCutover();
@@ -409,7 +423,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   }, [metaHistory]);
 
   useEffect(() => {
-    localStorage.setItem(PLANNER_TASK_TABLE_PREFERENCES_KEY, JSON.stringify(taskTablePreferences));
+    persistPlannerTaskTablePreferences(taskTablePreferences);
   }, [taskTablePreferences]);
 
   useEffect(() => {
