@@ -16,6 +16,8 @@ import {
   parseSprintEvidenceList,
   parseSprintProjection,
   parseSprintTrajectory,
+  parseTaskExecutionResult,
+  recordSourceTaskExecution,
   updateSprintAction,
 } from './sprint';
 
@@ -197,6 +199,37 @@ const day = {
   replayed: false,
 };
 
+const executionResult = {
+  execution: {
+    id: 81,
+    outcome: 'completed',
+    performedOn: '2026-07-16',
+    taskMinutes: 60,
+    exerciseMinutes: 35,
+    questionsTotal: 20,
+    correctCount: 16,
+    wrongCount: 4,
+    doubtCount: 2,
+    performanceBp: 8000,
+    energyAfter: 3,
+    notes: 'Revisão registrada no dia correto',
+    recordedAt: '2026-07-17T09:00:00.000000Z',
+    version: 1,
+  },
+  sourceTask: {
+    id: 4,
+    targetSlug: 'sefaz_ce',
+    status: 'completed',
+    spentMinutes: 60,
+    performanceBp: 8000,
+    provenance: { observedOn: '2026-07-16' },
+  },
+  sprintAction: { id: 2, state: 'completed', decision: 'accepted', version: 2 },
+  calendarItem: { id: 8, state: 'completed', completedAt: '2026-07-16T12:00:00.000000Z', version: 2 },
+  replayed: false,
+  refreshRequired: true,
+};
+
 test('sprint parsers accept the official config and auditable day contract', () => {
   assert.deepEqual(parseSprintConfig(config), config);
   assert.deepEqual(parseSprintDay(day), day);
@@ -315,6 +348,49 @@ test('sprint requests preserve idempotency and exact action result payloads', as
     energyAfter: 2,
     questionRefs: [{ questionFingerprint: 'q-1', sourceTaskId: 'task-1', reason: 'doubt' }],
   });
+});
+
+test('source execution request uses the authoritative URL, payload, and idempotency key', async (context) => {
+  let request: { input: string; init?: RequestInit } | undefined;
+  context.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    request = { input: String(input), init };
+    return new Response(JSON.stringify(executionResult), {
+      status: 201, headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  assert.deepEqual(await recordSourceTaskExecution(4, {
+    outcome: 'completed', performedOn: '2026-07-16', taskMinutes: 60, exerciseMinutes: 35,
+    questionsTotal: 20, correctCount: 16, wrongCount: 4, doubtCount: 2,
+    energyAfter: 3, notes: 'Revisão registrada no dia correto',
+  }, 'execution-key'), executionResult);
+
+  assert.equal(request?.input, '/api/v1/source-plans/tasks/4/executions');
+  assert.equal(request?.init?.method, 'POST');
+  assert.equal(new Headers(request?.init?.headers).get('Idempotency-Key'), 'execution-key');
+  assert.deepEqual(JSON.parse(String(request?.init?.body)), {
+    outcome: 'completed', performedOn: '2026-07-16', taskMinutes: 60, exerciseMinutes: 35,
+    questionsTotal: 20, correctCount: 16, wrongCount: 4, doubtCount: 2,
+    energyAfter: 3, notes: 'Revisão registrada no dia correto',
+  });
+});
+
+test('source execution parser rejects malformed terminal response fields', () => {
+  assert.deepEqual(parseTaskExecutionResult(executionResult), executionResult);
+  assert.throws(
+    () => parseTaskExecutionResult({
+      ...executionResult,
+      execution: { ...executionResult.execution, outcome: 'saved', performanceBp: 7900 },
+    }),
+    /task execution/i,
+  );
+  assert.throws(
+    () => parseTaskExecutionResult({
+      ...executionResult,
+      sourceTask: { ...executionResult.sourceTask, status: 'pending' },
+    }),
+    /task execution/i,
+  );
 });
 
 test('optional sprint day only converts the structured missing response to null', async (context) => {

@@ -54,6 +54,7 @@ test('persisted LS tasks hydrate the calendar without losing execution state', (
   });
 
   assert.equal(task.id, 'meta-47-29');
+  assert.equal(task.sourcePlanTaskId, 4);
   assert.equal(task.number, 29);
   assert.equal(task.scheduledDate, '2026-07-14');
   assert.equal(task.startTime, '08:00');
@@ -263,6 +264,21 @@ test('SQLite restoration keeps a newer local edit for the same LS task', () => {
   assert.equal(merged[0]?.description, 'Edicao local mais recente');
   assert.equal(merged[0]?.status, 'started');
   assert.equal(merged[0]?.updatedAt, '2026-07-13T12:00:00.000Z');
+});
+
+test('source-plan identity survives restoration merges', () => {
+  const base = {
+    id: 'meta-47-task-29', sourcePlanTaskId: 4, number: 29, metaNumber: 47,
+    discipline: 'LTE', format: 'Revisão', description: 'ICMS', spentMinutes: 0,
+    estimatedMinutes: 60, performance: null, status: 'pending' as const, relevance: 10,
+    durationMinutes: 60, source: 'ls-meta-text' as const, plannerSourceKind: 'ls' as const,
+    createdAt: '2026-07-16T08:00:00.000Z', updatedAt: '2026-07-16T08:00:00.000Z',
+  };
+  const [merged] = mergeRestoredSourcePlanTasks([
+    { ...base, sourcePlanTaskId: undefined, updatedAt: '2026-07-16T09:00:00.000Z' },
+  ], [base]);
+
+  assert.equal(merged.sourcePlanTaskId, 4);
 });
 
 test('SQLite restoration cannot regress a completed pinned task', () => {

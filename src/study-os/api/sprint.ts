@@ -342,6 +342,70 @@ export interface SourcePlanImportResult {
   replayed: boolean;
 }
 
+export type TaskExecutionOutcome = 'started' | 'completed' | 'failed' | 'skipped';
+
+export interface SourceTaskExecutionInput {
+  outcome: TaskExecutionOutcome;
+  performedOn: string;
+  taskMinutes: number;
+  exerciseMinutes: number;
+  questionsTotal: number;
+  correctCount: number;
+  wrongCount: number;
+  doubtCount: number;
+  energyAfter: number | null;
+  notes: string;
+}
+
+export interface TaskExecution {
+  id: number;
+  outcome: TaskExecutionOutcome;
+  performedOn: string;
+  taskMinutes: number;
+  exerciseMinutes: number;
+  questionsTotal: number;
+  correctCount: number;
+  wrongCount: number;
+  doubtCount: number;
+  performanceBp: number | null;
+  energyAfter: number | null;
+  notes: string;
+  recordedAt: string;
+  version: number;
+}
+
+export interface TaskExecutionSourceTask {
+  id: number;
+  targetSlug: string;
+  status: TaskExecutionOutcome;
+  spentMinutes: number;
+  performanceBp: number | null;
+  provenance: Record<string, unknown>;
+}
+
+export interface TaskExecutionSprintAction {
+  id: number;
+  state: SprintActionState;
+  decision: SprintDecision;
+  version: number;
+}
+
+export interface TaskExecutionCalendarItem {
+  id: number;
+  state: SprintActionState;
+  completedAt: string | null;
+  version: number;
+}
+
+export interface TaskExecutionResult {
+  execution: TaskExecution;
+  sourceTask: TaskExecutionSourceTask;
+  sprintAction: TaskExecutionSprintAction | null;
+  calendarItem: TaskExecutionCalendarItem | null;
+  replayed: boolean;
+  refreshRequired: boolean;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === 'string';
@@ -352,8 +416,14 @@ const isNonNegative = (value: unknown): value is number => isInteger(value) && N
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const inRange = (value: unknown, minimum: number, maximum: number): value is number =>
   isNumber(value) && value >= minimum && value <= maximum;
-const isDate = (value: unknown): value is string =>
-  isString(value) && /^\d{4}-\d{2}-\d{2}$/.test(value);
+const isDate = (value: unknown): value is string => {
+  if (!isString(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+};
 const isTimestamp = (value: unknown): value is string =>
   isString(value)
   && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
@@ -808,6 +878,81 @@ export const parseSourcePlanTaskList = (value: unknown): SourcePlanTaskList => {
   };
 };
 
+const executionOutcomes = ['started', 'completed', 'failed', 'skipped'] as const;
+
+export const parseTaskExecution = (value: unknown): TaskExecution => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !oneOf(value.outcome, executionOutcomes)
+    || !isDate(value.performedOn)
+    || !isNonNegative(value.taskMinutes)
+    || !isNonNegative(value.exerciseMinutes)
+    || value.exerciseMinutes > value.taskMinutes
+    || !isNonNegative(value.questionsTotal)
+    || !isNonNegative(value.correctCount)
+    || !isNonNegative(value.wrongCount)
+    || !isNonNegative(value.doubtCount)
+    || value.correctCount + value.wrongCount > value.questionsTotal
+    || value.doubtCount > value.questionsTotal
+    || !(value.performanceBp === null || isBasisPoints(value.performanceBp))
+    || !(value.energyAfter === null || inRange(value.energyAfter, 1, 5))
+    || !isString(value.notes)
+    || !isTimestamp(value.recordedAt)
+    || !isPositive(value.version)) invalid('task execution');
+  const execution = value as Record<string, unknown>;
+  const expectedPerformanceBp = (execution.correctCount as number) + (execution.wrongCount as number) === 0
+    ? null
+    : Math.round(((execution.correctCount as number) * 10000) / ((execution.correctCount as number) + (execution.wrongCount as number)));
+  if (execution.performanceBp !== expectedPerformanceBp) invalid('task execution');
+  return value as unknown as TaskExecution;
+};
+
+const parseTaskExecutionSourceTask = (value: unknown): TaskExecutionSourceTask => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !isText(value.targetSlug)
+    || !oneOf(value.status, executionOutcomes)
+    || !isNonNegative(value.spentMinutes)
+    || !(value.performanceBp === null || isBasisPoints(value.performanceBp))
+    || !isRecord(value.provenance)) invalid('task execution source task');
+  return value as unknown as TaskExecutionSourceTask;
+};
+
+const parseTaskExecutionSprintAction = (value: unknown): TaskExecutionSprintAction => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !oneOf(value.state, ['pending', 'active', 'completed', 'skipped', 'failed'] as const)
+    || !oneOf(value.decision, ['pending', 'accepted', 'rejected'] as const)
+    || !isPositive(value.version)) invalid('task execution sprint action');
+  return value as unknown as TaskExecutionSprintAction;
+};
+
+const parseTaskExecutionCalendarItem = (value: unknown): TaskExecutionCalendarItem => {
+  if (!isRecord(value)
+    || !isPositive(value.id)
+    || !oneOf(value.state, ['pending', 'active', 'completed', 'skipped', 'failed'] as const)
+    || !(value.completedAt === null || isTimestamp(value.completedAt))
+    || !isPositive(value.version)) invalid('task execution calendar item');
+  return value as unknown as TaskExecutionCalendarItem;
+};
+
+export const parseTaskExecutionResult = (value: unknown): TaskExecutionResult => {
+  if (!isRecord(value)
+    || !isRecord(value.execution)
+    || !isRecord(value.sourceTask)
+    || !(value.sprintAction === null || isRecord(value.sprintAction))
+    || !(value.calendarItem === null || isRecord(value.calendarItem))
+    || typeof value.replayed !== 'boolean'
+    || typeof value.refreshRequired !== 'boolean') invalid('task execution result');
+  const result = value as Record<string, unknown>;
+  const execution = parseTaskExecution(result.execution);
+  const sourceTask = parseTaskExecutionSourceTask(result.sourceTask);
+  const sprintAction = result.sprintAction === null ? null : parseTaskExecutionSprintAction(result.sprintAction);
+  const calendarItem = result.calendarItem === null ? null : parseTaskExecutionCalendarItem(result.calendarItem);
+  if (sourceTask.performanceBp !== execution.performanceBp) invalid('task execution result');
+  return { ...(value as unknown as TaskExecutionResult), execution, sourceTask, sprintAction, calendarItem };
+};
+
 const jsonMutation = (method: string, body: object, idempotencyKey: string): RequestInit => ({
   method,
   headers: {
@@ -890,6 +1035,14 @@ export const updateSprintAction = async (
   idempotencyKey: string,
 ): Promise<SprintAction> => parseSprintAction(await requestJson(
   `/api/v1/sprints/actions/${actionId}`, jsonMutation('PUT', input, idempotencyKey),
+));
+
+export const recordSourceTaskExecution = async (
+  taskId: number,
+  input: SourceTaskExecutionInput,
+  idempotencyKey: string,
+): Promise<TaskExecutionResult> => parseTaskExecutionResult(await requestJson(
+  `/api/v1/source-plans/tasks/${taskId}/executions`, jsonMutation('POST', input, idempotencyKey),
 ));
 
 export const importSourcePlan = async (

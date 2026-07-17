@@ -143,7 +143,12 @@ export const mergeRestoredSourcePlanTasks = (
     }
     const localIsNewer = Number.isFinite(localUpdatedAt)
       && (!Number.isFinite(persistedUpdatedAt) || localUpdatedAt > persistedUpdatedAt);
-    if (localIsNewer) return local;
+    if (localIsNewer) {
+      return {
+        ...local,
+        sourcePlanTaskId: local.sourcePlanTaskId ?? task.sourcePlanTaskId,
+      };
+    }
     const localHasAuthority = local.status === 'completed'
       || local.status === 'started'
       || local.status === 'failed'
@@ -193,6 +198,7 @@ export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => 
     source: plannerSource(task),
     plannerSourceKind: task.sourceKind === 'trilha' ? 'trilha_estrategica' : task.sourceKind,
     targetSlug: task.targetSlug,
+    sourcePlanTaskId: task.id,
     plannedBlockKind: blockKind(task),
     plannedQuestions: plannedQuestions === undefined ? undefined : Math.max(0, Math.round(plannedQuestions)),
     materialHint: task.materialHint || undefined,
