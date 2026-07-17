@@ -190,6 +190,15 @@ Plan: `docs/superpowers/plans/2026-07-13-in-task-pdf-question-import.md`
 | 5. Existing-task entry points | complete | `d9d013d` | `6ae7998` | 4 focused; 285 full frontend; lint; build; diff-check | spec compliant; quality approved after explicit history-identity fix |
 | 6. Browser acceptance and final gate | pending | pending | pending | pending | pending |
 
+## Planner Tasks Table Quality of Life
+
+Plan: `docs/superpowers/plans/2026-07-17-planner-task-table-qol.md`
+
+| Task | Status | Base | Head | Verification | Review |
+| --- | --- | --- | --- | --- | --- |
+| 1. Pure column preferences and stable sort | complete | `dd52aae` | `77ccff2` | 7 focused; lint; diff-check | spec compliant; quality approved |
+| 2. Configurable task table UI | pending | pending | pending | pending | pending |
+
 ## Sprint V2: Evidence and Real Calibration
 
 Plan: `docs/superpowers/plans/2026-07-14-sprint-v2-evidence-calibration.md`
