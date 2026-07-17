@@ -1,8 +1,8 @@
-# In-Task PDF Question Import Implementation Plan
+# In-Task PDF and Text Question Import Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let an existing Diario task import complete objective questions from a PDF into a new section, a new block, or an existing block without losing study progress.
+**Goal:** Let an existing Diario task import complete objective questions from a PDF or pasted text into a new section, a new block, or an existing block without losing study progress.
 
 **Architecture:** Keep PDF extraction in the current parser, build and deduplicate canonical question-bank items before touching the task, and pass those items through a pure import planner that returns an immutable task plus a structured summary. A separate storage helper commits the task array and question bank together with rollback, while one shared modal owns parsing, destination selection, preview, and confirmation for every UI entry point.
 
@@ -21,6 +21,7 @@
 - Re-importing the same batch into the same destination must not duplicate task questions or question-bank items.
 - Imported gabaritos start hidden in execution views.
 - A task/question-bank persistence failure must restore both previous localStorage values before any React state or update event changes.
+- PDF and pasted text must normalize to the same preview input and therefore have identical deduplication, conflict, destination, and rollback behavior.
 
 ---
 
@@ -1093,7 +1094,7 @@ import { readFileSync } from 'node:fs';
 const componentPath = new URL('./TaskQuestionPdfImportModal.tsx', import.meta.url);
 const source = readFileSync(componentPath, 'utf8');
 
-test('task PDF modal exposes the complete safe import flow', () => {
+test('task question modal exposes PDF and pasted-text safe import flows', () => {
   for (const label of [
     'Arquivo e fonte', 'Destino', 'Prévia', 'Confirmar',
     'Detectadas', 'Rejeitadas', 'No banco', 'Enriquecidas', 'Adicionadas', 'Conflitos',
@@ -1104,6 +1105,8 @@ test('task PDF modal exposes the complete safe import flow', () => {
     assert.match(source, new RegExp(destination));
   }
   assert.match(source, /importObjectiveQuestionsFromPdf/);
+  assert.match(source, /parseObjectiveQuestions/);
+  assert.match(source, /Colar texto/);
   assert.match(source, /buildTaskQuestionImportPreview/);
   assert.match(source, /disabled=\{!canConfirm \|\| isCommitting\}/);
   assert.doesNotMatch(source, /value=["']tec["']/);
@@ -1142,6 +1145,8 @@ setParsed(imported);
 ```
 
 Catch parser failures, retain the selected file, and show `Não foi possível ler este PDF.` inside the modal.
+
+Add a segmented input selector with `PDF` and `Colar texto`. Text mode renders a labeled textarea and `Processar texto`; it calls `parseObjectiveQuestions(pastedText, { requireExplicitQuestionLabel: sourceKind === 'professor' })`, maps the result to the same structural parsed batch (`fileName: 'texto-colado.txt'`, `pageCount: 0`, parser rejection count), and never mutates task/bank state before confirmation. Empty text or zero detected objective questions keeps confirmation disabled with `Nenhuma questão objetiva detectada.`
 
 - [ ] **Step 4: Implement destination selectors and memoized preview**
 
@@ -1228,11 +1233,11 @@ const blockModalSource = read('./BlockEditModal.tsx');
 const sectionModalSource = read('./SectionEditModal.tsx');
 
 test('every existing-task surface opens the shared PDF importer', () => {
-assert.match(appSource, /Importar PDF/);
+assert.match(appSource, /Importar questões/);
 assert.match(blockCardSource, /Importar PDF nesta seção/);
 assert.match(blockCardSource, /Importar PDF neste bloco/);
-assert.match(blockModalSource, /Importar PDF/);
-assert.match(sectionModalSource, /Criar e importar PDF/);
+assert.match(blockModalSource, /Importar questões/);
+assert.match(sectionModalSource, /Criar e importar questões/);
 assert.match(appSource, /setTaskWorkTab\('questoes'\)/);
 assert.match(appSource, /commitTaskQuestionImport/);
 assert.match(blockCardSource, /onImportQuestionsFromPdf/);

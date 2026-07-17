@@ -1,12 +1,12 @@
-# In-Task PDF Question Import Design
+# In-Task PDF and Pasted-Text Question Import Design
 
 ## Goal
 
-Let the student add complete objective questions from a PDF to an already-created task, including while the task is in progress. The same flow must also enrich blocks that currently contain only question numbers and a manual answer key, without discarding answers, doubts, observations, or attempt history.
+Let the student add complete objective questions from a PDF or pasted task tips/text to an already-created task, including while the task is in progress. The same flow must also enrich blocks that currently contain only question numbers and a manual answer key, without discarding answers, doubts, observations, or attempt history.
 
 ## Scope
 
-- Add one shared **Importar PDF** modal for existing tasks.
+- Add one shared **Importar questões** modal for existing tasks, with `PDF` and `Colar texto` inputs.
 - Expose it from the task footer, a section header, and an activity block toolbar.
 - Reuse the current PDF parser and question-bank metadata model.
 - Support three destinations:
@@ -39,7 +39,7 @@ The modal may change destination before confirmation. A locked target block or l
 
 The modal contains four compact stages in one surface:
 
-1. **Arquivo e fonte:** PDF, source kind, source name, target, discipline, bank, and lesson. Task metadata pre-fills target and discipline.
+1. **Conteúdo e fonte:** PDF or pasted text, source kind, source name, target, discipline, bank, and lesson. Task metadata pre-fills target and discipline. Pasted text is parsed with `parseObjectiveQuestions` and follows the same preview/commit pipeline.
 2. **Destino:** segmented choice for `Nova seção`, `Nova atividade`, or `Bloco existente`, followed by the relevant section/block selector.
 3. **Prévia:** detected questions, rejected blocks, duplicates, questions to enrich, questions to append, and content/gabarito conflicts.
 4. **Confirmar:** one explicit import command. Parsing and preview never mutate task or bank data.
