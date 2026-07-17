@@ -181,7 +181,7 @@ export const BlockEditModal: React.FC<BlockEditModalProps> = ({
             className="border border-[#f59e0b]/40 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] px-5 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-2"
           >
             <FileUp className="w-5 h-5" />
-            {modalState.id ? 'Importar questões neste bloco' : 'Importar questões'}
+            {modalState.id ? 'Importar questões neste bloco (PDF ou texto)' : 'Importar questões (PDF ou texto)'}
           </button>
           <button 
             onClick={onSave} 

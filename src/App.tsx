@@ -269,7 +269,10 @@ function App() {
     taskId: string;
     destination: TaskQuestionImportDestination;
   } | null>(null);
-  const [gabaritoModal, setGabaritoModal] = useState<string | null>(null);
+  const [gabaritoModal, setGabaritoModal] = useState<{
+    taskId: string;
+    blockId: string;
+  } | null>(null);
   const [viewingTaskId, setViewingTaskId] = useState<string | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
@@ -722,7 +725,7 @@ function App() {
                                   onToggleLock={(blockId) => toggleLock(activeTaskId!, blockId)}
                                   onEditBlock={(editedBlock) => openEditBlock(activeTask.id, editedBlock)}
                                   onDeleteBlock={handleDeleteBlock}
-                                  onImportGabarito={setGabaritoModal}
+                                  onImportGabarito={(blockId) => setGabaritoModal({ taskId: activeTask.id, blockId })}
                                   onToggleLayout={(blockId) => toggleBlockLayout(activeTaskId!, blockId)}
                                   onToggleStats={(blockId) => toggleBlockStats(activeTaskId!, blockId)}
                                   onToggleSectionLock={(title) => toggleSectionLock(activeTaskId!, title)}
@@ -756,7 +759,7 @@ function App() {
                       onClick={() => openTaskPdfImport(activeTask.id, { kind: 'new_section', sectionTitle: '' })}
                       className="flex items-center gap-2 px-8 py-4 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] rounded-2xl transition-all border border-dashed border-[#f59e0b]/30 hover:border-[#f59e0b] font-black uppercase tracking-widest text-xs group"
                     >
-                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões
+                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões (PDF ou texto)
                     </button>
                   </div>
                 </div>
@@ -852,7 +855,7 @@ function App() {
                             onToggleLock={(bid) => toggleLock(viewingTask.id, bid)}
                             onEditBlock={(editedBlock) => openEditBlock(viewingTask.id, editedBlock)}
                             onDeleteBlock={handleDeleteBlock}
-                            onImportGabarito={setGabaritoModal}
+                            onImportGabarito={(blockId) => setGabaritoModal({ taskId: viewingTask.id, blockId })}
                             onToggleLayout={(bid) => toggleBlockLayout(viewingTask.id, bid)}
                             onToggleStats={(bid) => toggleBlockStats(viewingTask.id, bid)}
                             onToggleSectionLock={(title) => toggleSectionLock(viewingTask.id, title)}
@@ -884,7 +887,7 @@ function App() {
                       onClick={() => openTaskPdfImport(viewingTask.id, { kind: 'new_section', sectionTitle: '' })}
                       className="flex items-center gap-2 px-8 py-4 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#fcd34d] rounded-2xl transition-all border border-dashed border-[#f59e0b]/30 hover:border-[#f59e0b] font-black uppercase tracking-widest text-xs group"
                     >
-                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões
+                      <FileUp className="w-5 h-5 group-hover:scale-110 transition-transform" /> Importar questões (PDF ou texto)
                     </button>
                   </div>
                 </div>
@@ -937,7 +940,7 @@ function App() {
           isOpen={!!gabaritoModal}
           onClose={() => setGabaritoModal(null)}
           onImport={(answers) => {
-            importGabarito(activeTaskId || viewingTaskId!, gabaritoModal, answers);
+            importGabarito(gabaritoModal.taskId, gabaritoModal.blockId, answers);
             setGabaritoModal(null);
             showToast('Gabarito importado!');
           }}

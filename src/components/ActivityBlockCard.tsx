@@ -311,8 +311,8 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                 type="button"
                 onClick={() => onImportQuestionsFromPdf?.({ kind: 'new_block', sectionTitle: block.title })}
                 className="p-2 text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-xl transition-all"
-                title="Importar PDF nesta seção"
-                aria-label="Importar PDF nesta seção"
+                title="Importar questões nesta seção (PDF ou texto)"
+                aria-label="Importar questões nesta seção (PDF ou texto)"
               >
                 <FileUp className="w-5 h-5" />
               </button>
@@ -653,8 +653,8 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
               type="button"
               onClick={() => onImportQuestionsFromPdf?.({ kind: 'existing_block', blockId: block.id })}
               className="p-1.5 text-gray-600 hover:text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-colors"
-              title="Importar PDF neste bloco"
-              aria-label="Importar PDF neste bloco"
+              title="Importar questões neste bloco (PDF ou texto)"
+              aria-label="Importar questões neste bloco (PDF ou texto)"
             >
               <FileUp className="w-4 h-4" />
             </button>

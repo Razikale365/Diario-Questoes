@@ -140,7 +140,7 @@ export const SectionEditModal: React.FC<SectionEditModalProps> = ({
                 className="flex-[1.5] px-6 py-4 bg-[#f59e0b]/15 hover:bg-[#f59e0b]/25 text-[#fcd34d] rounded-2xl font-black shadow-xl shadow-black/20 flex items-center justify-center gap-2 transition-all disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileUp className="w-5 h-5" />
-                Criar e importar questões
+                Criar e importar questões (PDF ou texto)
               </button>}
             </div>
           </div>
