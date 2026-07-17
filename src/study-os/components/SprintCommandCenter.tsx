@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 
 import { StudyOsApiError } from '../api/client';
-import { SprintCalendarPanel } from './SprintCalendarPanel';
+import { TaskExecutionFields } from '../../components/TaskExecutionFields';
+import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../../utils/taskResultDraft';
+import { STUDY_OS_DATA_CHANGED, parseStudyOsDataChangedDetail, announceStudyOsDataChanged } from '../dataChanged';
 import {
   fetchOptionalSprintDay,
   fetchSourcePlanTasks,
@@ -25,6 +27,7 @@ import {
   fetchSprintProjection,
   fetchSprintTrajectory,
   generateSprintDay,
+  recordSourceTaskExecution,
   refreshSprintDay,
   updateSprintAction,
   type SprintAction,
@@ -33,7 +36,6 @@ import {
   type SprintDay,
   type SprintEvidenceList,
   type SprintProjection,
-  type SprintQuestionRef,
   type SprintRecommendation,
   type SprintTrajectory,
   type SourcePlanTask,
@@ -43,7 +45,6 @@ import {
 interface SprintCommandCenterProps {
   targetSlug: string;
   onOpenSourceTask: (taskId: string) => void;
-  getQuestionRefs: (taskId: string) => SprintQuestionRef[];
   showToast: (message: string) => void;
 }
 
@@ -56,6 +57,18 @@ interface ResultDraft {
   doubtCount: number;
   energyAfter: number;
 }
+
+const executionDraftForAction = (action: SprintAction, energy: number): TaskExecutionDraft => ({
+  performedOn: isoToday(),
+  taskMinutes: `${action.durationMinutes}`,
+  exerciseMinutes: '0',
+  questionsTotal: `${action.plannedQuestions}`,
+  correctCount: '0',
+  wrongCount: '0',
+  doubtCount: '0',
+  energyAfter: energy,
+  notes: '',
+});
 
 const recommendationLabel: Record<SprintRecommendation, string> = {
   execute: 'Executar',
@@ -168,7 +181,6 @@ const tecUrlForAction = (action: SprintAction) => {
 export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   targetSlug,
   onOpenSourceTask,
-  getQuestionRefs,
   showToast,
 }) => {
   const [config, setConfig] = useState<SprintConfig | null>(null);
@@ -190,6 +202,8 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   const [minimumMode, setMinimumMode] = useState(false);
   const [resultActionId, setResultActionId] = useState<number | null>(null);
   const [resultDraft, setResultDraft] = useState<ResultDraft | null>(null);
+  const [executionDraft, setExecutionDraft] = useState<TaskExecutionDraft | null>(null);
+  const [executionErrors, setExecutionErrors] = useState<Partial<Record<keyof TaskExecutionDraft, string>>>({});
 
   const refreshAuditState = useCallback(async () => {
     const [nextTrajectory, nextEvidence, nextSourceTasks] = await Promise.all([
@@ -271,6 +285,16 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
     return () => controller.abort();
   }, [load]);
 
+  useEffect(() => {
+    const handleDataChanged = (event: Event) => {
+      const detail = parseStudyOsDataChangedDetail((event as CustomEvent<unknown>).detail);
+      if (!detail || detail.targetSlug !== targetSlug || !detail.resources.includes('sprint-day')) return;
+      void load();
+    };
+    window.addEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+    return () => window.removeEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+  }, [load, targetSlug]);
+
   const createDay = async (
     refresh: boolean,
     announce = true,
@@ -298,6 +322,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
         await refreshAuditState();
       } catch (auditError) {
         setError(`Dia atualizado, mas a auditoria não foi recarregada: ${errorMessage(auditError)}`);
+        return null;
       }
       if (announce) showToast(refresh ? 'Dia recalculado.' : 'Sprint do dia gerado.');
       return next;
@@ -336,31 +361,35 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   };
 
   const submitResult = async (action: SprintAction) => {
-    if (!resultDraft) return;
+    if (!resultDraft || !executionDraft || action.sourcePlanTaskId === null) return;
+    const parsed = parseTaskExecutionDraft(executionDraft);
+    if (!parsed.ok) {
+      setExecutionErrors(parsed.errors);
+      return;
+    }
     setBusy(`result-${action.id}`);
     try {
-      const questionRefs = action.externalTaskId
-        ? getQuestionRefs(action.externalTaskId)
-        : action.questionRefs;
-      const saved = await updateSprintAction(action.id, {
+      const { performanceBp: _derivedPerformanceBp, ...executionInput } = parsed.value;
+      const saved = await recordSourceTaskExecution(action.sourcePlanTaskId, {
+        outcome: resultDraft.state,
+        ...executionInput,
+        sprintActionId: action.id,
         expectedVersion: action.version,
-        decision: 'accepted',
-        state: resultDraft.state,
-        actualMinutes: resultDraft.actualMinutes,
-        questionsDone: resultDraft.questionsDone,
-        correctCount: resultDraft.correctCount,
-        wrongCount: resultDraft.wrongCount,
-        doubtCount: resultDraft.doubtCount,
-        energyAfter: resultDraft.energyAfter,
-        questionRefs,
       }, mutationKey(`result-${action.id}`, date));
       setDay((current) => current ? {
         ...current,
-        actions: current.actions.map((item) => item.id === saved.id ? saved : item),
+        actions: current.actions.map((item) => item.id === saved.sprintAction?.id ? { ...item, ...saved.sprintAction } : item),
       } : current);
       setResultActionId(null);
       setResultDraft(null);
-      setEnergy(resultDraft.energyAfter);
+      setExecutionDraft(null);
+      setExecutionErrors({});
+      setEnergy(parsed.value.energyAfter);
+      announceStudyOsDataChanged({
+        targetSlug,
+        taskId: action.sourcePlanTaskId,
+        resources: ['source-plan', 'sprint-day', 'calendar', 'evidence'],
+      });
       const refreshed = await createDay(true, false);
       if (!refreshed) {
         try {
@@ -398,14 +427,6 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   const lsActions = visibleActions.filter((action) => action.sourcePlanTaskId !== null);
   const extraActions = visibleActions.filter((action) => action.sourcePlanTaskId === null);
   const activeResult = day?.actions.find((action) => action.id === resultActionId) || null;
-  const calendarStartDate = isoToday();
-  const calendarEndDate = useMemo(() => {
-    const rollingEnd = shiftDate(calendarStartDate, 14);
-    if (!config) return rollingEnd;
-    const dayBeforeP1 = shiftDate(config.objectiveDate, -1);
-    return dayBeforeP1 < rollingEnd ? dayBeforeP1 : rollingEnd;
-  }, [calendarStartDate, config]);
-
   if (loading) {
     return (
       <section className="flex min-h-48 items-center justify-center border-y border-white/10 bg-[#202020]">
@@ -416,12 +437,6 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
 
   return (
     <>
-      <SprintCalendarPanel
-        targetSlug={targetSlug}
-        startDate={calendarStartDate}
-        endDate={calendarEndDate}
-        onNotice={showToast}
-      />
       <section className="overflow-hidden border-y border-[#404040] bg-[#202020]">
       <div className="border-b border-white/10 px-3 py-3 sm:px-5 sm:py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -537,10 +552,10 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       {day ? (
         <div className="grid lg:grid-cols-[minmax(0,1.65fr)_minmax(19rem,0.85fr)]">
           <div className="border-b border-white/10 p-4 sm:p-5 lg:border-b-0 lg:border-r">
-            <QueueSection title="Fila LS" count={lsActions.length} actions={lsActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
+            <QueueSection title="Fila LS" count={lsActions.length} actions={lsActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
           </div>
           <div className="bg-[#1b1b1b] p-4 sm:p-5">
-            <QueueSection title="Intervenções" count={extraActions.length} actions={extraActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
+            <QueueSection title="Intervenções" count={extraActions.length} actions={extraActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
           </div>
         </div>
       ) : (
@@ -584,22 +599,17 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
         </div>
       </details>
 
-      {activeResult && resultDraft && (
+      {activeResult && resultDraft && executionDraft && (
         <div className="border-t border-white/10 bg-[#262626] p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-[10px] font-black uppercase tracking-widest text-[#bef264]">Registrar execução</p><h3 className="mt-1 font-black text-white">{activeResult.title}</h3></div>
-            <button type="button" title="Fechar" onClick={() => { setResultActionId(null); setResultDraft(null); }} className="grid h-8 w-8 place-items-center rounded bg-white/5 text-gray-300 hover:bg-white/10"><X className="h-4 w-4" /></button>
+            <button type="button" title="Fechar" onClick={() => { setResultActionId(null); setResultDraft(null); setExecutionDraft(null); setExecutionErrors({}); }} className="grid h-8 w-8 place-items-center rounded bg-white/5 text-gray-300 hover:bg-white/10"><X className="h-4 w-4" /></button>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
             <ResultSelect value={resultDraft.state} onChange={(value) => setResultDraft({ ...resultDraft, state: value })} />
-            <ResultNumber label="Minutos" value={resultDraft.actualMinutes} onChange={(value) => setResultDraft({ ...resultDraft, actualMinutes: value })} />
-            <ResultNumber label="Questões" value={resultDraft.questionsDone} onChange={(value) => setResultDraft({ ...resultDraft, questionsDone: value })} />
-            <ResultNumber label="Certas" value={resultDraft.correctCount} onChange={(value) => setResultDraft({ ...resultDraft, correctCount: value })} />
-            <ResultNumber label="Erradas" value={resultDraft.wrongCount} onChange={(value) => setResultDraft({ ...resultDraft, wrongCount: value })} />
-            <ResultNumber label="Dúvidas" value={resultDraft.doubtCount} onChange={(value) => setResultDraft({ ...resultDraft, doubtCount: value })} />
           </div>
+          <div className="mt-3"><TaskExecutionFields draft={executionDraft} errors={executionErrors} onChange={setExecutionDraft} /></div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2"><span className="text-[10px] font-black uppercase text-gray-500">Energia depois</span>{[1, 2, 3, 4, 5].map((level) => <button key={level} type="button" onClick={() => setResultDraft({ ...resultDraft, energyAfter: level })} className={`h-7 w-7 rounded text-[10px] font-black ${resultDraft.energyAfter === level ? 'bg-[#84cc16] text-black' : 'bg-white/5 text-gray-400'}`}>{level}</button>)}</div>
             <button type="button" onClick={() => void submitResult(activeResult)} disabled={busy !== null} className="inline-flex h-10 items-center gap-2 rounded bg-[#84cc16] px-4 text-xs font-black uppercase text-black hover:bg-[#65a30d] disabled:opacity-50">{busy === `result-${activeResult.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Salvar e recalcular</button>
           </div>
         </div>
@@ -685,7 +695,7 @@ const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, busy
             {action.plannedQuestions > 0 && <a href={tecUrlForAction(action)} target="study-os-tec" rel="noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded border border-sky-400/25 bg-sky-400/10 px-2.5 text-[10px] font-black uppercase text-sky-100 hover:bg-sky-400/20">TEC <ExternalLink className="h-3.5 w-3.5" /></a>}
             <button type="button" onClick={() => void onPrompt(action)} className="inline-flex h-8 items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2.5 text-[10px] font-black uppercase text-gray-200 hover:bg-white/10"><ClipboardCopy className="h-3.5 w-3.5" /> Prompt ChatGPT</button>
             {action.state === 'pending' && <><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, true)} className="inline-flex h-8 items-center gap-1.5 rounded border border-[#84cc16]/30 bg-[#84cc16]/10 px-2.5 text-[10px] font-black uppercase text-[#bef264] disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Confirmar</button><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, false)} title="Recusar sugestão" className="grid h-8 w-8 place-items-center rounded border border-white/10 bg-white/5 text-gray-400 hover:text-white disabled:opacity-50"><X className="h-3.5 w-3.5" /></button></>}
-            {!['completed', 'skipped'].includes(action.state) && <button type="button" onClick={() => onResult(action)} className={`inline-flex h-8 items-center gap-1.5 rounded border px-2.5 text-[10px] font-black uppercase ${resultActionId === action.id ? 'border-amber-300/40 bg-amber-300/15 text-amber-100' : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'}`}><Activity className="h-3.5 w-3.5" /> Resultado</button>}
+            {!['completed', 'skipped', 'failed'].includes(action.state) && action.sourcePlanTaskId !== null && <button type="button" onClick={() => onResult(action)} className={`inline-flex h-8 items-center gap-1.5 rounded border px-2.5 text-[10px] font-black uppercase ${resultActionId === action.id ? 'border-amber-300/40 bg-amber-300/15 text-amber-100' : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'}`}><Activity className="h-3.5 w-3.5" /> Resultado</button>}
           </div>
           <details className="mt-3 border-t border-white/10 pt-2"><summary className="cursor-pointer text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-300">Detalhes do score</summary><dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">{scoreEntries(action.scoreDetails).map(([key, value]) => <React.Fragment key={key}><dt className="break-words text-gray-500">{key}</dt><dd className="break-words text-right font-bold text-gray-300">{formatScoreValue(value)}</dd></React.Fragment>)}</dl></details>
         </article>
@@ -693,7 +703,5 @@ const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, busy
     </div>
   </div>
 );
-
-const ResultNumber: React.FC<{ label: string; value: number; onChange: (value: number) => void }> = ({ label, value, onChange }) => <label><span className="mb-1 block text-[9px] font-black uppercase text-gray-500">{label}</span><input type="number" min={0} value={value} onChange={(event) => onChange(Math.max(0, Number(event.target.value)))} className="h-9 w-full rounded border border-white/10 bg-[#0d0d0d] px-2 text-sm font-black text-white outline-none focus:border-[#84cc16]" /></label>;
 
 const ResultSelect: React.FC<{ value: ResultDraft['state']; onChange: (value: ResultDraft['state']) => void }> = ({ value, onChange }) => <label><span className="mb-1 block text-[9px] font-black uppercase text-gray-500">Estado</span><select value={value} onChange={(event) => onChange(event.target.value as ResultDraft['state'])} className="h-9 w-full rounded border border-white/10 bg-[#0d0d0d] px-2 text-xs font-black text-white outline-none focus:border-[#84cc16]"><option value="completed">Concluída</option><option value="skipped">Pulada</option><option value="failed">Falhou</option></select></label>;

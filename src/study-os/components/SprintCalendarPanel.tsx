@@ -21,6 +21,7 @@ import {
   type SprintCalendarDocument,
 } from '../api/sprintCalendar';
 import { buildSprintCalendarView } from '../domain/sprintCalendarView';
+import { STUDY_OS_DATA_CHANGED, parseStudyOsDataChangedDetail } from '../dataChanged';
 
 
 interface SprintCalendarPanelProps {
@@ -110,6 +111,16 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   }, [load]);
 
   useEffect(() => {
+    const handleDataChanged = (event: Event) => {
+      const detail = parseStudyOsDataChangedDetail((event as CustomEvent<unknown>).detail);
+      if (!detail || detail.targetSlug !== targetSlug || !detail.resources.includes('calendar')) return;
+      void load();
+    };
+    window.addEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+    return () => window.removeEventListener(STUDY_OS_DATA_CHANGED, handleDataChanged);
+  }, [load, targetSlug]);
+
+  useEffect(() => {
     setBusy(null);
     return () => {
       mutationControllerRef.current?.abort();
@@ -131,16 +142,21 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     ...document.days.flatMap((day) => day.warnings),
   ])] : [], [document]);
 
-  const createPreview = useCallback(async () => {
+  const createPreview = useCallback(async (refreshHead = false) => {
     mutationControllerRef.current?.abort();
     const controller = new AbortController();
     mutationControllerRef.current = controller;
     setBusy('preview');
     setError(null);
     try {
-      const expectedRunId = document?.run.decision === 'applied'
-        ? document.run.id
-        : document?.run.baseAppliedRunId ?? null;
+      const currentDocument = refreshHead
+        ? await fetchSprintCalendarHead(targetSlug, startDate, controller.signal)
+        : document;
+      if (controller.signal.aborted) return;
+      if (refreshHead) setDocument(currentDocument);
+      const expectedRunId = currentDocument?.run.decision === 'applied'
+        ? currentDocument.run.id
+        : currentDocument?.run.baseAppliedRunId ?? null;
       const next = await previewSprintCalendar({
         targetSlug,
         startDate,
@@ -165,7 +181,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   }, [document, endDate, onNotice, startDate, targetSlug]);
 
   useEffect(() => {
-    const handleAutoOrganize = () => void createPreview();
+    const handleAutoOrganize = () => void createPreview(true);
     window.addEventListener('study-os:auto-organize', handleAutoOrganize);
     return () => window.removeEventListener('study-os:auto-organize', handleAutoOrganize);
   }, [createPreview]);

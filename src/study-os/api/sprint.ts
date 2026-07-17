@@ -355,6 +355,8 @@ export interface SourceTaskExecutionInput {
   doubtCount: number;
   energyAfter: number | null;
   notes: string;
+  sprintActionId?: number;
+  expectedVersion?: number;
 }
 
 export interface TaskExecution {

@@ -362,7 +362,7 @@ test('source execution request uses the authoritative URL, payload, and idempote
   assert.deepEqual(await recordSourceTaskExecution(4, {
     outcome: 'completed', performedOn: '2026-07-16', taskMinutes: 60, exerciseMinutes: 35,
     questionsTotal: 20, correctCount: 16, wrongCount: 4, doubtCount: 2,
-    energyAfter: 3, notes: 'Revisão registrada no dia correto',
+    energyAfter: 3, notes: 'Revisão registrada no dia correto', sprintActionId: 8, expectedVersion: 3,
   }, 'execution-key'), executionResult);
 
   assert.equal(request?.input, '/api/v1/source-plans/tasks/4/executions');
@@ -371,7 +371,7 @@ test('source execution request uses the authoritative URL, payload, and idempote
   assert.deepEqual(JSON.parse(String(request?.init?.body)), {
     outcome: 'completed', performedOn: '2026-07-16', taskMinutes: 60, exerciseMinutes: 35,
     questionsTotal: 20, correctCount: 16, wrongCount: 4, doubtCount: 2,
-    energyAfter: 3, notes: 'Revisão registrada no dia correto',
+    energyAfter: 3, notes: 'Revisão registrada no dia correto', sprintActionId: 8, expectedVersion: 3,
   });
 });
 

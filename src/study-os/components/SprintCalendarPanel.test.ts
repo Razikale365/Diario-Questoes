@@ -29,15 +29,15 @@ test('calendar panel exposes the preview/apply flow and precision legend', () =>
   assert.equal(source.includes('controller.signal'), true);
   assert.equal(source.includes('aria-label={`Prioridade ${priorityLabel[day.hottestPriority]}`}'), true);
   assert.equal(source.includes('<article'), true);
+  assert.equal(source.includes('STUDY_OS_DATA_CHANGED'), true);
+  assert.equal(source.includes('parseStudyOsDataChangedDetail'), true);
+  assert.equal(source.includes("detail.targetSlug !== targetSlug"), true);
+  assert.equal(source.includes("detail.resources.includes('calendar')"), true);
+  assert.equal(source.includes('window.removeEventListener(STUDY_OS_DATA_CHANGED'), true);
 });
 
-test('command center mounts the calendar before the daily execution surface', () => {
+test('Planner owns the shared calendar while the command center consumes the day projection', () => {
   const source = readFileSync(commandCenterUrl, 'utf8');
-  const calendar = source.indexOf('<SprintCalendarPanel');
-  const dailySurface = source.indexOf('<section className="overflow-hidden');
 
-  assert.ok(calendar > 0);
-  assert.ok(dailySurface > calendar);
-  assert.equal(source.includes('const calendarStartDate = isoToday()'), true);
-  assert.equal(source.includes('startDate={calendarStartDate}'), true);
+  assert.equal(source.includes('<SprintCalendarPanel'), false);
 });

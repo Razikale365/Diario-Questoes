@@ -32,7 +32,6 @@ import {
 
 import { PlannerMetaHistoryEntry, PlannerMetaHistoryOrigin, PlannerMetaSummary, PlannerTask, QuestionBankItem, StudyTask } from '../types';
 import {
-  applyPlannerTaskResult,
   autoSchedulePlannerTasks,
   buildPlannerTaskChatPrompt,
   buildMonthGrid,
@@ -41,7 +40,6 @@ import {
   getPlannerTodayCommandCenter,
   mergePlannerTasks,
   parseLsMetaText,
-  type PlannerTaskResultInput,
   toIsoDate,
 } from '../utils/planner';
 import { extractPdfText } from '../utils/pdfQuestionImport';
@@ -65,7 +63,8 @@ import {
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
-import { parseTaskResultDraft, type TaskResultDraft } from '../utils/taskResultDraft';
+import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../utils/taskResultDraft';
+import { TaskExecutionFields } from './TaskExecutionFields';
 import { parseStudyImportPackage, parseWeekScheduleImport, WeekScheduleImport } from '../utils/studyImportPackage';
 import {
   CutoverStatus,
@@ -78,8 +77,9 @@ import { SprintCalendarPanel } from '../study-os/components/SprintCalendarPanel'
 import {
   fetchSourcePlanTasks,
   importSourcePlan,
-  type SprintQuestionRef,
+  recordSourceTaskExecution,
 } from '../study-os/api/sprint';
+import { announceStudyOsDataChanged } from '../study-os/dataChanged';
 import {
   currentSourcePlanTasks,
   externalSourceTaskId,
@@ -737,23 +737,60 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     );
   };
 
-  const applyTaskResult = (taskId: string, result: PlannerTaskResultInput) => {
-    const resultLabel: Record<PlannerTaskResultInput['outcome'], string> = {
-      started: 'Tarefa iniciada.',
-      completed: 'Resultado registrado.',
-      failed: 'Falha registrada para refresh.',
-      skipped: 'Pulo registrado; a tarefa continua pendente.',
-    };
+  const startCalendarAutoOrganize = () => {
+    window.location.hash = '#/calendar';
+    setActiveSection('calendar');
+    window.setTimeout(() => window.dispatchEvent(new Event('study-os:auto-organize')), 0);
+  };
+
+  const applyTaskResult = async (
+    taskId: string,
+    outcome: 'started' | 'completed' | 'failed' | 'skipped',
+    draft: TaskExecutionDraft,
+  ) => {
+    if (studyOsTarget !== 'sefaz_ce') {
+      throw new Error('O recibo de execução está disponível apenas para tarefas persistidas no Study OS.');
+    }
+    const parsed = parseTaskExecutionDraft(draft);
+    if (!parsed.ok) throw new Error('Revise os campos marcados antes de salvar.');
     const before = plannerTasks.find((task) => task.id === taskId);
+    if (!before) throw new Error('A tarefa não está mais disponível no Planner.');
+
+    const persisted = before.sourcePlanTaskId
+      ? null
+      : await fetchSourcePlanTasks(studyOsTarget, undefined);
+    const sourcePlanTaskId = before.sourcePlanTaskId
+      ?? persisted?.items.find((item) => item.externalTaskId === externalSourceTaskId(before))?.id;
+    if (!sourcePlanTaskId) {
+      throw new Error('A importação do plano ainda não terminou. Aguarde alguns segundos e tente novamente.');
+    }
+
+    const { performanceBp: _derivedPerformanceBp, ...executionInput } = parsed.value;
+    const saved = await recordSourceTaskExecution(sourcePlanTaskId, {
+      outcome,
+      ...executionInput,
+    }, `planner-execution-${sourcePlanTaskId}-${Date.now()}`);
     const now = new Date().toISOString();
-    setPlannerTasks((current) =>
-      current.map((task) => (task.id === taskId ? applyPlannerTaskResult(task, result, now) : task))
-    );
-    if (result.outcome === 'completed' && before?.status !== 'completed') {
-      const evidence = [result.spentMinutes !== undefined ? `${result.spentMinutes} min` : null, result.performance !== null && result.performance !== undefined ? `${result.performance}%` : null].filter(Boolean).join(' · ');
-      showToast(`Conquista comprovada${evidence ? `: ${evidence}` : ''}.`);
+    setPlannerTasks((current) => current.map((task) => task.id === taskId ? {
+      ...task,
+      sourcePlanTaskId: saved.sourceTask.id,
+      status: saved.sourceTask.status,
+      spentMinutes: saved.sourceTask.spentMinutes,
+      performance: saved.sourceTask.performanceBp === null ? null : saved.sourceTask.performanceBp / 100,
+      completedAt: outcome === 'completed' ? `${saved.execution.performedOn}T12:00:00-03:00` : undefined,
+      lastOutcome: outcome,
+      updatedAt: now,
+    } : task));
+    announceStudyOsDataChanged({
+      targetSlug: studyOsTarget,
+      taskId: sourcePlanTaskId,
+      resources: ['source-plan', 'sprint-day', 'calendar', 'evidence'],
+    });
+    if (outcome === 'completed') {
+      showToast(`Conquista comprovada: ${saved.execution.taskMinutes} min${saved.execution.performanceBp === null ? '' : ` · ${(saved.execution.performanceBp / 100).toLocaleString('pt-BR')}%`}.`);
+      startCalendarAutoOrganize();
     } else {
-      showToast(resultLabel[result.outcome]);
+      showToast('Resultado registrado no Study OS.');
     }
   };
 
@@ -807,9 +844,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
   const autoOrganize = () => {
     if (studyOsTarget === 'sefaz_ce') {
-      window.location.hash = '#/calendar';
-      setActiveSection('calendar');
-      window.setTimeout(() => window.dispatchEvent(new Event('study-os:auto-organize')), 0);
+      startCalendarAutoOrganize();
       return;
     }
     setPlannerTasks((current) =>
@@ -843,28 +878,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     if (matches.length > 0) {
       showToast(`${matches.length} questão(ões) do banco vinculadas à tarefa.`);
     }
-  };
-
-  const sprintQuestionRefs = (taskId: string): SprintQuestionRef[] => {
-    const task = plannerTasks.find((item) => item.id === taskId || externalSourceTaskId(item) === taskId);
-    if (!task) return [];
-    return matchQuestionBankItemsToPlannerTask(task, questionBankItems)
-      .map((item): SprintQuestionRef | null => {
-        const lastAttempt = item.attempts[item.attempts.length - 1];
-        const reason = lastAttempt?.isCorrect === false
-          ? 'wrong'
-          : item.hasDoubt
-            ? 'doubt'
-            : item.favorite
-              ? 'favorite'
-              : null;
-        return reason ? {
-          questionFingerprint: item.fingerprint,
-          sourceTaskId: task.linkedStudyTaskId || task.id,
-          reason,
-        } : null;
-      })
-      .filter((item): item is SprintQuestionRef => item !== null);
   };
 
   const updateDraftTask = (key: string, updates: DraftTaskEdit) => {
@@ -1172,7 +1185,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                 const task = plannerTasks.find((item) => item.id === taskId || externalSourceTaskId(item) === taskId);
                 if (task) createOrOpenStudyTask(task);
               }}
-              getQuestionRefs={sprintQuestionRefs}
               showToast={showToast}
             />
           )}
@@ -1567,7 +1579,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           onClose={() => setSelectedTaskId(null)}
           onExecute={() => createOrOpenStudyTask(selectedTask)}
           onCopyChatPrompt={() => copyPlannerTaskChatPrompt(selectedTask)}
-          onApplyResult={(result) => applyTaskResult(selectedTask.id, result)}
+          onApplyResult={(outcome, draft) => applyTaskResult(selectedTask.id, outcome, draft)}
           onClearSchedule={() => clearSchedule(selectedTask.id)}
           onArchive={() => {
             archivePlannerTask(selectedTask.id);
@@ -1758,26 +1770,6 @@ const NumberField: React.FC<{ label: string; value: number; onChange: (value: nu
   </label>
 );
 
-const ResultNumberField: React.FC<{
-  label: string;
-  value: string;
-  error?: string;
-  onChange: (value: string) => void;
-}> = ({ label, value, error, onChange }) => (
-  <label className="grid min-w-0 gap-1 text-[10px] font-black uppercase tracking-widest text-gray-500">
-    {label}
-    <input
-      type="text"
-      inputMode="numeric"
-      value={value}
-      aria-invalid={Boolean(error)}
-      onChange={(event) => onChange(event.target.value)}
-      className={`min-w-0 rounded border bg-[#404040] px-3 py-2 text-sm font-black text-white outline-none focus:border-purple-500 ${error ? 'border-red-400' : 'border-[#525252]'}`}
-    />
-    {error && <span className="normal-case tracking-normal text-red-300">{error}</span>}
-  </label>
-);
-
 const CalendarNav: React.FC<{ label: string; onPrev: () => void; onNext: () => void }> = ({ label, onPrev, onNext }) => (
   <div className="flex items-center gap-2">
     <button type="button" onClick={onPrev} title="Anterior" className="rounded bg-white/5 px-3 py-2 text-sm font-black text-white hover:bg-white/10">
@@ -1803,17 +1795,31 @@ const PlannerTaskDetailModal: React.FC<{
   onClose: () => void;
   onExecute: () => void;
   onCopyChatPrompt: () => void;
-  onApplyResult: (result: PlannerTaskResultInput) => void;
+  onApplyResult: (outcome: 'started' | 'completed' | 'failed' | 'skipped', draft: TaskExecutionDraft) => Promise<void>;
   onClearSchedule: () => void;
   onArchive: () => void;
 }> = ({ task, onClose, onExecute, onCopyChatPrompt, onApplyResult, onClearSchedule, onArchive }) => {
-  const [draft, setDraft] = useState<TaskResultDraft>({ performance: `${task.performance ?? 70}`, spentMinutes: `${task.spentMinutes || task.durationMinutes || 60}` });
-  const [draftErrors, setDraftErrors] = useState<Partial<Record<keyof TaskResultDraft, string>>>({});
+  const draftForTask = (current: PlannerTask): TaskExecutionDraft => ({
+    performedOn: toIsoDate(new Date()),
+    taskMinutes: `${current.spentMinutes || current.durationMinutes || 60}`,
+    exerciseMinutes: '0',
+    questionsTotal: `${current.plannedQuestions || 0}`,
+    correctCount: '0',
+    wrongCount: '0',
+    doubtCount: '0',
+    energyAfter: 3,
+    notes: '',
+  });
+  const [draft, setDraft] = useState<TaskExecutionDraft>(() => draftForTask(task));
+  const [draftErrors, setDraftErrors] = useState<Partial<Record<keyof TaskExecutionDraft, string>>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setDraft({ performance: `${task.performance ?? 70}`, spentMinutes: `${task.spentMinutes || task.durationMinutes || 60}` });
+    setDraft(draftForTask(task));
     setDraftErrors({});
-  }, [task.id, task.performance, task.spentMinutes, task.durationMinutes]);
+    setSubmitError(null);
+  }, [task.id, task.performance, task.spentMinutes, task.durationMinutes, task.plannedQuestions]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -1821,23 +1827,23 @@ const PlannerTaskDetailModal: React.FC<{
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [onClose]);
 
-  const submitResult = (outcome: PlannerTaskResultInput['outcome']) => {
-    if (outcome === 'started') {
-      onApplyResult({ outcome });
-      return;
-    }
-    if (outcome === 'skipped') {
-      const minutes = /^\d+$/.test(draft.spentMinutes) ? Number(draft.spentMinutes) : 0;
-      onApplyResult({ outcome, spentMinutes: minutes });
-      return;
-    }
-    const parsed = parseTaskResultDraft(draft);
+  const submitResult = async (outcome: 'started' | 'completed' | 'failed' | 'skipped') => {
+    const parsed = parseTaskExecutionDraft(draft);
     if (!parsed.ok) {
       setDraftErrors(parsed.errors);
       return;
     }
     setDraftErrors({});
-    onApplyResult({ outcome, ...parsed.value });
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      await onApplyResult(outcome, draft);
+      onClose();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Não foi possível salvar o resultado.');
+    } finally {
+      setSubmitting(false);
+    }
   };
   const visibleDetails = task.plannerSourceKind === 'generated_planner'
     ? task.details
@@ -1949,50 +1955,42 @@ const PlannerTaskDetailModal: React.FC<{
             </div>
             <div className="rounded-lg border border-white/10 bg-[#262626] p-3">
               <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-gray-500">Resultado</p>
-              <div className="grid grid-cols-2 gap-2">
-                <ResultNumberField
-                  label="Desemp. %"
-                  value={draft.performance}
-                  error={draftErrors.performance}
-                  onChange={(performance) => setDraft((current) => ({ ...current, performance }))}
-                />
-                <ResultNumberField
-                  label="Minutos"
-                  value={draft.spentMinutes}
-                  error={draftErrors.spentMinutes}
-                  onChange={(spentMinutes) => setDraft((current) => ({ ...current, spentMinutes }))}
-                />
-              </div>
+              <TaskExecutionFields draft={draft} errors={draftErrors} onChange={setDraft} />
+              {submitError ? <p role="alert" className="mt-3 border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{submitError}</p> : null}
               {task.status === 'completed' ? (
                 <div className="mt-3 rounded-lg border border-[#84cc16]/25 bg-[#84cc16]/10 p-3">
                   <p className="text-xs font-bold text-[#d9f99d]">Concluída e mantida no calendário como evidência.</p>
-                  <button type="button" onClick={() => submitResult('started')} className="mt-2 rounded border border-white/10 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-white/5">Reabrir tarefa</button>
+                  <button type="button" disabled={submitting} onClick={() => void submitResult('started')} className="mt-2 rounded border border-white/10 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-white/5 disabled:opacity-50">Reabrir tarefa</button>
                 </div>
               ) : <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => submitResult('started')}
+                  disabled={submitting}
+                  onClick={() => void submitResult('started')}
                   className="flex items-center justify-center gap-2 rounded border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] font-black uppercase text-blue-200 transition hover:bg-blue-500/20"
                 >
                   <Play className="h-3.5 w-3.5" /> Iniciar
                 </button>
                 <button
                   type="button"
-                  onClick={() => submitResult('completed')}
+                  disabled={submitting}
+                  onClick={() => void submitResult('completed')}
                   className="flex items-center justify-center gap-2 rounded border border-[#84cc16]/30 bg-[#84cc16]/15 px-3 py-2 text-[10px] font-black uppercase text-[#bef264] transition hover:bg-[#84cc16]/25"
                 >
                   <CheckCircle2 className="h-3.5 w-3.5" /> Concluir
                 </button>
                 <button
                   type="button"
-                  onClick={() => submitResult('failed')}
+                  disabled={submitting}
+                  onClick={() => void submitResult('failed')}
                   className="flex items-center justify-center gap-2 rounded border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-[10px] font-black uppercase text-orange-200 transition hover:bg-orange-500/20"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" /> Falhei
                 </button>
                 <button
                   type="button"
-                  onClick={() => submitResult('skipped')}
+                  disabled={submitting}
+                  onClick={() => void submitResult('skipped')}
                   className="flex items-center justify-center gap-2 rounded border border-red-400/20 bg-red-500/10 px-3 py-2 text-[10px] font-black uppercase text-red-200 transition hover:bg-red-500/20"
                 >
                   <Ban className="h-3.5 w-3.5" /> Pular
