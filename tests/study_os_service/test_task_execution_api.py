@@ -10,6 +10,7 @@ from study_os_service.app import create_app
 from study_os_service.config import StudyOsSettings
 from study_os_service.db.connection import connect_database
 from study_os_service.repositories.sprint_calendar import SprintCalendarRepository
+from study_os_service.services.task_execution import TaskExecutionService
 
 
 def rich_payload(performed_on: str = "2026-07-16") -> dict[str, object]:
@@ -458,3 +459,125 @@ def test_rich_legacy_payload_rejects_incompatible_or_source_less_actions(
     assert incompatible.json()["code"] == "invalid_sprint_action"
     assert source_less.status_code == 422
     assert source_less.json()["code"] == "invalid_sprint_action"
+
+
+def test_direct_post_binds_requested_sprint_action_and_version(
+    client: TestClient, seeded_source_task: int
+):
+    day = materialize_day(client, key="direct-bound-action-day")
+    action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+
+    saved = client.post(
+        f"/api/v1/source-plans/tasks/{seeded_source_task}/executions",
+        headers={"Idempotency-Key": "direct-bound-action"},
+        json=rich_payload()
+        | {
+            "sprintActionId": action["id"],
+            "expectedVersion": action["version"],
+        },
+    )
+    stored = connect_database(client.app.state.settings.database_path)
+    execution = stored.execute(
+        "SELECT sprint_action_id FROM task_executions"
+    ).fetchone()
+    action_state = stored.execute(
+        "SELECT state, version FROM sprint_actions WHERE id=?", (action["id"],)
+    ).fetchone()
+    stored.close()
+
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["sprintAction"]["id"] == action["id"]
+    assert tuple(execution) == (action["id"],)
+    assert tuple(action_state) == ("completed", action["version"] + 1)
+
+
+def test_direct_post_stale_action_version_rolls_back_every_projection(
+    client: TestClient, seeded_source_task: int
+):
+    day = materialize_day(client, key="direct-stale-action-day")
+    action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+    before = _transaction_snapshot(client, seeded_source_task)
+
+    stale = client.post(
+        f"/api/v1/source-plans/tasks/{seeded_source_task}/executions",
+        headers={"Idempotency-Key": "direct-stale-action"},
+        json=rich_payload()
+        | {
+            "sprintActionId": action["id"],
+            "expectedVersion": action["version"] + 1,
+        },
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "stale_sprint_action"
+    assert _transaction_snapshot(client, seeded_source_task) == before
+
+
+@pytest.mark.parametrize("identity", ["invalid", "mismatched"])
+def test_direct_post_rejects_bad_action_identity_without_partial_writes(
+    client: TestClient, seeded_source_task: int, identity: str
+):
+    day = materialize_day(client, key=f"direct-{identity}-action-day")
+    source_action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+    if identity == "invalid":
+        sprint_action_id = 0
+        expected_version = source_action["version"]
+    else:
+        source_less = next(
+            row for row in day["actions"] if row["sourcePlanTaskId"] is None
+        )
+        sprint_action_id = source_less["id"]
+        expected_version = source_less["version"]
+    before = _transaction_snapshot(client, seeded_source_task)
+
+    rejected = client.post(
+        f"/api/v1/source-plans/tasks/{seeded_source_task}/executions",
+        headers={"Idempotency-Key": f"direct-{identity}-action"},
+        json=rich_payload()
+        | {
+            "sprintActionId": sprint_action_id,
+            "expectedVersion": expected_version,
+        },
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "invalid_task_execution"
+    assert _transaction_snapshot(client, seeded_source_task) == before
+
+
+def test_service_rejects_body_and_keyword_action_metadata_mismatch(
+    client: TestClient, seeded_source_task: int
+):
+    day = materialize_day(client, key="service-action-mismatch-day")
+    source_action = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] == seeded_source_task
+    )
+    source_less = next(
+        row for row in day["actions"] if row["sourcePlanTaskId"] is None
+    )
+    before = _transaction_snapshot(client, seeded_source_task)
+    stored = connect_database(client.app.state.settings.database_path)
+
+    try:
+        with pytest.raises(ValueError, match="sprintActionId"):
+            TaskExecutionService(stored).record(
+                seeded_source_task,
+                rich_payload()
+                | {
+                    "sprintActionId": source_action["id"],
+                    "expectedVersion": source_action["version"],
+                },
+                idempotency_key="service-action-mismatch",
+                sprint_action_id=source_less["id"],
+                expected_version=source_action["version"],
+            )
+    finally:
+        stored.close()
+
+    assert _transaction_snapshot(client, seeded_source_task) == before

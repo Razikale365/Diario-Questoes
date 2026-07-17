@@ -43,6 +43,33 @@ def _integer(value: object, label: str, *, default: int | None = None) -> int:
     return value
 
 
+def _positive_integer(value: object, label: str) -> int:
+    parsed = _integer(value, label)
+    if parsed < 1:
+        raise ValueError(f"{label} must be a positive integer")
+    return parsed
+
+
+def _resolve_optional_positive_integer(
+    payload: Mapping[str, Any],
+    body_key: str,
+    explicit_value: int | None,
+) -> int | None:
+    body_value = (
+        _positive_integer(payload[body_key], body_key)
+        if body_key in payload
+        else None
+    )
+    explicit = (
+        _positive_integer(explicit_value, body_key)
+        if explicit_value is not None
+        else None
+    )
+    if body_value is not None and explicit is not None and body_value != explicit:
+        raise ValueError(f"{body_key} does not match the explicit service argument")
+    return body_value if body_value is not None else explicit
+
+
 def _date(value: object) -> date:
     if not isinstance(value, str):
         raise ValueError("performedOn must use YYYY-MM-DD")
@@ -95,13 +122,29 @@ class TaskExecutionService:
         if not isinstance(payload, Mapping):
             raise ValueError("task execution payload must be an object")
         key = _text(idempotency_key, "Idempotency-Key")
+        resolved_action_id = _resolve_optional_positive_integer(
+            payload, "sprintActionId", sprint_action_id
+        )
+        resolved_expected_version = _resolve_optional_positive_integer(
+            payload, "expectedVersion", expected_version
+        )
+        if (resolved_action_id is None) != (resolved_expected_version is None):
+            raise ValueError(
+                "sprintActionId and expectedVersion must be provided together"
+            )
         source = self.sprint.get_source_task(source_task_id)
         if source is None:
             raise SourceTaskNotFoundError(source_task_id)
+        if resolved_action_id is not None:
+            bound_action = self.sprint.get_action(resolved_action_id)
+            if bound_action is None:
+                raise ValueError("sprintActionId does not identify an action")
+            if bound_action["source_plan_task_id"] != source_task_id:
+                raise ValueError("sprintActionId does not belong to the source task")
         task_input = TaskExecutionInput(
             target_slug=source.target_slug,
             source_plan_task_id=source_task_id,
-            sprint_action_id=sprint_action_id,
+            sprint_action_id=resolved_action_id,
             outcome=_text(payload.get("outcome"), "outcome"),  # type: ignore[arg-type]
             performed_on=_date(payload.get("performedOn")),
             task_minutes=_integer(payload.get("taskMinutes"), "taskMinutes"),
@@ -118,7 +161,7 @@ class TaskExecutionService:
         )
         request_hash = _canonical_hash({
             "sourceTaskId": source_task_id,
-            "sprintActionId": sprint_action_id,
+            "sprintActionId": resolved_action_id,
             "payload": dict(payload),
         })
         self.connection.execute("BEGIN IMMEDIATE")
@@ -141,11 +184,11 @@ class TaskExecutionService:
             action = self.sprint.reconcile_actions_for_source_in_transaction(
                 source_task_id,
                 execution=execution,
-                expected_action_id=sprint_action_id,
-                expected_version=expected_version,
+                expected_action_id=resolved_action_id,
+                expected_version=resolved_expected_version,
             )
-            if sprint_action_id is not None:
-                self.sprint.insert_action_question_refs(sprint_action_id, question_refs)
+            if resolved_action_id is not None:
+                self.sprint.insert_action_question_refs(resolved_action_id, question_refs)
             if execution.outcome == "completed":
                 SourcePlanCycleService(self.connection).mark_recovered_in_transaction(
                     source_task_id, execution.performed_on
