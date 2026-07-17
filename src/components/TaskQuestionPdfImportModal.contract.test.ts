@@ -24,3 +24,10 @@ test('task question modal exposes PDF and pasted-text safe import flows', () => 
   assert.doesNotMatch(source, /persistQuestionBank/);
   assert.doesNotMatch(source, /localStorage/);
 });
+
+test('changing import source or input invalidates an old parse before it can publish', () => {
+  assert.match(source, /const parseGateRef = useRef/);
+  assert.match(source, /const invalidateParse = \(\)/);
+  assert.match(source, /const changeSourceKind = \(nextSourceKind/);
+  assert.match(source, /!current\.trim\(\) \|\| current === 'Questões importadas'/);
+});

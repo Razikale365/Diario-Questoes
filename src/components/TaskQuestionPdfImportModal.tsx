@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, FileUp, Loader2, SearchCheck, X } from 'lucide-react';
 
 import type { QuestionBankItem, QuestionSourceKind, StudyTask } from '../types';
@@ -16,6 +16,7 @@ import type {
 } from '../utils/taskQuestionImport';
 import { DEFAULT_STUDY_TARGET_PROFILES } from '../utils/studyPlannerCore';
 import { fetchPlannerTargets } from '../study-os/api/planner';
+import { createTaskQuestionImportParseGate } from './taskQuestionImportParseGate';
 
 type ImportInputMode = 'pdf' | 'text';
 type ImportSourceKind = Exclude<QuestionSourceKind, 'tec'>;
@@ -78,15 +79,22 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
   const [isParsing, setIsParsing] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const parseGateRef = useRef<ReturnType<typeof createTaskQuestionImportParseGate> | null>(null);
+  if (!parseGateRef.current) parseGateRef.current = createTaskQuestionImportParseGate();
+
+  const invalidateParse = () => {
+    parseGateRef.current!.invalidate();
+    setParsed(null);
+    setError(null);
+    setIsParsing(false);
+  };
 
   useEffect(() => {
+    invalidateParse();
     if (!isOpen) return;
     setInputMode('pdf');
     setFile(null);
     setPastedText('');
-    setParsed(null);
-    setError(null);
-    setIsParsing(false);
     setIsCommitting(false);
     setSourceKind('estrategia');
     setTargetSlug(task?.targetSlug || '');
@@ -184,17 +192,22 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
     const title = normalizedFileTitle(fileName);
     setSourceName((current) => current || title);
     setLesson((current) => current || title);
-    setBlockTitle((current) => current === 'Questões importadas' ? title : current);
+    setBlockTitle((current) => !current.trim() || current === 'Questões importadas' ? title : current);
     setDestination((current) => current?.kind === 'new_section' && !current.sectionTitle
       ? { ...current, sectionTitle: title }
       : current);
   };
 
   const selectFile = (nextFile: File | null) => {
+    invalidateParse();
     setFile(nextFile);
-    setParsed(null);
-    setError(null);
     if (nextFile) fillMetadataFromName(nextFile.name);
+  };
+
+  const changeSourceKind = (nextSourceKind: ImportSourceKind) => {
+    if (nextSourceKind === sourceKind) return;
+    invalidateParse();
+    setSourceKind(nextSourceKind);
   };
 
   const processPdf = async () => {
@@ -202,23 +215,28 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
       setError('Selecione um PDF para processar.');
       return;
     }
-    setIsParsing(true);
+    const generation = parseGateRef.current!.begin();
+    setParsed(null);
     setError(null);
+    setIsParsing(true);
     try {
       const imported = await importObjectiveQuestionsFromPdf(file, {
         requireExplicitQuestionLabel: sourceKind === 'professor',
       });
+      if (!parseGateRef.current!.isCurrent(generation)) return;
       setParsed(imported);
       if (imported.questions.length === 0) setError('Nenhuma questão objetiva detectada.');
     } catch {
-      setError('Não foi possível ler este PDF.');
+      if (parseGateRef.current!.isCurrent(generation)) setError('Não foi possível ler este PDF.');
     } finally {
-      setIsParsing(false);
+      if (parseGateRef.current!.isCurrent(generation)) setIsParsing(false);
     }
   };
 
   const processText = () => {
+    const generation = parseGateRef.current!.begin();
     if (!pastedText.trim()) {
+      if (!parseGateRef.current!.isCurrent(generation)) return;
       setParsed(null);
       setError('Nenhuma questão objetiva detectada.');
       return;
@@ -227,6 +245,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
     const result = parseObjectiveQuestions(pastedText, {
       requireExplicitQuestionLabel: sourceKind === 'professor',
     });
+    if (!parseGateRef.current!.isCurrent(generation)) return;
     setParsed({
       ...result,
       fileName: 'texto-colado.txt',
@@ -288,7 +307,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
               <h3 className="text-xs font-black uppercase tracking-wider text-[#f8fafc]">Arquivo e fonte</h3>
               <div className="inline-flex rounded border border-[#334155] p-1 text-xs">
                 {([{ value: 'pdf', label: 'PDF' }, { value: 'text', label: 'Colar texto' }] as const).map((option) => (
-                  <button key={option.value} type="button" onClick={() => { setInputMode(option.value); setParsed(null); setError(null); }} className={`rounded px-3 py-1.5 font-bold ${inputMode === option.value ? 'bg-[#f59e0b] text-[#111827]' : 'text-[#94a3b8] hover:text-white'}`}>
+                  <button key={option.value} type="button" onClick={() => { invalidateParse(); setInputMode(option.value); }} className={`rounded px-3 py-1.5 font-bold ${inputMode === option.value ? 'bg-[#f59e0b] text-[#111827]' : 'text-[#94a3b8] hover:text-white'}`}>
                     {option.label}
                   </button>
                 ))}
@@ -316,7 +335,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
 
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs text-[#94a3b8]">Fonte
-                  <select value={sourceKind} onChange={(event) => setSourceKind(event.target.value as ImportSourceKind)} className="mt-1 w-full rounded border border-[#334155] bg-[#0b1220] p-2 text-sm text-white">
+                  <select value={sourceKind} onChange={(event) => changeSourceKind(event.target.value as ImportSourceKind)} className="mt-1 w-full rounded border border-[#334155] bg-[#0b1220] p-2 text-sm text-white">
                     {SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
