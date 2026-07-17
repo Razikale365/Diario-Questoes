@@ -35,10 +35,6 @@ def _date(value: object, label: str) -> date:
     return value
 
 
-def _basis_points(value: object, label: str) -> int:
-    return _require_int(value, label, minimum=0, maximum=10000)
-
-
 def _derived_performance_bp(correct_count: int, wrong_count: int) -> int | None:
     answered = correct_count + wrong_count
     if answered == 0:
@@ -63,7 +59,6 @@ class TaskExecutionInput:
     correct_count: int
     wrong_count: int
     doubt_count: int
-    supplied_performance_bp: int | None
     energy_after: int | None
     notes: str
 
@@ -101,18 +96,6 @@ class TaskExecutionInput:
         object.__setattr__(self, "wrong_count", wrong_count)
         object.__setattr__(self, "doubt_count", doubt_count)
 
-        supplied = (
-            None
-            if self.supplied_performance_bp is None
-            else _basis_points(self.supplied_performance_bp, "supplied performance")
-        )
-        expected = _derived_performance_bp(correct_count, wrong_count)
-        if supplied is not None and expected is None:
-            raise ValueError("supplied performance is not allowed with empty answers")
-        if supplied is not None and expected is not None and supplied != expected:
-            raise ValueError("supplied performance does not match aggregate counts")
-        object.__setattr__(self, "supplied_performance_bp", supplied)
-
         if self.energy_after is not None:
             object.__setattr__(
                 self, "energy_after", _require_int(self.energy_after, "energy after", minimum=1, maximum=5)
@@ -122,8 +105,7 @@ class TaskExecutionInput:
 
     @property
     def performance_bp(self) -> int | None:
-        derived = _derived_performance_bp(self.correct_count, self.wrong_count)
-        return self.supplied_performance_bp if derived is None else derived
+        return _derived_performance_bp(self.correct_count, self.wrong_count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,10 +147,11 @@ class TaskExecution:
             correct_count=self.correct_count,
             wrong_count=self.wrong_count,
             doubt_count=self.doubt_count,
-            supplied_performance_bp=self.performance_bp,
             energy_after=self.energy_after,
             notes=self.notes,
         )
+        if self.performance_bp != task_input.performance_bp:
+            raise ValueError("stored performance does not match aggregate counts")
         object.__setattr__(self, "target_slug", task_input.target_slug)
         object.__setattr__(self, "source_plan_task_id", task_input.source_plan_task_id)
         object.__setattr__(self, "sprint_action_id", task_input.sprint_action_id)

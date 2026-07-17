@@ -28,12 +28,31 @@ def valid_input(**overrides: object) -> TaskExecutionInput:
         "correct_count": 16,
         "wrong_count": 4,
         "doubt_count": 2,
-        "supplied_performance_bp": None,
         "energy_after": 3,
         "notes": "Revisão de ontem",
     }
     payload.update(overrides)
     return TaskExecutionInput(**payload)  # type: ignore[arg-type]
+
+
+def test_input_accepts_the_exact_brief_payload_without_supplied_performance():
+    execution = TaskExecutionInput(
+        target_slug="sefaz_ce",
+        source_plan_task_id=1,
+        sprint_action_id=None,
+        outcome="completed",
+        performed_on=date(2026, 7, 16),
+        task_minutes=60,
+        exercise_minutes=35,
+        questions_total=20,
+        correct_count=16,
+        wrong_count=4,
+        doubt_count=2,
+        energy_after=3,
+        notes="Revisão de ontem",
+    )
+
+    assert execution.performance_bp == 8000
 
 
 def _install_version_twelve(connection: sqlite3.Connection) -> None:
@@ -304,14 +323,6 @@ def test_counts_derive_performance_without_inventing_empty_evidence():
         ).performance_bp
         is None
     )
-    with pytest.raises(ValueError, match="empty answers"):
-        valid_input(
-            questions_total=0,
-            correct_count=0,
-            wrong_count=0,
-            doubt_count=0,
-            supplied_performance_bp=0,
-        )
 
 
 def test_input_accepts_backdated_result_and_rejects_future_date():
