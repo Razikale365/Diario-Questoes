@@ -42,3 +42,14 @@ test('task table preference storage failures cannot block PlannerArea rendering'
     /useState<PlannerTaskTablePreferences>\(\(\) =>\s*parsePlannerTaskTablePreferences\(localStorage\.getItem/,
   );
 });
+
+test('mobile tasks render readable cards and missing performance remains explicit', () => {
+  assert.match(source, /className="space-y-3 sm:hidden"/);
+  assert.match(source, /Tarefa \{task\.number\}/);
+  assert.match(source, /plannerTaskPerformanceLabel\(task\.performance\)/);
+  assert.match(source, /Sem agenda/);
+  assert.match(source, /min-h-11/);
+  assert.match(source, /task\.scheduledDate && plannerTaskActionAvailability\(task\.status\)\.canExecute/);
+  assert.match(source, /className="hidden overflow-x-auto sm:block"/);
+  assert.doesNotMatch(source, /task\.performance \?\? 0/);
+});

@@ -142,6 +142,8 @@ export interface PlannerTask {
   plannerSourceKind?: PlannerTaskSourceKind;
   targetSlug?: string;
   sourcePlanTaskId?: number;
+  sourceCycleStartsOn?: string;
+  sourceCycleEndsOn?: string;
   originTaskId?: string;
   plannedBlockKind?: PlannerTaskBlockKind;
   plannedQuestions?: number;

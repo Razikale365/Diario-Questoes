@@ -33,6 +33,42 @@ const calendarDate = (task: SourcePlanTask): string | undefined => {
 const fallbackTimestamp = (scheduledDate: string | undefined) =>
   scheduledDate ? `${scheduledDate}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z';
 
+const shiftIsoDate = (value: string, delta: number) => {
+  const [year, month, day] = value.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + delta));
+  return shifted.toISOString().slice(0, 10);
+};
+
+const LAST_SUPPORTED_CALENDAR_HORIZON_OFFSET_DAYS = 14;
+
+export const plannerCalendarEndDate = (
+  tasks: PlannerTask[],
+  today: string,
+  deadline: string | null | undefined,
+): string => {
+  const currentCycles = tasks.filter((task) => (
+    task.sourceCycleStartsOn !== undefined
+    && task.sourceCycleEndsOn !== undefined
+    && task.sourceCycleStartsOn <= today
+    && today <= task.sourceCycleEndsOn
+  ));
+  const latestMeta = currentCycles.reduce(
+    (latest, task) => Math.max(latest, task.metaNumber ?? -1),
+    -1,
+  );
+  const cycleEnd = currentCycles
+    .filter((task) => (task.metaNumber ?? -1) === latestMeta)
+    .map((task) => task.sourceCycleEndsOn)
+    .filter((value): value is string => value !== undefined)
+    .sort()
+    .at(-1);
+  const limits = [shiftIsoDate(today, LAST_SUPPORTED_CALENDAR_HORIZON_OFFSET_DAYS)];
+  if (cycleEnd) limits.push(cycleEnd);
+  if (deadline) limits.push(shiftIsoDate(deadline, -1));
+  const endDate = limits.sort()[0];
+  return endDate < today ? today : endDate;
+};
+
 export const sourceTaskKind = (task: PlannerTask): SprintSourceTaskKind => {
   if (task.plannedBlockKind) return task.plannedBlockKind;
   const text = `${task.discipline} ${task.format} ${task.description}`.toLocaleLowerCase('pt-BR');
@@ -199,6 +235,8 @@ export const plannerTaskFromSourcePlan = (task: SourcePlanTask): PlannerTask => 
     plannerSourceKind: task.sourceKind === 'trilha' ? 'trilha_estrategica' : task.sourceKind,
     targetSlug: task.targetSlug,
     sourcePlanTaskId: task.id,
+    sourceCycleStartsOn: task.cycle?.startsOn,
+    sourceCycleEndsOn: task.cycle?.endsOn,
     plannedBlockKind: blockKind(task),
     plannedQuestions: plannedQuestions === undefined ? undefined : Math.max(0, Math.round(plannedQuestions)),
     materialHint: task.materialHint || undefined,

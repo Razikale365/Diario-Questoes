@@ -122,6 +122,8 @@ test('cycle-overrun backlog tasks remain unscheduled when hydrating the calendar
   assert.equal(overrun.scheduledDate, undefined);
   assert.equal(overrun.createdAt, '1970-01-01T00:00:00.000Z');
   assert.equal(overrun.updatedAt, '1970-01-01T00:00:00.000Z');
+  assert.equal(overrun.sourceCycleStartsOn, '2026-07-11');
+  assert.equal(overrun.sourceCycleEndsOn, '2026-07-17');
   assert.equal(backlog.scheduledDate, undefined);
 });
 

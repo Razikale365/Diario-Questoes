@@ -283,7 +283,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
   const planMessage = preview && !preview.plan.ok ? preview.plan.message : null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end bg-[#05070d]/85 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#05070d]/85 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation">
       <section
         role="dialog"
         aria-modal="true"

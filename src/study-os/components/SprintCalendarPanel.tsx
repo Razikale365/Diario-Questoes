@@ -110,7 +110,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     } finally {
       requestGateRef.current!.applyIfCurrent(request, () => setLoading(false));
     }
-  }, [startDate, targetSlug]);
+  }, [endDate, startDate, targetSlug]);
 
   useEffect(() => {
     const controller = new AbortController();

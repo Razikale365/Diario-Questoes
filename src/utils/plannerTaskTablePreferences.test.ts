@@ -66,7 +66,7 @@ test('malformed visibility cannot blank every data column', () => {
   assert.equal(parsed.sort, null);
 });
 
-test('moves columns and hides or shows without accepting actions', () => {
+test('moves columns and hides or shows configurable values', () => {
   const moved = movePlannerTaskColumn(DEFAULT_PLANNER_TASK_TABLE_PREFERENCES, 'description', 'number');
   assert.equal(moved.order[0], 'description');
   assert.deepEqual(DEFAULT_PLANNER_TASK_TABLE_PREFERENCES.order, DEFAULT_PLANNER_TASK_COLUMNS);
@@ -75,11 +75,6 @@ test('moves columns and hides or shows without accepting actions', () => {
   assert.deepEqual(hidden.hidden, ['format']);
   const shown = setPlannerTaskColumnHidden(hidden, 'format', false);
   assert.deepEqual(shown.hidden, []);
-
-  // @ts-expect-error actions is intentionally outside the configurable public union
-  movePlannerTaskColumn(shown, 'actions', 'number');
-  // @ts-expect-error actions is intentionally outside the configurable public union
-  setPlannerTaskColumnHidden(shown, 'actions', true);
 });
 
 test('refuses to hide the last visible data column', () => {

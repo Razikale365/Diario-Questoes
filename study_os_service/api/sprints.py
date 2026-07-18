@@ -20,6 +20,9 @@ from study_os_service.services.sprint import (
     SprintTargetNotFoundError,
 )
 from study_os_service.repositories.sprint import SprintVersionConflictError
+from study_os_service.repositories.task_execution import (
+    TaskExecutionTerminalSourceConflict,
+)
 from study_os_service.services.sprint_day import (
     SprintActionNotFoundError,
     SprintConfigMutationService,
@@ -453,6 +456,8 @@ async def update_sprint_action(
         ) from exc
     except IdempotencyConflictError as exc:
         raise SprintApiError(409, "idempotency_conflict", str(exc)) from exc
+    except TaskExecutionTerminalSourceConflict as exc:
+        raise SprintApiError(409, "stale_sprint_action", str(exc)) from exc
     except SprintVersionConflictError as exc:
         raise SprintApiError(409, "stale_sprint_action", str(exc)) from exc
     except sqlite3.IntegrityError as exc:

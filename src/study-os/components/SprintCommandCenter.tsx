@@ -498,7 +498,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
             onExtraChange={setExtraBudgetMinutes}
           />
           <div className="col-span-2 flex min-h-16 items-center justify-between gap-3 border border-white/10 bg-[#171717] px-3 py-2 xl:col-span-1">
-            <div><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">Energia</span><p className="mt-1 text-sm font-black text-white">{energy}/5</p></div>
+            <div><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Energia</span><p className="mt-1 text-sm font-black text-white">{energy}/5</p></div>
             <div className="flex gap-1" aria-label="Energia disponível">
               {[1, 2, 3, 4, 5].map((level) => (
                 <button key={level} type="button" title={`Energia ${level}`} onClick={() => setEnergy(level)} className={`h-7 w-7 rounded text-[10px] font-black ${energy === level ? 'bg-[#84cc16] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>{level}</button>
@@ -603,22 +603,29 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
         </div>
       </details>
 
+      </section>
       {activeResult && resultDraft && executionDraft && (
-        <div className="border-t border-white/10 bg-[#262626] p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><p className="text-[10px] font-black uppercase tracking-widest text-[#bef264]">Registrar execução</p><h3 className="mt-1 font-black text-white">{activeResult.title}</h3></div>
-            <button type="button" title="Fechar" onClick={() => { setResultActionId(null); setResultDraft(null); setExecutionDraft(null); setExecutionErrors({}); }} className="grid h-8 w-8 place-items-center rounded bg-white/5 text-gray-300 hover:bg-white/10"><X className="h-4 w-4" /></button>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <ResultSelect value={resultDraft.state} onChange={(value) => setResultDraft({ ...resultDraft, state: value })} />
-          </div>
-          <div className="mt-3"><TaskExecutionFields draft={executionDraft} errors={executionErrors} onChange={setExecutionDraft} /></div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <button type="button" onClick={() => void submitResult(activeResult)} disabled={busy !== null} className="inline-flex h-10 items-center gap-2 rounded bg-[#84cc16] px-4 text-xs font-black uppercase text-black hover:bg-[#65a30d] disabled:opacity-50">{busy === `result-${activeResult.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Salvar e recalcular</button>
-          </div>
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#05070d]/85 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sprint-result-title"
+            className="max-h-[92vh] w-full max-w-5xl overflow-y-auto border border-white/10 bg-[#262626] p-4 shadow-2xl shadow-black/50 sm:rounded-xl sm:p-5"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><p className="text-[10px] font-black uppercase tracking-widest text-[#bef264]">Registrar execução</p><h3 id="sprint-result-title" className="mt-1 font-black text-white">{activeResult.title}</h3></div>
+              <button type="button" aria-label="Fechar registro de execução" title="Fechar" onClick={() => { setResultActionId(null); setResultDraft(null); setExecutionDraft(null); setExecutionErrors({}); }} className="grid h-8 w-8 place-items-center rounded bg-white/5 text-gray-300 hover:bg-white/10"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <ResultSelect value={resultDraft.state} onChange={(value) => setResultDraft({ ...resultDraft, state: value })} />
+            </div>
+            <div className="mt-3"><TaskExecutionFields draft={executionDraft} errors={executionErrors} onChange={setExecutionDraft} /></div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <button type="button" onClick={() => void submitResult(activeResult)} disabled={busy !== null} className="inline-flex h-10 items-center gap-2 rounded bg-[#84cc16] px-4 text-xs font-black uppercase text-black hover:bg-[#65a30d] disabled:opacity-50">{busy === `result-${activeResult.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Salvar e recalcular</button>
+            </div>
+          </section>
         </div>
       )}
-      </section>
     </>
   );
 };
@@ -632,7 +639,7 @@ const ProjectionMetric: React.FC<{
   onChange: (value: number) => void;
 }> = ({ label, value, target, interval, manual, onChange }) => (
   <div className="flex min-h-16 items-center justify-between gap-3 border border-white/10 bg-[#171717] px-3 py-2">
-    <span><span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{label}</span><span className="mt-1 block text-[10px] font-bold text-gray-500">{target}</span>{interval && <span className="mt-0.5 block text-[9px] font-semibold text-gray-600">faixa 90% {interval}</span>}</span>
+    <span><span className="text-[9px] font-black uppercase tracking-widest text-gray-400">{label}</span><span className="mt-1 block text-[10px] font-bold text-gray-400">{target}</span>{interval && <span className="mt-0.5 block text-[9px] font-semibold text-gray-500">faixa 90% {interval}</span>}</span>
     {manual ? <input aria-label={`${label} manual`} type="number" min={0} max={80} value={value ?? ''} onChange={(event) => onChange(Number(event.target.value))} className="h-9 w-16 rounded border border-amber-300/30 bg-[#0d0d0d] text-center text-lg font-black text-amber-100 outline-none focus:border-amber-300" /> : <strong className="text-xl font-black text-white">{formatScore(value)}</strong>}
   </div>
 );

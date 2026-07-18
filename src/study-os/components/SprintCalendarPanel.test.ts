@@ -35,3 +35,13 @@ test('Planner owns the shared calendar while the command center consumes the day
 
   assert.equal(source.includes('<SprintCalendarPanel'), false);
 });
+
+test('cycle hydration that changes the horizon end always replaces an invalidated head load', () => {
+  const source = readFileSync(panelUrl, 'utf8');
+  const load = source.slice(
+    source.indexOf('const load = useCallback'),
+    source.indexOf('\n\n  useEffect(() => {', source.indexOf('const load = useCallback')),
+  );
+
+  assert.match(load, /\}, \[endDate, startDate, targetSlug\]\);/);
+});

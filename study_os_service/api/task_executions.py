@@ -7,7 +7,10 @@ from fastapi import APIRouter, Body, Header, Request
 from fastapi.responses import JSONResponse
 
 from study_os_service.repositories.sprint import SprintVersionConflictError
-from study_os_service.repositories.task_execution import TaskExecutionIdempotencyConflict
+from study_os_service.repositories.task_execution import (
+    TaskExecutionIdempotencyConflict,
+    TaskExecutionTerminalSourceConflict,
+)
 from study_os_service.services.task_execution import SourceTaskNotFoundError, TaskExecutionService
 
 
@@ -43,6 +46,8 @@ async def record_task_execution(
         raise TaskExecutionApiError(404, "source_task_not_found", "source task does not exist") from exc
     except TaskExecutionIdempotencyConflict as exc:
         raise TaskExecutionApiError(409, "task_execution_idempotency_conflict", str(exc)) from exc
+    except TaskExecutionTerminalSourceConflict as exc:
+        raise TaskExecutionApiError(409, "source_task_terminal", str(exc)) from exc
     except SprintVersionConflictError as exc:
         raise TaskExecutionApiError(409, "stale_sprint_action", str(exc)) from exc
     except sqlite3.IntegrityError as exc:

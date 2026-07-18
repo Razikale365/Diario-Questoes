@@ -68,6 +68,7 @@ test('PlannerArea source-plan restore remains safe under React Strict Mode remou
   assert.equal(source.includes('return () => controller.abort()'), true);
   assert.equal(source.includes('hydratedSourcePlanTarget !== studyOsTarget'), true);
   assert.equal(source.includes('setHydratedSourcePlanTarget(null)'), true);
+  assert.doesNotMatch(source, /restauradas do Study OS/);
 });
 
 test('App keeps the planner toast callback stable across renders', () => {
@@ -107,6 +108,16 @@ test('execution defaults do not invent zero-percent question evidence', () => {
   assert.equal(sprintDecisionState(false, false), 'skipped');
   assert.equal(sprintDecisionState(true, false), 'active');
   assert.equal(sprintDecisionState(true, true), 'skipped');
+});
+
+test('execution receipt opens as a focused accessible dialog', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+
+  assert.match(source, /role="dialog"/);
+  assert.match(source, /aria-modal="true"/);
+  assert.match(source, /aria-labelledby="sprint-result-title"/);
+  assert.match(source, /aria-label="Fechar registro de execução"/);
+  assert.match(source, /fixed inset-0 z-\[80\].*justify-center/);
 });
 
 test('generation, recalculation, and saved results refresh audit state in parallel', () => {

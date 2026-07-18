@@ -9,3 +9,9 @@ export const plannerTaskActionAvailability = (status: PlannerTaskStatus): Planne
   const terminal = status === 'completed' || status === 'archived';
   return { canExecute: !terminal, canRecordResult: !terminal };
 };
+
+export const plannerTaskPerformanceLabel = (performance: number | null): string => (
+  performance === null
+    ? 'Sem evidência'
+    : `${performance.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+);

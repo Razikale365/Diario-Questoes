@@ -11,6 +11,18 @@ class TaskExecutionIdempotencyConflict(RuntimeError):
     pass
 
 
+class TaskExecutionTerminalSourceConflict(RuntimeError):
+    def __init__(self, source_task_id: int, status: str):
+        super().__init__(source_task_id, status)
+        self.source_task_id = source_task_id
+        self.status = status
+
+    def __str__(self) -> str:
+        return (
+            f"source task {self.source_task_id} is terminal with status {self.status}"
+        )
+
+
 def _parse_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -101,6 +113,16 @@ class TaskExecutionRepository:
             if existing.request_hash != request_hash:
                 raise TaskExecutionIdempotencyConflict("idempotency key was already used for another request")
             return existing, True
+
+        source_row = self.connection.execute(
+            "SELECT status FROM source_plan_tasks WHERE id=?",
+            (task_input.source_plan_task_id,),
+        ).fetchone()
+        if source_row is not None and source_row["status"] == "completed":
+            raise TaskExecutionTerminalSourceConflict(
+                source_task_id=task_input.source_plan_task_id,
+                status=source_row["status"],
+            )
 
         cursor = self.connection.execute(
             """

@@ -80,7 +80,10 @@ import {
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
 import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
 import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../utils/taskResultDraft';
-import { plannerTaskActionAvailability } from '../utils/plannerExecutionUi';
+import {
+  plannerTaskActionAvailability,
+  plannerTaskPerformanceLabel,
+} from '../utils/plannerExecutionUi';
 import {
   DEFAULT_PLANNER_TASK_COLUMNS,
   DEFAULT_PLANNER_TASK_TABLE_PREFERENCES,
@@ -113,6 +116,7 @@ import {
   currentSourcePlanTasks,
   externalSourceTaskId,
   mergeRestoredSourcePlanTasks,
+  plannerCalendarEndDate,
   plannerTaskFromSourcePlan,
   sourcePlanTaskInput,
 } from '../study-os/sourcePlanBridge';
@@ -460,7 +464,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       return;
     }
     sourcePlanHydrationInFlight.current = true;
-    const shouldAnnounceRestore = plannerTasks.length === 0;
     const localLatestMeta = plannerTasks.reduce(
       (latest, task) => Math.max(latest, task.metaNumber ?? 0),
       0,
@@ -493,7 +496,6 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             importedAt: new Date().toISOString(),
           };
         });
-        if (shouldAnnounceRestore) showToast(`${restored.length} tarefa(s) restauradas do Study OS.`);
       })
       .catch((restoreError) => {
         if (!controller.signal.aborted) {
@@ -507,7 +509,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         }
       });
     return () => controller.abort();
-  }, [showToast, studyOsTarget]);
+  }, [studyOsTarget]);
 
   useEffect(() => {
     if (
@@ -1457,7 +1459,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
         <SprintCalendarPanel
           targetSlug={studyOsTarget}
           startDate={toIsoDate(new Date())}
-          endDate={toIsoDate(shiftDate(new Date(), 14))}
+          endDate={plannerCalendarEndDate(
+            plannerTasks,
+            toIsoDate(new Date()),
+            studyOsActiveTarget?.deadline,
+          )}
           autoOrganizeRequestToken={calendarAutoOrganizeRequestToken}
           onNotice={showToast}
         />
@@ -2196,7 +2202,7 @@ const PLANNER_TASK_COLUMN_REGISTRY: Record<PlannerTaskColumnId, PlannerTaskColum
     id: 'performance',
     label: 'Desemp.',
     sortValue: (task) => task.performance,
-    render: (task) => <span className="font-bold text-gray-300">{task.performance ?? 0}%</span>,
+    render: (task) => <span className="font-bold text-gray-300">{plannerTaskPerformanceLabel(task.performance)}</span>,
   },
   status: {
     id: 'status',
@@ -2225,6 +2231,52 @@ const PLANNER_TASK_COLUMN_REGISTRY: Record<PlannerTaskColumnId, PlannerTaskColum
     ),
   },
 };
+
+const PlannerTaskRowActions: React.FC<{
+  task: PlannerTask;
+  onExecute: (task: PlannerTask) => void;
+  onClearSchedule: (taskId: string) => void;
+  onArchive: (taskId: string) => void;
+  onRestore: (taskId: string) => void;
+}> = ({ task, onExecute, onClearSchedule, onArchive, onRestore }) => (
+  <div className="flex flex-wrap justify-end gap-2">
+    {task.scheduledDate && plannerTaskActionAvailability(task.status).canExecute && (
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onClearSchedule(task.id); }}
+        className="min-h-11 rounded bg-red-500/10 px-3 py-2 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20 sm:min-h-0 sm:px-2 sm:py-1"
+      >
+        Soltar
+      </button>
+    )}
+    {task.status === 'archived' ? (
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onRestore(task.id); }}
+        className="min-h-11 rounded bg-[#84cc16]/10 px-3 py-2 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20 sm:min-h-0 sm:px-2 sm:py-1"
+      >
+        Restaurar
+      </button>
+    ) : plannerTaskActionAvailability(task.status).canExecute ? (
+      <>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onArchive(task.id); }}
+          className="min-h-11 rounded bg-yellow-400/10 px-3 py-2 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20 sm:min-h-0 sm:px-2 sm:py-1"
+        >
+          Arquivar
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onExecute(task); }}
+          className="min-h-11 rounded bg-white/10 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-white/20 sm:min-h-0 sm:px-2 sm:py-1"
+        >
+          Executar
+        </button>
+      </>
+    ) : null}
+  </div>
+);
 
 const SortableTaskColumnHeader: React.FC<{
   column: PlannerTaskColumnDefinition;
@@ -2332,7 +2384,7 @@ const TaskRows: React.FC<{
           </button>
           {isColumnsMenuOpen && (
             <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-white/10 bg-[#1a1a1a] p-2 shadow-2xl">
-              <p className="px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-500">Exibir dados</p>
+              <p className="px-2 py-1 text-[10px] font-black uppercase tracking-widest text-gray-400">Exibir dados</p>
               {preferences.order.map((column) => {
                 const visible = !preferences.hidden.includes(column);
                 return (
@@ -2364,12 +2416,48 @@ const TaskRows: React.FC<{
           )}
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="space-y-3 sm:hidden">
+        {tasks.map((task) => (
+          <article
+            key={task.id}
+            tabIndex={onOpen ? 0 : undefined}
+            onClick={() => onOpen?.(task.id)}
+            onKeyDown={(event) => {
+              if (onOpen && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                onOpen(task.id);
+              }
+            }}
+            className={`rounded-lg border border-white/10 bg-[#202020] p-4 text-sm text-gray-300 ${onOpen ? 'cursor-pointer' : ''}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-purple-300">Tarefa {task.number}</p>
+                <h3 className="mt-1 text-base font-black leading-tight text-white">{task.discipline}</h3>
+              </div>
+              <span className={`shrink-0 rounded border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${statusClass[task.status]}`}>
+                {statusLabel[task.status]}
+              </span>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-gray-200">{task.description}</p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><dt className="font-black uppercase tracking-wide text-gray-400">Tempo</dt><dd className="mt-0.5 font-bold text-white">{formatMinutes(task.durationMinutes)}</dd></div>
+              <div><dt className="font-black uppercase tracking-wide text-gray-400">Desempenho</dt><dd className="mt-0.5 font-bold text-white">{plannerTaskPerformanceLabel(task.performance)}</dd></div>
+              <div><dt className="font-black uppercase tracking-wide text-gray-400">Relevância</dt><dd className="mt-0.5 font-bold text-purple-200">{task.relevance}</dd></div>
+              <div><dt className="font-black uppercase tracking-wide text-gray-400">Agenda</dt><dd className="mt-0.5 font-bold text-white">{task.scheduledDate ? `${task.scheduledDate}${task.startTime ? ` ${task.startTime}` : ''}` : 'Sem agenda'}</dd></div>
+            </dl>
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <PlannerTaskRowActions task={task} onExecute={onExecute} onClearSchedule={onClearSchedule} onArchive={onArchive} onRestore={onRestore} />
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto sm:block">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <table className="w-full min-w-[880px] border-collapse text-left">
             <thead>
               <SortableContext items={visibleColumns.map((column) => column.id)} strategy={horizontalListSortingStrategy}>
-                <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-500">
+                <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400">
                   {visibleColumns.map((column) => (
                     <SortableTaskColumnHeader
                       key={column.id}
@@ -2400,43 +2488,7 @@ const TaskRows: React.FC<{
                     <td key={column.id} className="px-3 py-3">{column.render(task)}</td>
                   ))}
                   <td className="sticky right-0 z-10 bg-[#262626] px-3 py-3">
-                    <div className="flex justify-end gap-2">
-                      {task.scheduledDate && task.status !== 'archived' && (
-                        <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); onClearSchedule(task.id); }}
-                          className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-black uppercase text-red-300 hover:bg-red-500/20"
-                        >
-                          Soltar
-                        </button>
-                      )}
-                      {task.status === 'archived' ? (
-                        <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); onRestore(task.id); }}
-                          className="rounded bg-[#84cc16]/10 px-2 py-1 text-[10px] font-black uppercase text-[#84cc16] hover:bg-[#84cc16]/20"
-                        >
-                          Restaurar
-                        </button>
-                      ) : plannerTaskActionAvailability(task.status).canExecute ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(event) => { event.stopPropagation(); onArchive(task.id); }}
-                            className="rounded bg-yellow-400/10 px-2 py-1 text-[10px] font-black uppercase text-yellow-300 hover:bg-yellow-400/20"
-                          >
-                            Arquivar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => { event.stopPropagation(); onExecute(task); }}
-                            className="rounded bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white/20"
-                          >
-                            Executar
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
+                    <PlannerTaskRowActions task={task} onExecute={onExecute} onClearSchedule={onClearSchedule} onArchive={onArchive} onRestore={onRestore} />
                   </td>
                 </tr>
               ))}
