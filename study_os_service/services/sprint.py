@@ -296,6 +296,7 @@ class SourcePlanService:
                     source_kind=prepared["source_kind"],
                     plan_label=prepared["plan_label"],
                     meta_number=prepared["meta_number"],
+                    allow_correction=prepared["cycle_correction"],
                     **prepared["cycle"],
                 )
             for task in prepared["tasks"]:
@@ -464,6 +465,9 @@ class SourcePlanService:
         if meta_number is not None:
             meta_number = _integer(meta_number, "meta number")
         cycle_payload = payload.get("cycle")
+        cycle_correction = payload.get("cycleCorrection", False)
+        if not isinstance(cycle_correction, bool):
+            raise ValueError("cycleCorrection must be boolean")
         cycle = None
         if cycle_payload is not None:
             if not isinstance(cycle_payload, Mapping):
@@ -570,5 +574,6 @@ class SourcePlanService:
             "plan_label": plan_label,
             "meta_number": meta_number,
             "cycle": cycle,
+            "cycle_correction": cycle_correction,
             "tasks": prepared_tasks,
         }

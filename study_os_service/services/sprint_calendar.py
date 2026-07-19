@@ -206,6 +206,15 @@ class SprintCalendarService:
                 overrides=overrides,
                 previous=previous,
             )
+            daily_minutes = prepared["hours_per_day"] * 60
+            capacities = tuple(
+                replace(
+                    capacity,
+                    ls_minutes=min(capacity.ls_minutes, daily_minutes),
+                    extra_minutes=max(0, min(capacity.extra_minutes, daily_minutes - capacity.ls_minutes)),
+                )
+                for capacity in capacities
+            )
             override_versions = self._override_versions(target_slug)
             snapshot = SprintHorizonSnapshot(
                 target_slug=target_slug,
@@ -225,6 +234,7 @@ class SprintCalendarService:
                 starts_on=starts_on,
                 ends_on=prepared["ends_on"],
                 capacities=capacities,
+                max_tasks_per_day=prepared["max_tasks_per_day"],
             )
             draft = self.engine.plan(request=request, snapshot=snapshot)
             if prepared["mode"] == "restore_run":
@@ -607,6 +617,14 @@ class SprintCalendarService:
             raise ValueError(
                 "restoreRunId is required exactly for restore_run mode"
             )
+        max_tasks_per_day = self._bounded_optional(
+            payload.get("maxTasksPerDay"), "tasks per day", 1, 12
+        )
+        hours_per_day = self._bounded_optional(
+            payload.get("hoursPerDay"), "hours per day", 1, 12
+        )
+        if max_tasks_per_day is None or hours_per_day is None:
+            raise ValueError("tasks per day and hours per day are required")
         now = self.clock()
         planning_cutoff = datetime.fromisoformat(_timestamp_text(now))
         canonical_payload = {
@@ -615,6 +633,8 @@ class SprintCalendarService:
             "endDate": ends_on.isoformat(),
             "expectedRunId": expected_run_id,
             "mode": mode,
+            "maxTasksPerDay": max_tasks_per_day,
+            "hoursPerDay": hours_per_day,
             "restoreRunId": restore_run_id,
         }
         return {
@@ -623,6 +643,8 @@ class SprintCalendarService:
             "ends_on": ends_on,
             "expected_run_id": expected_run_id,
             "mode": mode,
+            "max_tasks_per_day": max_tasks_per_day,
+            "hours_per_day": hours_per_day,
             "restore_run_id": restore_run_id,
             "planning_cutoff": planning_cutoff,
             "request_hash": _hash(canonical_payload),

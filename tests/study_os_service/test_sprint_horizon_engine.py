@@ -112,6 +112,50 @@ def test_each_released_ls_task_is_reserved_once_across_the_horizon():
     assert len(ids) == len(set(ids))
 
 
+def test_meta_tasks_are_balanced_across_each_available_day_of_the_cycle():
+    tasks = tuple(source(task_id, minutes=30) for task_id in range(1, 31))
+    draft = SprintHorizonEngine().plan(
+        request=replace(request(date(2026, 7, 15), 7), max_tasks_per_day=5),
+        snapshot=snapshot(
+            tasks=tasks,
+            cycles=(replace(
+                cycle(1, 47, date(2026, 7, 15), date(2026, 7, 21)),
+                released_at=CUTOFF,
+            ),),
+        ),
+    )
+
+    source_counts = [
+        sum(assignment.source_plan_task_id is not None for assignment in day.assignments)
+        for day in draft.days
+    ]
+
+    assert sum(source_counts) == 30
+    assert max(source_counts) - min(source_counts) <= 1
+
+
+def test_meta_task_quota_respects_the_user_selected_tasks_per_day():
+    tasks = tuple(source(task_id, minutes=30) for task_id in range(1, 31))
+    draft = SprintHorizonEngine().plan(
+        request=request(date(2026, 7, 15), 7),
+        snapshot=snapshot(
+            tasks=tasks,
+            cycles=(replace(
+                cycle(1, 47, date(2026, 7, 15), date(2026, 7, 21)),
+                released_at=CUTOFF,
+            ),),
+        ),
+    )
+
+    source_counts = [
+        sum(assignment.source_plan_task_id is not None for assignment in day.assignments)
+        for day in draft.days
+    ]
+
+    assert max(source_counts) == 4
+    assert sum(source_counts) == 28
+
+
 def test_task_is_never_scheduled_before_its_released_cycle_window():
     meta48 = replace(
         cycle(2, 48, date(2026, 7, 18), date(2026, 7, 24)),

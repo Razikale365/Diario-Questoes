@@ -120,6 +120,7 @@ class SourcePlanCycleService:
         released_at: datetime,
         starts_on: date,
         ends_on: date,
+        allow_correction: bool = False,
     ) -> SourcePlanCycle:
         if not self.connection.in_transaction:
             raise RuntimeError("caller must own an active cycle transaction")
@@ -144,6 +145,28 @@ class SourcePlanCycleService:
                 existing["ends_on"],
             )
             if current != values:
+                if allow_correction and not self.connection.execute(
+                    """
+                    SELECT 1
+                    FROM task_executions execution
+                    JOIN source_plan_tasks task ON task.id=execution.source_plan_task_id
+                    WHERE task.source_cycle_id=?
+                    LIMIT 1
+                    """,
+                    (existing["id"],),
+                ).fetchone():
+                    self.connection.execute(
+                        """
+                        UPDATE source_plan_cycles
+                        SET meta_number=?, released_at=?, starts_on=?, ends_on=?
+                        WHERE id=?
+                        """,
+                        (*values, existing["id"]),
+                    )
+                    updated = self.connection.execute(
+                        "SELECT * FROM source_plan_cycles WHERE id=?", (existing["id"],)
+                    ).fetchone()
+                    return _cycle(updated)
                 raise SourcePlanCycleConflictError(
                     "source plan cycle was reimported with different dates"
                 )

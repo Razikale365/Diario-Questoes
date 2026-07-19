@@ -29,8 +29,11 @@ interface SprintCalendarPanelProps {
   targetSlug: string;
   startDate: string;
   endDate: string;
+  maxTasksPerDay: number;
+  hoursPerDay: number;
   autoOrganizeRequestToken?: number;
   onNotice?: (message: string) => void;
+  onDocumentChange?: (document: SprintCalendarDocument | null) => void;
 }
 
 const precisionTone = {
@@ -85,8 +88,11 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   targetSlug,
   startDate,
   endDate,
+  maxTasksPerDay,
+  hoursPerDay,
   autoOrganizeRequestToken = 0,
   onNotice,
+  onDocumentChange,
 }) => {
   const [document, setDocument] = useState<SprintCalendarDocument | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +125,12 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
   }, [load]);
 
   useEffect(() => {
+    onDocumentChange?.(document);
+  }, [document, onDocumentChange]);
+
+  useEffect(() => () => onDocumentChange?.(null), [onDocumentChange]);
+
+  useEffect(() => {
     return subscribeStudyOsDataChanged(window, targetSlug, ['calendar'], () => void load());
   }, [load, targetSlug]);
 
@@ -144,6 +156,11 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     ...document.run.shortfalls,
     ...document.days.flatMap((day) => day.warnings),
   ])] : [], [document]);
+  const scheduledMetaTaskCount = useMemo(() => {
+    if (!document) return 0;
+    const itemById = new Map(document.items.map((item) => [item.id, item]));
+    return document.assignments.filter((assignment) => itemById.get(assignment.itemId)?.kind === 'source_task').length;
+  }, [document]);
 
   const createPreview = useCallback(async (refreshHead = false) => {
     requestGateRef.current!.invalidate();
@@ -168,6 +185,8 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
         endDate,
         expectedRunId,
         mode: 'reflow_open',
+        maxTasksPerDay,
+        hoursPerDay,
       }, mutationKey('calendar-preview'), controller.signal);
       if (mutationControllerRef.current === controller && !controller.signal.aborted) {
         setDocument(next);
@@ -183,7 +202,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
         setBusy(null);
       }
     }
-  }, [document, endDate, onNotice, startDate, targetSlug]);
+  }, [document, endDate, hoursPerDay, maxTasksPerDay, onNotice, startDate, targetSlug]);
 
   useEffect(() => {
     if (!intentGateRef.current!.consume(autoOrganizeRequestToken)) return;
@@ -232,7 +251,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <h2 className="text-base font-black text-white">Horizonte adaptativo</h2>
             <span className="text-[10px] font-bold text-gray-500">
-              {startDate} → {endDate} · {view?.totals.assignments ?? 0} blocos
+              {startDate} → {endDate} · {scheduledMetaTaskCount} tarefas agendadas
             </span>
           </div>
           <p className="mt-1 text-xs font-semibold text-gray-400">

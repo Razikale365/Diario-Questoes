@@ -45,6 +45,8 @@ test('sprint command center keeps the tactical workflow visible and score detail
   assert.equal(source.includes('fetchSprintEvidence'), true);
   assert.equal(source.includes('<details'), true);
   assert.equal(source.includes('createCalendarRequestGate'), true, 'day loads must use the tested request gate');
+  assert.equal(source.includes('Tarefa {sourceTaskNumber}'), true, 'the human queue must identify the LS task number');
+  assert.equal(source.includes('Abrir tarefa'), true, 'the human queue must open the task detail instead of jumping straight to execution');
 });
 
 test('PlannerArea mounts the SEFAZ sprint first and persists imported LS tasks', () => {
@@ -54,6 +56,7 @@ test('PlannerArea mounts the SEFAZ sprint first and persists imported LS tasks',
   assert.equal(source.includes('importSourcePlan'), true);
   assert.equal(source.includes('fetchSourcePlanTasks'), true);
   assert.equal(source.includes('plannerTaskFromSourcePlan'), true);
+  assert.equal(source.includes('setSelectedTaskId(task.id)'), true, 'opening a source task must use the shared Planner modal');
   assert.equal(source.indexOf('<SprintCommandCenter'), source.indexOf('<AutonomousDay') > -1
     ? Math.min(source.indexOf('<SprintCommandCenter'), source.indexOf('<AutonomousDay'))
     : source.indexOf('<SprintCommandCenter'));

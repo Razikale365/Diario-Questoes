@@ -415,6 +415,7 @@ class SprintHorizonRequest:
     starts_on: date
     ends_on: date
     capacities: tuple[HorizonDayCapacity, ...]
+    max_tasks_per_day: int = 4
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_slug", _text(self.target_slug, "target"))
@@ -429,6 +430,7 @@ class SprintHorizonRequest:
         _tuple(self.capacities, "horizon capacities")
         if tuple(item.plan_date for item in self.capacities) != expected:
             raise ValueError("horizon capacities must be contiguous")
+        _integer(self.max_tasks_per_day, "tasks per day", 1, 12)
 
 
 @dataclass(frozen=True, slots=True)

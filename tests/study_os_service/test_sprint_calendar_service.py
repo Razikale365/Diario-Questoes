@@ -79,6 +79,8 @@ def payload(expected_run_id=None, mode="reflow_open", restore_run_id=None):
         "endDate": "2026-07-20",
         "expectedRunId": expected_run_id,
         "mode": mode,
+        "maxTasksPerDay": 4,
+        "hoursPerDay": 4,
     }
     if restore_run_id is not None:
         document["restoreRunId"] = restore_run_id

@@ -26,6 +26,7 @@ import {
   subscribeStudyOsDataChanged,
 } from './executionUiState';
 import { createCalendarRequestGate } from './SprintCalendarControl';
+import { primarySprintActions, visibleSprintActions } from '../domain/sprintActionVisibility';
 import {
   fetchOptionalSprintDay,
   fetchSourcePlanTasks,
@@ -297,7 +298,7 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
   }, [load]);
 
   useEffect(() => {
-    return subscribeStudyOsDataChanged(window, targetSlug, ['sprint-day'], () => void load());
+    return subscribeStudyOsDataChanged(window, targetSlug, ['source-plan', 'sprint-day'], () => void load());
   }, [load, targetSlug]);
 
   useEffect(() => () => dayRequestGateRef.current?.dispose(), [targetSlug]);
@@ -423,13 +424,20 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
 
   const visibleActions = useMemo(() => {
     if (!day) return [];
-    if (!minimumMode) return day.actions;
+    const currentActions = visibleSprintActions(day.actions, sourceTasks);
+    if (!minimumMode) return currentActions;
     const ids = new Set(day.minimumViable.actionIds);
-    return day.actions.filter((action) => ids.has(action.id));
-  }, [day, minimumMode]);
+    return currentActions.filter((action) => ids.has(action.id));
+  }, [day, minimumMode, sourceTasks]);
 
   const lsActions = visibleActions.filter((action) => action.sourcePlanTaskId !== null);
+  const primaryLsActions = primarySprintActions(lsActions);
+  const hiddenLsActionCount = Math.max(0, lsActions.filter((action) => !['completed', 'failed', 'skipped'].includes(action.state)).length - primaryLsActions.length);
   const extraActions = visibleActions.filter((action) => action.sourcePlanTaskId === null);
+  const sourceTaskNumbers = useMemo(
+    () => new Map(sourceTasks.map((task) => [task.id, task.sourceOrder])),
+    [sourceTasks],
+  );
   const activeResult = day?.actions.find((action) => action.id === resultActionId) || null;
   if (loading) {
     return (
@@ -556,10 +564,11 @@ export const SprintCommandCenter: React.FC<SprintCommandCenterProps> = ({
       {day ? (
         <div className="grid lg:grid-cols-[minmax(0,1.65fr)_minmax(19rem,0.85fr)]">
           <div className="border-b border-white/10 p-4 sm:p-5 lg:border-b-0 lg:border-r">
-            <QueueSection title="Fila LS" count={lsActions.length} actions={lsActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
+            <QueueSection title="Agora" count={primaryLsActions.length} actions={primaryLsActions} sourceTaskNumbers={sourceTaskNumbers} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
+            {hiddenLsActionCount > 0 && <p className="mt-3 text-xs font-bold leading-relaxed text-gray-500">Mais {hiddenLsActionCount} blocos da Meta estão no roteiro do Calendário. Aqui aparecem apenas os próximos passos executáveis.</p>}
           </div>
           <div className="bg-[#1b1b1b] p-4 sm:p-5">
-            <QueueSection title="Intervenções" count={extraActions.length} actions={extraActions} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
+            <QueueSection title="Intervenções" count={extraActions.length} actions={extraActions} sourceTaskNumbers={sourceTaskNumbers} busy={busy} resultActionId={resultActionId} onConfirm={confirmAction} onResult={(action) => { setResultActionId(action.id); setResultDraft(defaultSprintResult(action, energy)); setExecutionDraft(executionDraftForAction(action, energy)); setExecutionErrors({}); }} onOpen={onOpenSourceTask} onPrompt={copyPrompt} />
           </div>
         </div>
       ) : (
@@ -681,6 +690,7 @@ interface QueueSectionProps {
   title: string;
   count: number;
   actions: SprintAction[];
+  sourceTaskNumbers: Map<number, number>;
   busy: string | null;
   resultActionId: number | null;
   onConfirm: (action: SprintAction, accept: boolean) => void;
@@ -689,26 +699,31 @@ interface QueueSectionProps {
   onPrompt: (action: SprintAction) => void;
 }
 
-const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, busy, resultActionId, onConfirm, onResult, onOpen, onPrompt }) => (
+const QueueSection: React.FC<QueueSectionProps> = ({ title, count, actions, sourceTaskNumbers, busy, resultActionId, onConfirm, onResult, onOpen, onPrompt }) => (
   <div>
     <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-black uppercase tracking-[0.2em] text-gray-300">{title}</h2><span className="rounded bg-white/5 px-2 py-1 text-[10px] font-black text-gray-400">{count}</span></div>
     <div className="space-y-2">
       {actions.length ? actions.map((action) => (
         <article key={action.id} className={`border border-white/10 border-l-4 bg-[#242424] p-3 ${recommendationTone[action.recommendation]} ${action.state === 'completed' ? 'opacity-60' : ''}`}>
+          {(() => {
+            const sourceTaskNumber = action.sourcePlanTaskId === null ? undefined : sourceTaskNumbers.get(action.sourcePlanTaskId);
+            return <>
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className={`rounded border px-2 py-1 text-[9px] font-black uppercase ${recommendationBadge[action.recommendation]}`}>{recommendationLabel[action.recommendation]}</span><span className="text-[9px] font-black uppercase text-gray-500">{action.paper} · {action.durationMinutes} min{action.plannedQuestions ? ` · ${action.plannedQuestions} q` : ''}</span><span className="rounded bg-white/5 px-2 py-1 text-[9px] font-black text-gray-300">Confiança {formatPercent(action.confidenceBp)}</span>{typeof action.scoreDetails.fragilityBp === 'number' && <span className="rounded bg-rose-400/10 px-2 py-1 text-[9px] font-black text-rose-200">Fragilidade {formatPercent(action.scoreDetails.fragilityBp)}</span>}{action.questionRefs.length > 0 && <span className="rounded bg-amber-300/10 px-2 py-1 text-[9px] font-black text-amber-200">{action.questionRefs.length} exatas</span>}</div><h3 className="mt-2 text-sm font-black leading-snug text-white">{action.title}</h3>{action.topicHint && <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{action.topicHint}</p>}</div>
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className={`rounded border px-2 py-1 text-[9px] font-black uppercase ${recommendationBadge[action.recommendation]}`}>{recommendationLabel[action.recommendation]}</span>{sourceTaskNumber && <span className="rounded bg-purple-400/15 px-2 py-1 text-[9px] font-black uppercase text-purple-100">Tarefa {sourceTaskNumber}</span>}<span className="text-[9px] font-black uppercase text-gray-500">{action.paper} · {action.durationMinutes} min{action.plannedQuestions ? ` · ${action.plannedQuestions} q` : ''}</span><span className="rounded bg-white/5 px-2 py-1 text-[9px] font-black text-gray-300">Confiança {formatPercent(action.confidenceBp)}</span>{typeof action.scoreDetails.fragilityBp === 'number' && <span className="rounded bg-rose-400/10 px-2 py-1 text-[9px] font-black text-rose-200">Fragilidade {formatPercent(action.scoreDetails.fragilityBp)}</span>}{action.questionRefs.length > 0 && <span className="rounded bg-amber-300/10 px-2 py-1 text-[9px] font-black text-amber-200">{action.questionRefs.length} exatas</span>}</div><h3 className="mt-2 text-sm font-black leading-snug text-white">{action.title}</h3>{action.topicHint && <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{action.topicHint}</p>}</div>
             <span className="text-[9px] font-black uppercase text-gray-500">{action.state === 'pending' ? 'A confirmar' : action.state}</span>
           </div>
           <div className="mt-3 border-l border-white/10 pl-3"><p className="text-[9px] font-black uppercase tracking-widest text-gray-500">Por que agora</p><p className="mt-1 text-xs font-semibold leading-relaxed text-gray-300">{action.whyNow}</p></div>
           {action.rationale.length > 0 && <ul className="mt-2 space-y-1 pl-3 text-[10px] font-semibold leading-relaxed text-gray-500">{action.rationale.map((reason, index) => <li key={`${reason}-${index}`}>• {reason}</li>)}</ul>}
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {action.externalTaskId && <button type="button" onClick={() => onOpen(action.externalTaskId!)} className="inline-flex h-8 items-center gap-1.5 rounded bg-[#84cc16] px-2.5 text-[10px] font-black uppercase text-black hover:bg-[#65a30d]"><Play className="h-3.5 w-3.5" /> Abrir</button>}
+            {action.externalTaskId && <button type="button" onClick={() => onOpen(action.externalTaskId!)} className="inline-flex h-8 items-center gap-1.5 rounded bg-[#84cc16] px-2.5 text-[10px] font-black uppercase text-black hover:bg-[#65a30d]"><Play className="h-3.5 w-3.5" /> Abrir tarefa</button>}
             {action.plannedQuestions > 0 && <a href={tecUrlForAction(action)} target="study-os-tec" rel="noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded border border-sky-400/25 bg-sky-400/10 px-2.5 text-[10px] font-black uppercase text-sky-100 hover:bg-sky-400/20">TEC <ExternalLink className="h-3.5 w-3.5" /></a>}
             <button type="button" onClick={() => void onPrompt(action)} className="inline-flex h-8 items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2.5 text-[10px] font-black uppercase text-gray-200 hover:bg-white/10"><ClipboardCopy className="h-3.5 w-3.5" /> Prompt ChatGPT</button>
             {action.state === 'pending' && <><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, true)} className="inline-flex h-8 items-center gap-1.5 rounded border border-[#84cc16]/30 bg-[#84cc16]/10 px-2.5 text-[10px] font-black uppercase text-[#bef264] disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Confirmar</button><button type="button" disabled={busy !== null} onClick={() => void onConfirm(action, false)} title="Recusar sugestão" className="grid h-8 w-8 place-items-center rounded border border-white/10 bg-white/5 text-gray-400 hover:text-white disabled:opacity-50"><X className="h-3.5 w-3.5" /></button></>}
             {!['completed', 'skipped', 'failed'].includes(action.state) && action.sourcePlanTaskId !== null && <button type="button" onClick={() => onResult(action)} className={`inline-flex h-8 items-center gap-1.5 rounded border px-2.5 text-[10px] font-black uppercase ${resultActionId === action.id ? 'border-amber-300/40 bg-amber-300/15 text-amber-100' : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'}`}><Activity className="h-3.5 w-3.5" /> Resultado</button>}
           </div>
           <details className="mt-3 border-t border-white/10 pt-2"><summary className="cursor-pointer text-[9px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-300">Detalhes do score</summary><dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">{scoreEntries(action.scoreDetails).map(([key, value]) => <React.Fragment key={key}><dt className="break-words text-gray-500">{key}</dt><dd className="break-words text-right font-bold text-gray-300">{formatScoreValue(value)}</dd></React.Fragment>)}</dl></details>
+            </>;
+          })()}
         </article>
       )) : <div className="border border-dashed border-white/10 px-3 py-8 text-center text-xs font-bold text-gray-600">Nenhuma ação nesta fila.</div>}
     </div>

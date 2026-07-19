@@ -1,4 +1,4 @@
-import type { PlannerTask, PlannerTaskBlockKind, PlannerTaskSource } from '../types';
+import type { PlannerMetaSummary, PlannerTask, PlannerTaskBlockKind, PlannerTaskSource } from '../types';
 import { mergePlannerTasks } from '../utils/planner';
 import type { SourcePlanTask, SourcePlanTaskInput, SprintSourceTaskKind } from './api/sprint';
 
@@ -37,6 +37,22 @@ const shiftIsoDate = (value: string, delta: number) => {
   const [year, month, day] = value.split('-').map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + delta));
   return shifted.toISOString().slice(0, 10);
+};
+
+const isoDateFromBrazilianDate = (value: string | undefined) => {
+  const match = value?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : undefined;
+};
+
+export const sourcePlanCycleForMeta = (meta: PlannerMetaSummary | null | undefined) => {
+  const startsOn = isoDateFromBrazilianDate(meta?.startedAt);
+  const nextMetaOn = isoDateFromBrazilianDate(meta?.nextMetaAt);
+  if (!startsOn || !nextMetaOn || nextMetaOn <= startsOn) return undefined;
+  return {
+    releasedAt: `${startsOn}T00:00:00-03:00`,
+    startsOn,
+    endsOn: shiftIsoDate(nextMetaOn, -1),
+  };
 };
 
 const LAST_SUPPORTED_CALENDAR_HORIZON_OFFSET_DAYS = 14;

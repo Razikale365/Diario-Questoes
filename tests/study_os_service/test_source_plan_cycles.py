@@ -49,6 +49,7 @@ def _import_cycle(
     starts_on: str,
     ends_on: str,
     tasks: list[dict[str, object]],
+    cycle_correction: bool = False,
 ):
     return client.post(
         "/api/v1/source-plans/import",
@@ -58,6 +59,7 @@ def _import_cycle(
             "sourceKind": "ls",
             "planLabel": label,
             "metaNumber": meta,
+            "cycleCorrection": cycle_correction,
             "cycle": {
                 "releasedAt": released_at,
                 "startsOn": starts_on,
@@ -200,3 +202,23 @@ def test_conflicting_cycle_reimport_returns_409(tmp_path: Path):
     assert first.status_code == 201, first.text
     assert conflict.status_code == 409
     assert conflict.json()["code"] == "source_plan_cycle_conflict"
+
+
+def test_cycle_correction_updates_an_unexecuted_imported_meta_window(tmp_path: Path):
+    with _client(tmp_path) as client:
+        _seed(client)
+        first = _import_cycle(
+            client, key="meta48-wrong-window", label="Meta 48", meta=48,
+            released_at="2026-04-27T00:00:00-03:00", starts_on="2026-04-27", ends_on="2026-05-03",
+            tasks=[_task("meta48-a", "Economia", "2026-04-27")],
+        )
+        corrected = _import_cycle(
+            client, key="meta48-corrected-window", label="Meta 48", meta=48,
+            released_at="2026-07-18T00:00:00-03:00", starts_on="2026-07-18", ends_on="2026-07-24",
+            tasks=[_task("meta48-a", "Economia", "2026-07-18")], cycle_correction=True,
+        )
+
+    assert first.status_code == 201, first.text
+    assert corrected.status_code == 201, corrected.text
+    assert corrected.json()["cycle"]["startsOn"] == "2026-07-18"
+    assert corrected.json()["cycle"]["endsOn"] == "2026-07-24"

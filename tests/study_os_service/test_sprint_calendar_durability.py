@@ -224,6 +224,8 @@ def _preview_payload(expected_run_id: int | None) -> dict[str, object]:
         "endDate": "2026-07-20",
         "expectedRunId": expected_run_id,
         "mode": "reflow_open",
+        "maxTasksPerDay": 4,
+        "hoursPerDay": 4,
     }
 
 

@@ -102,6 +102,8 @@ export interface SprintCalendarPreviewInput {
   endDate: string;
   expectedRunId: number | null;
   mode: CalendarPreviewMode;
+  maxTasksPerDay: number;
+  hoursPerDay: number;
   restoreRunId?: number;
 }
 
@@ -331,7 +333,7 @@ export const parseSprintCalendar = (value: unknown): SprintCalendarDocument => {
     }
     if (assignment.replacesPlaceholderItemId !== null) {
       const replaced = itemById.get(assignment.replacesPlaceholderItemId);
-      if (!replaced || replaced.kind !== 'future_cycle_capacity' || assignedItem.kind !== 'source_task') invalid('placeholder replacement');
+      if (assignedItem.kind !== 'source_task' || (replaced && replaced.kind !== 'future_cycle_capacity')) invalid('placeholder replacement');
     }
   }
   for (const day of days) {

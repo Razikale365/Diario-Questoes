@@ -110,6 +110,23 @@ test('calendar parser rejects executable placeholders and duplicate day identiti
   }), /duplicate/i);
 });
 
+test('calendar parser accepts a source assignment whose replaced placeholder belongs to the base run', () => {
+  const replacement = {
+    ...calendar,
+    items: [{
+      ...calendar.items[0], id: 22, itemKey: 'source:48:1', origin: 'source', kind: 'source_task',
+      sourcePlanTaskId: 77, subjectProfileId: 1, title: 'Tarefa da Meta 48', expectedMetaNumber: 48,
+    }],
+    assignments: [{
+      ...calendar.assignments[0], itemId: 22, precision: 'exact', action: { title: 'Executar: Tarefa da Meta 48' },
+      expectedGainMilli: 10, replacesPlaceholderItemId: 999,
+    }],
+    diff: { ...calendar.diff, placeholderReplacements: 1 },
+  };
+
+  assert.deepEqual(parseSprintCalendar(replacement), replacement);
+});
+
 test('calendar parser rejects inconsistent capacity and applied runs without timestamp', () => {
   assert.throws(() => parseSprintCalendar({
     ...calendar,
@@ -149,6 +166,8 @@ test('preview and apply preserve idempotency, mode, and expected head', async (c
     endDate: '2026-07-31',
     expectedRunId: null,
     mode: 'restore_run',
+    maxTasksPerDay: 4,
+    hoursPerDay: 4,
     restoreRunId: 6,
   }, 'preview-key');
   await applySprintCalendarRun(7, {
@@ -164,6 +183,8 @@ test('preview and apply preserve idempotency, mode, and expected head', async (c
     endDate: '2026-07-31',
     expectedRunId: null,
     mode: 'restore_run',
+    maxTasksPerDay: 4,
+    hoursPerDay: 4,
     restoreRunId: 6,
   });
   assert.equal(requests[1]?.input, '/api/v1/sprints/calendar/runs/7/apply');
@@ -181,10 +202,10 @@ test('calendar head converts only the structured missing response to null', asyn
 test('restore mode requires restoreRunId and other modes reject it', async () => {
   await assert.rejects(() => previewSprintCalendar({
     targetSlug: 'sefaz_ce', startDate: '2026-07-18', endDate: '2026-07-31',
-    expectedRunId: null, mode: 'restore_run',
+    expectedRunId: null, mode: 'restore_run', maxTasksPerDay: 4, hoursPerDay: 4,
   }, 'missing-restore'), /restoreRunId/);
   await assert.rejects(() => previewSprintCalendar({
     targetSlug: 'sefaz_ce', startDate: '2026-07-18', endDate: '2026-07-31',
-    expectedRunId: null, mode: 'reflow_open', restoreRunId: 6,
+    expectedRunId: null, mode: 'reflow_open', maxTasksPerDay: 4, hoursPerDay: 4, restoreRunId: 6,
   }, 'extra-restore'), /restoreRunId/);
 });

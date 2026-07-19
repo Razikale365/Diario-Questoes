@@ -197,6 +197,37 @@ test('mergePlannerTasks refreshes reimported task details by meta and number wit
   assert.equal(result[0].linkedStudyTaskId, 'study-task-29');
 });
 
+test('parseLsMetaText preserves the standalone Meta 48 heading when a later task number is parenthesized', () => {
+  const result = parseLsMetaText(`
+META 9 (SEFAZ CE Experiente)
+META 48
+
+(10) Administração Pública
+Material indicado: TEC Concursos
+Assunto(s): Integridade e Programa de Integridade
+Relevância: 8
+`, 'ls-meta-pdf');
+
+  assert.equal(result.meta.metaNumber, 48, 'the PDF meta heading must not be replaced by task 10');
+});
+
+test('parseLsMetaText turns a dated LS PDF footer into the current weekly Meta window', () => {
+  const result = parseLsMetaText(`
+META 48
+Inscrições: 27/04/2026
+18/07/2026  1
+18/07/2026  2
+
+(1) Administração Pública
+Material indicado: TEC Concursos
+Assunto(s): Integridade
+Relevância: 8
+`, 'ls-meta-pdf');
+
+  assert.equal(result.meta.startedAt, '18/07/2026');
+  assert.equal(result.meta.nextMetaAt, '25/07/2026');
+});
+
 test('replacePendingGeneratedStudyOsTasks preserves LS and completed work while replacing only the same target and dates', () => {
   const existing = [
     makeTask({ id: 'ls-task', source: 'ls-meta-pdf', scheduledDate: '2026-07-10' }),

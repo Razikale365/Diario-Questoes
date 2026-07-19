@@ -106,6 +106,11 @@ import { CourseInventory } from '../study-os/components/CourseInventory';
 import { AutonomousDay } from '../study-os/components/AutonomousDay';
 import { SprintCommandCenter } from '../study-os/components/SprintCommandCenter';
 import { SprintCalendarPanel } from '../study-os/components/SprintCalendarPanel';
+import type { SprintCalendarDocument } from '../study-os/api/sprintCalendar';
+import {
+  projectCalendarPreviewEntries,
+  type CalendarTaskIdentity,
+} from '../study-os/domain/calendarPreviewProjection';
 import {
   fetchSourcePlanTasks,
   importSourcePlan,
@@ -118,6 +123,7 @@ import {
   mergeRestoredSourcePlanTasks,
   plannerCalendarEndDate,
   plannerTaskFromSourcePlan,
+  sourcePlanCycleForMeta,
   sourcePlanTaskInput,
 } from '../study-os/sourcePlanBridge';
 
@@ -399,12 +405,19 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   const studyOsTarget = cutover.activeTargetSlug;
   const [hydratedSourcePlanTarget, setHydratedSourcePlanTarget] = useState<string | null>(null);
   const [calendarAutoOrganizeRequestToken, setCalendarAutoOrganizeRequestToken] = useState(0);
+  const [sprintCalendarDocument, setSprintCalendarDocument] = useState<SprintCalendarDocument | null>(null);
+  const [calendarBacklogExpanded, setCalendarBacklogExpanded] = useState(false);
 
   useEffect(() => {
     if (section) setActiveSection(section);
   }, [section]);
 
   useEffect(() => setTaskSearch(taskQuery), [taskQuery]);
+
+  useEffect(() => {
+    if (sprintCalendarDocument) setView('week');
+  }, [sprintCalendarDocument?.run.id]);
+
   const studyOsActiveTarget = useMemo(
     () => cutover.targets.find((target) => target.targetSlug === studyOsTarget),
     [cutover.targets, studyOsTarget],
@@ -524,11 +537,14 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       : plannerTasks.every((task) => task.source === 'manual' || task.source === 'generated')
         ? 'manual'
         : 'ls';
+    const cycle = sourcePlanCycleForMeta(metaSummary);
     const payload = {
       targetSlug: 'sefaz_ce',
       sourceKind,
       planLabel: metaSummary?.title || plannerTasks[0]?.planejamento || 'Plano local',
       metaNumber: metaSummary?.metaNumber,
+      ...(cycle ? { cycle } : {}),
+      ...(cycle && plannerTasks.every((task) => task.source === 'ls-meta-pdf') ? { cycleCorrection: true } : {}),
       tasks,
     } as const;
     const signature = compactHash(JSON.stringify(payload));
@@ -536,6 +552,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     lastSourceSync.current = signature;
     void importSourcePlan(payload, `planner-sync-${signature}`)
       .then((result) => {
+        announceStudyOsDataChanged({ targetSlug: studyOsTarget, resources: ['source-plan'] });
         if (result.createdCount > 0) {
           showToast(`${result.createdCount} tarefa(s) LS persistidas no Study OS.`);
         }
@@ -581,12 +598,45 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
   );
 
   const groupedByDate = useMemo(() => groupTasksByDate(filteredTasks), [filteredTasks]);
+  const calendarTaskIdentities = useMemo<CalendarTaskIdentity[]>(() => plannerTasks.flatMap((task) => (
+    task.sourcePlanTaskId
+      ? [{
+          sourcePlanTaskId: task.sourcePlanTaskId,
+          plannerTaskId: task.id,
+          taskNumber: task.number,
+          discipline: task.discipline,
+        }]
+      : []
+  )), [plannerTasks]);
+  const calendarPreviewByDate = useMemo(() => {
+    const entries = projectCalendarPreviewEntries(sprintCalendarDocument, calendarTaskIdentities);
+    return entries.reduce<Record<string, typeof entries>>((byDate, entry) => {
+      (byDate[entry.date] ||= []).push(entry);
+      return byDate;
+    }, {});
+  }, [calendarTaskIdentities, sprintCalendarDocument]);
   const monthDays = useMemo(() => buildMonthGrid(monthDate), [monthDate]);
   const weekDays = useMemo(() => buildWeekDays(weekDate), [weekDate]);
+  const calendarWeekDays = useMemo(() => {
+    if (!sprintCalendarDocument) return weekDays;
+    const start = new Date(`${sprintCalendarDocument.run.windowStart}T00:00:00`);
+    const end = new Date(`${sprintCalendarDocument.run.windowEnd}T00:00:00`);
+    const totalDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (totalDays !== 7) return weekDays;
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      return {
+        date: toIsoDate(date),
+        label: date.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
+        dayNumber: date.getDate(),
+      };
+    });
+  }, [sprintCalendarDocument, weekDays]);
   const weekStartLabel = useMemo(() => {
-    const [year, month, day] = weekDays[0].date.split('-').map(Number);
+    const [year, month, day] = calendarWeekDays[0].date.split('-').map(Number);
     return new Date(year, month - 1, day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  }, [weekDays]);
+  }, [calendarWeekDays]);
 
   const stats = useMemo(() => {
     const total = activePlannerTasks.length;
@@ -797,6 +847,8 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
 
   const startCalendarAutoOrganize = () => {
     setActiveSection('calendar');
+    setView('week');
+    setCalendarBacklogExpanded(false);
     setCalendarAutoOrganizeRequestToken((token) => token + 1);
   };
 
@@ -1109,6 +1161,26 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     </button>
   );
 
+  const renderCalendarPreviewTask = (entry: ReturnType<typeof projectCalendarPreviewEntries>[number]) => (
+    <button
+      key={entry.id}
+      type="button"
+      data-testid="calendar-preview-task"
+      onClick={() => entry.plannerTaskId && setSelectedTaskId(entry.plannerTaskId)}
+      disabled={!entry.plannerTaskId}
+      className={`rounded border border-dashed text-left text-[11px] shadow-sm ${
+        entry.priorityTier === 'critical' ? 'border-rose-400/60 bg-rose-400/10' : entry.priorityTier === 'high' ? 'border-amber-300/60 bg-amber-300/10' : 'border-sky-300/60 bg-sky-300/10'
+      } w-full px-2 py-1.5 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-purple-500/60 disabled:cursor-default`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 font-black leading-snug text-white">{entry.taskNumber ? `Tarefa ${entry.taskNumber}` : 'Tarefa da meta'}</span>
+        <span className="shrink-0 rounded bg-black/20 px-1.5 py-0.5 text-[9px] font-black text-white/70">{formatMinutes(entry.durationMinutes)}</span>
+      </div>
+      <p className="mt-0.5 line-clamp-2 font-bold leading-snug text-white/85">{entry.title}</p>
+      <p className="mt-1 text-[9px] font-black uppercase tracking-wide text-white/65">{entry.discipline || 'Meta da semana'} · abrir</p>
+    </button>
+  );
+
   const renderTodayTaskCard = (task: PlannerTask, isNext = false) => (
     <div
       key={task.id}
@@ -1240,7 +1312,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               targetSlug={studyOsTarget}
               onOpenSourceTask={(taskId) => {
                 const task = plannerTasks.find((item) => item.id === taskId || externalSourceTaskId(item) === taskId);
-                if (task) createOrOpenStudyTask(task);
+                if (task) setSelectedTaskId(task.id);
               }}
               showToast={showToast}
             />
@@ -1464,8 +1536,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             toIsoDate(new Date()),
             studyOsActiveTarget?.deadline,
           )}
+          maxTasksPerDay={maxTasksPerDay}
+          hoursPerDay={maxHoursPerDay}
           autoOrganizeRequestToken={calendarAutoOrganizeRequestToken}
           onNotice={showToast}
+          onDocumentChange={setSprintCalendarDocument}
         />
       )}
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -1473,10 +1548,18 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
           <div className="rounded-lg border border-[#404040] bg-[#262626] p-4">
             <div className="mb-4 flex items-center gap-2">
               <ListChecks className="h-5 w-5 text-[#84cc16]" />
-              <h2 className="text-base font-black text-white">Backlog</h2>
+              <h2 className="text-base font-black text-white">Meta da semana</h2>
               <span className="ml-auto rounded bg-black/30 px-2 py-1 text-[10px] font-black text-gray-400">{unscheduledTasks.length}</span>
             </div>
-            <div className="grid gap-3">
+            <p className="mb-3 text-xs font-bold leading-relaxed text-gray-400">O roteiro fica no calendário. Abra o backlog apenas para arrastar ou ajustar uma tarefa específica.</p>
+            <button
+              type="button"
+              onClick={() => setCalendarBacklogExpanded((expanded) => !expanded)}
+              className="w-full rounded border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-wide text-gray-200 transition hover:bg-white/10"
+            >
+              {calendarBacklogExpanded ? 'Recolher backlog' : `Ver ${unscheduledTasks.length} tarefas da meta`}
+            </button>
+            {calendarBacklogExpanded && <div className="mt-3 grid gap-3">
               <select
                 value={disciplineFilter}
                 onChange={(event) => setDisciplineFilter(event.target.value)}
@@ -1504,10 +1587,10 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                   className="rounded border border-[#525252] bg-[#404040] px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
                 />
               </label>
-            </div>
+            </div>}
           </div>
 
-          <div
+          {calendarBacklogExpanded && <div
             onDragOver={(event) => event.preventDefault()}
             onDrop={() => {
               if (draggingTaskId) clearSchedule(draggingTaskId);
@@ -1520,7 +1603,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
             ) : (
               <p className="p-4 text-center text-sm font-bold text-gray-500">Sem tarefas soltas.</p>
             )}
-          </div>
+          </div>}
         </aside>
 
         <main className="rounded-lg border border-[#404040] bg-[#262626] p-4">
@@ -1552,11 +1635,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                 onNext={() => setMonthDate((current) => shiftMonth(current, 1))}
               />
             ) : (
-              <CalendarNav
-                label={`Semana de ${weekStartLabel}`}
-                onPrev={() => setWeekDate((current) => shiftWeek(current, -1))}
-                onNext={() => setWeekDate((current) => shiftWeek(current, 1))}
-              />
+              sprintCalendarDocument ? (
+                <span className="rounded border border-[#84cc16]/30 bg-[#84cc16]/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-[#bef264]">Roteiro da meta · {sprintCalendarDocument.run.windowStart.slice(8, 10)}/{sprintCalendarDocument.run.windowStart.slice(5, 7)}–{sprintCalendarDocument.run.windowEnd.slice(8, 10)}/{sprintCalendarDocument.run.windowEnd.slice(5, 7)}</span>
+              ) : (
+                <CalendarNav
+                  label={`Semana de ${weekStartLabel}`}
+                  onPrev={() => setWeekDate((current) => shiftWeek(current, -1))}
+                  onNext={() => setWeekDate((current) => shiftWeek(current, 1))}
+                />
+              )
             )}
           </div>
 
@@ -1567,6 +1654,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               ))}
               {monthDays.map((day) => {
                 const tasksForDay = groupedByDate[day.date] || [];
+                const previewForDay = calendarPreviewByDate[day.date] || [];
+                const calendarMinutes = tasksForDay.reduce((sum, task) => sum + task.durationMinutes, 0)
+                  + previewForDay.reduce((sum, task) => sum + task.durationMinutes, 0);
                 return (
                   <div
                     key={day.date}
@@ -1578,9 +1668,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                   >
                     <div className="mb-2 flex items-center justify-between">
                       <span className={`text-xs font-black ${day.isCurrentMonth ? 'text-white' : 'text-gray-600'}`}>{day.dayNumber}</span>
-                      {tasksForDay.length > 0 && (
+                      {calendarMinutes > 0 && (
                         <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-black text-gray-400">
-                          {formatMinutes(tasksForDay.reduce((sum, task) => sum + task.durationMinutes, 0))}
+                          {formatMinutes(calendarMinutes)}
                         </span>
                       )}
                     </div>
@@ -1588,6 +1678,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                       {tasksForDay
                         .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '') || a.number - b.number)
                         .map((task) => renderMonthTaskItem(task))}
+                      {previewForDay.map(renderCalendarPreviewTask)}
                     </div>
                   </div>
                 );
@@ -1598,7 +1689,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
               <div className="min-w-[980px]">
                 <div className="grid grid-cols-[72px_repeat(7,minmax(120px,1fr))] gap-1">
                   <div />
-                  {weekDays.map((day) => (
+                  {calendarWeekDays.map((day) => (
                     <div key={day.date} className="rounded bg-[#1a1a1a] px-3 py-2 text-center">
                       <p className="text-[10px] font-black uppercase tracking-widest text-purple-400">{day.label}</p>
                       <p className="text-lg font-black text-white">{day.dayNumber}</p>
@@ -1609,8 +1700,9 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                       <div className="sticky left-0 z-10 flex h-24 items-start justify-end bg-[#262626] pr-2 pt-2 text-[11px] font-black text-gray-500">
                         {slot}
                       </div>
-                      {weekDays.map((day) => {
+                      {calendarWeekDays.map((day) => {
                         const tasksForSlot = (groupedByDate[day.date] || []).filter((task) => (task.startTime || '').startsWith(slot.slice(0, 2)));
+                        const previewForDay = slot === '08:00' ? calendarPreviewByDate[day.date] || [] : [];
                         return (
                           <div
                             key={`${day.date}-${slot}`}
@@ -1620,6 +1712,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
                           >
                             <div className="space-y-2">
                               {tasksForSlot.map((task) => renderTaskCard(task, true))}
+                              {previewForDay.map(renderCalendarPreviewTask)}
                             </div>
                           </div>
                         );

@@ -301,14 +301,14 @@ const findFirstFormat = (line: string) => {
 };
 
 const extractMetaNumber = (text: string) => {
-  const currentMetaMatch = text.match(/Meta\s+\d+\s*\(#?(\d+)\)/i);
-  if (currentMetaMatch) return Number(currentMetaMatch[1]);
-
   const pdfMetaNumbers = Array.from(text.matchAll(/^\s*META\s+(\d{1,4})\s*$/gim))
     .map((candidate) => Number(candidate[1]))
     .filter((value) => Number.isFinite(value));
 
   if (pdfMetaNumbers.length > 0) return Math.max(...pdfMetaNumbers);
+
+  const currentMetaMatch = text.match(/Meta[ \t]+\d+[ \t]*\(#?(\d+)\)/i);
+  if (currentMetaMatch) return Number(currentMetaMatch[1]);
 
   const hashMatch = text.match(/#(\d{1,4})/);
   return hashMatch ? Number(hashMatch[1]) : undefined;
@@ -334,6 +334,23 @@ const extractFirstNumberAfterLabel = (text: string, label: RegExp, fallback = 0)
 const extractDateAfterLabel = (text: string, label: RegExp) => {
   const match = text.match(label);
   return match?.[1];
+};
+
+const shiftBrazilianDate = (value: string, days: number) => {
+  const [day, month, year] = value.split('/').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return `${String(shifted.getUTCDate()).padStart(2, '0')}/${String(shifted.getUTCMonth() + 1).padStart(2, '0')}/${shifted.getUTCFullYear()}`;
+};
+
+const mostFrequentPdfDate = (text: string) => {
+  const dates = Array.from(text.matchAll(/\b\d{2}\/\d{2}\/\d{4}\b/g)).map((match) => ({ value: match[0], index: match.index ?? 0 }));
+  const counts = new Map<string, { count: number; lastIndex: number }>();
+  for (const date of dates) {
+    const current = counts.get(date.value) || { count: 0, lastIndex: 0 };
+    counts.set(date.value, { count: current.count + 1, lastIndex: date.index });
+  }
+  return [...counts.entries()]
+    .sort(([, left], [, right]) => right.count - left.count || right.lastIndex - left.lastIndex)[0]?.[0];
 };
 
 const parseStatus = (value: string): PlannerTaskStatus => {
@@ -558,6 +575,10 @@ export const parseLsMetaText = (text: string, source: PlannerTaskSource = 'ls-me
   const totalTasks = extractFirstNumberAfterLabel(normalizedText, /Total de Tarefas\s+(\d+)/i, tasks.length);
   const totalDisciplines = extractFirstNumberAfterLabel(normalizedText, /Quantidade de Mat[eé]rias\s+(\d+)/i, new Set(tasks.map((task) => task.discipline)).size);
   const completedPercent = extractFirstNumberAfterLabel(normalizedText, /Meta Conclu[ií]da\(%\)\s+(\d+)%/i, totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0);
+  const startedAt = extractDateAfterLabel(normalizedText, /meta iniciada em\s+(\d{2}\/\d{2}\/\d{4})/i)
+    || (source === 'ls-meta-pdf' ? mostFrequentPdfDate(normalizedText) : undefined);
+  const nextMetaAt = extractDateAfterLabel(normalizedText, /Pr[oó]xima meta\s+(\d{2}\/\d{2}\/\d{4})/i)
+    || (source === 'ls-meta-pdf' && startedAt ? shiftBrazilianDate(startedAt, 7) : undefined);
 
   return {
     meta: {
@@ -572,8 +593,8 @@ export const parseLsMetaText = (text: string, source: PlannerTaskSource = 'ls-me
       pendingTasks,
       ignoredTasks,
       startedTasks,
-      startedAt: extractDateAfterLabel(normalizedText, /meta iniciada em\s+(\d{2}\/\d{2}\/\d{4})/i),
-      nextMetaAt: extractDateAfterLabel(normalizedText, /Pr[oó]xima meta\s+(\d{2}\/\d{2}\/\d{4})/i),
+      startedAt,
+      nextMetaAt,
       importedAt,
     },
     tasks,

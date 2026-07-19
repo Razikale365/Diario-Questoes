@@ -197,6 +197,14 @@ class SprintHorizonEngine:
                     )
                 )
                 executable = self._fit_actions(actions, available_minutes)
+                source_task_quota = self._source_task_quota(
+                    remaining=remaining,
+                    capacities=request.capacities,
+                    plan_date=capacity.plan_date,
+                    cycle_by_task=cycle_by_task,
+                    max_tasks_per_day=request.max_tasks_per_day,
+                )
+                source_tasks_assigned = 0
                 normal_count = sum(
                     1
                     for action in executable
@@ -210,6 +218,11 @@ class SprintHorizonEngine:
                 high_count = ceil(normal_count / 3) if normal_count else 0
                 normal_index = 0
                 for action in executable:
+                    if (
+                        action.source_plan_task_id is not None
+                        and source_tasks_assigned >= source_task_quota
+                    ):
+                        continue
                     source_task = (
                         remaining.get(action.source_plan_task_id)
                         if action.source_plan_task_id is not None
@@ -270,6 +283,7 @@ class SprintHorizonEngine:
                     next_position = self._next_position(used_positions)
                     if action.source_plan_task_id is not None:
                         remaining.pop(action.source_plan_task_id, None)
+                        source_tasks_assigned += 1
                     if action.action_kind == "simulation":
                         virtual_simulation_present = True
                     if action.subject_key == "p1_direito_financeiro" and action.recommendation == "extra":
@@ -301,6 +315,37 @@ class SprintHorizonEngine:
             warnings=tuple(dict.fromkeys(global_warnings)),
             shortfalls=tuple(dict.fromkeys(shortfalls)),
         )
+
+    @staticmethod
+    def _source_task_quota(
+        *,
+        remaining: dict[int, SourcePlanTask],
+        capacities: tuple[HorizonDayCapacity, ...],
+        plan_date: date,
+        cycle_by_task: dict[int, SourcePlanCycle | None],
+        max_tasks_per_day: int,
+    ) -> int:
+        eligible_tasks = tuple(
+            task
+            for task in remaining.values()
+            if SprintHorizonEngine._cycle_allows(cycle_by_task[task.id], plan_date)
+        )
+        eligible_days = tuple(
+            capacity
+            for capacity in capacities
+            if capacity.available
+            and capacity.total_minutes > 0
+            and capacity.plan_date >= plan_date
+            and any(
+                SprintHorizonEngine._cycle_allows(
+                    cycle_by_task[task.id], capacity.plan_date
+                )
+                for task in eligible_tasks
+            )
+        )
+        if not eligible_tasks or not eligible_days:
+            return 0
+        return min(max_tasks_per_day, ceil(len(eligible_tasks) / len(eligible_days)))
 
     @staticmethod
     def _validate(request: SprintHorizonRequest, snapshot: SprintHorizonSnapshot) -> None:

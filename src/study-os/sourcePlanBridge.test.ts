@@ -9,8 +9,22 @@ import {
   mergeRestoredSourcePlanTasks,
   plannerTaskFromSourcePlan,
   sourcePlanTaskInput,
+  sourcePlanCycleForMeta,
   sourceTaskKind,
 } from './sourcePlanBridge';
+
+test('sourcePlanCycleForMeta makes the supplied 18-24 July Meta current only for that week', () => {
+  assert.deepEqual(sourcePlanCycleForMeta({
+    id: 'meta_48', title: 'Meta (#48)', metaNumber: 48,
+    totalTasks: 30, totalDisciplines: 22, completedPercent: 0, completedTasks: 0,
+    pendingTasks: 30, ignoredTasks: 0, startedTasks: 0,
+    startedAt: '18/07/2026', nextMetaAt: '25/07/2026', importedAt: '2026-07-18T00:00:00.000Z',
+  }), {
+    releasedAt: '2026-07-18T00:00:00-03:00',
+    startsOn: '2026-07-18',
+    endsOn: '2026-07-24',
+  });
+});
 
 
 test('persisted LS tasks hydrate the calendar without losing execution state', () => {
