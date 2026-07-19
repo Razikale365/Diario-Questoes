@@ -23,6 +23,7 @@ export interface QuestionBankMergeResult {
   items: QuestionBankItem[];
   added: number;
   duplicates: number;
+  updated: number;
 }
 
 export interface QuestionBankBackup {
@@ -615,44 +616,171 @@ export const buildQuestionBankItems = (
   });
 };
 
+const normalizeSourceFileName = (name?: string) =>
+  (name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.pdf$/i, '');
+
+const normalizeDiscipline = (disc?: string) =>
+  (disc || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '');
+
+const normalizeTargetSlug = (slug?: string) =>
+  (slug || '').trim().toLowerCase() || 'legacy';
+
+const hasSecondaryIdentity = (item: QuestionBankItem) =>
+  Boolean(item.sourceFileName && item.sourceFileName.trim()) &&
+  typeof item.sourceQuestionNumber === 'number' &&
+  item.sourceQuestionNumber > 0;
+
+const getSecondaryKey = (item: QuestionBankItem) => {
+  const normFile = normalizeSourceFileName(item.sourceFileName);
+  const num = item.sourceQuestionNumber;
+  const normDisc = normalizeDiscipline(item.discipline);
+  const normTarget = normalizeTargetSlug(item.targetSlug);
+  return `${normFile}|${num}|${normDisc}|${normTarget}`;
+};
+
 export const mergeQuestionBankItems = (
   existing: QuestionBankItem[],
   incoming: QuestionBankItem[],
 ): QuestionBankMergeResult => {
-  const byFingerprint = new Map(existing.map((item) => [item.fingerprint, item]));
+  const itemsMap = new Map<string, QuestionBankItem>();
+  const byFingerprint = new Map<string, QuestionBankItem>();
+  const bySecondary = new Map<string, QuestionBankItem>();
+
+  existing.forEach((item) => {
+    itemsMap.set(item.id, item);
+    byFingerprint.set(item.fingerprint, item);
+    if (hasSecondaryIdentity(item)) {
+      bySecondary.set(getSecondaryKey(item), item);
+    }
+  });
+
   let added = 0;
   let duplicates = 0;
+  let updated = 0;
 
   incoming.forEach((item) => {
-    const previous = byFingerprint.get(item.fingerprint);
-    if (previous) {
-      duplicates += 1;
-      byFingerprint.set(item.fingerprint, {
-        ...item,
-        id: previous.id,
-        favorite: previous.favorite,
-        hasDoubt: previous.hasDoubt,
-        observations: previous.observations,
-        attempts: previous.attempts,
-        importedAt: previous.importedAt,
-        updatedAt: new Date().toISOString(),
-        tags: normalizeTags([...previous.tags, ...item.tags]),
-      });
-      return;
+    let matchBySecondary: QuestionBankItem | undefined;
+    if (hasSecondaryIdentity(item)) {
+      matchBySecondary = bySecondary.get(getSecondaryKey(item));
     }
 
-    added += 1;
-    byFingerprint.set(item.fingerprint, item);
+    if (matchBySecondary) {
+      if (matchBySecondary.fingerprint === item.fingerprint) {
+        // Duplicate (same secondary identity and same fingerprint)
+        duplicates += 1;
+        const merged = {
+          ...item,
+          id: matchBySecondary.id,
+          favorite: matchBySecondary.favorite,
+          hasDoubt: matchBySecondary.hasDoubt,
+          observations: matchBySecondary.observations || item.observations,
+          attempts: matchBySecondary.attempts,
+          importedAt: matchBySecondary.importedAt,
+          updatedAt: new Date().toISOString(),
+          tags: normalizeTags([...matchBySecondary.tags, ...item.tags]),
+        };
+        itemsMap.set(matchBySecondary.id, merged);
+        byFingerprint.set(item.fingerprint, merged);
+        bySecondary.set(getSecondaryKey(item), merged);
+      } else {
+        // Update (same secondary identity but different fingerprint)
+        updated += 1;
+        
+        // Remove old fingerprint from index
+        byFingerprint.delete(matchBySecondary.fingerprint);
+
+        const collidingItem = byFingerprint.get(item.fingerprint);
+        if (collidingItem) {
+          // Collision: another item in the database already has the new fingerprint
+          const merged = {
+            ...item,
+            id: collidingItem.id,
+            favorite: collidingItem.favorite || matchBySecondary.favorite,
+            hasDoubt: collidingItem.hasDoubt || matchBySecondary.hasDoubt,
+            observations: [collidingItem.observations, matchBySecondary.observations].filter(Boolean).join(' | ') || undefined,
+            attempts: [...collidingItem.attempts, ...matchBySecondary.attempts].sort((a, b) => a.attemptedAt.localeCompare(b.attemptedAt)),
+            importedAt: collidingItem.importedAt || matchBySecondary.importedAt,
+            updatedAt: new Date().toISOString(),
+            tags: normalizeTags([...collidingItem.tags, ...matchBySecondary.tags, ...item.tags]),
+          };
+          
+          // Remove the obsolete matchBySecondary from indexes
+          itemsMap.delete(matchBySecondary.id);
+          bySecondary.delete(getSecondaryKey(matchBySecondary));
+
+          // Set/overwrite colliding item
+          itemsMap.set(collidingItem.id, merged);
+          byFingerprint.set(item.fingerprint, merged);
+          if (hasSecondaryIdentity(merged)) {
+            bySecondary.set(getSecondaryKey(merged), merged);
+          }
+        } else {
+          // No collision
+          const merged = {
+            ...item,
+            id: matchBySecondary.id,
+            favorite: matchBySecondary.favorite,
+            hasDoubt: matchBySecondary.hasDoubt,
+            observations: matchBySecondary.observations || item.observations,
+            attempts: matchBySecondary.attempts,
+            importedAt: matchBySecondary.importedAt,
+            updatedAt: new Date().toISOString(),
+            tags: normalizeTags([...matchBySecondary.tags, ...item.tags]),
+          };
+          itemsMap.set(matchBySecondary.id, merged);
+          byFingerprint.set(item.fingerprint, merged);
+          bySecondary.set(getSecondaryKey(item), merged);
+        }
+      }
+    } else {
+      // No match by secondary identity. Try match by fingerprint.
+      const matchByFingerprint = byFingerprint.get(item.fingerprint);
+      if (matchByFingerprint) {
+        duplicates += 1;
+        const merged = {
+          ...item,
+          id: matchByFingerprint.id,
+          favorite: matchByFingerprint.favorite,
+          hasDoubt: matchByFingerprint.hasDoubt,
+          observations: matchByFingerprint.observations || item.observations,
+          attempts: matchByFingerprint.attempts,
+          importedAt: matchByFingerprint.importedAt,
+          updatedAt: new Date().toISOString(),
+          tags: normalizeTags([...matchByFingerprint.tags, ...item.tags]),
+        };
+        itemsMap.set(matchByFingerprint.id, merged);
+        byFingerprint.set(item.fingerprint, merged);
+        if (hasSecondaryIdentity(merged)) {
+          bySecondary.set(getSecondaryKey(merged), merged);
+        }
+      } else {
+        // Completely new item
+        added += 1;
+        itemsMap.set(item.id, item);
+        byFingerprint.set(item.fingerprint, item);
+        if (hasSecondaryIdentity(item)) {
+          bySecondary.set(getSecondaryKey(item), item);
+        }
+      }
+    }
   });
 
   return {
-    items: Array.from(byFingerprint.values()).sort((a, b) =>
+    items: Array.from(itemsMap.values()).sort((a, b) =>
       a.discipline.localeCompare(b.discipline) ||
       a.sourceName.localeCompare(b.sourceName) ||
       (a.sourceQuestionNumber || 0) - (b.sourceQuestionNumber || 0)
     ),
     added,
     duplicates,
+    updated,
   };
 };
 

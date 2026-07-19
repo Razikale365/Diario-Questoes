@@ -6,6 +6,7 @@ import {
   ParseObjectiveQuestionsOptions,
   ParseObjectiveQuestionsResult,
 } from './objectiveQuestionParser';
+import { stripPdfPageArtifacts } from './pdfTextCleanup';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -62,7 +63,12 @@ export const extractPdfText = async (file: File) => {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent();
       const pageText = textItemsToPageText(textContent.items as PdfTextItem[]);
-      if (pageText) pages.push(`[Pagina ${pageNumber}]\n${pageText}`);
+      if (pageText) {
+        const cleanedText = stripPdfPageArtifacts(pageText, pageNumber);
+        if (cleanedText.trim()) {
+          pages.push(`[Pagina ${pageNumber}]\n${cleanedText}`);
+        }
+      }
     }
 
     return {

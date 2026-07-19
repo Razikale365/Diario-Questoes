@@ -13,17 +13,26 @@ export interface ImportedObjectiveQuestion {
   year?: number;
 }
 
+export interface ParseDiagnostics {
+  detectedNumbers: number[];
+  duplicateNumbers: number[];
+  missingNumbers: number[];
+  outOfOrderNumbers: number[];
+  rejectedBlockCount: number;
+}
+
 export interface ParseObjectiveQuestionsResult {
   questions: ImportedObjectiveQuestion[];
   rejectedBlocks: number;
+  diagnostics?: ParseDiagnostics;
 }
 
 export interface ParseObjectiveQuestionsOptions {
   requireExplicitQuestionLabel?: boolean;
 }
 
-const QUESTION_START_RE = /(^|\n)\s*(?:(?:quest(?:ão|ao)|q)\s*)?(\d{1,4})\s*(?:[.)\-–:]|\b)/giu;
-const EXPLICIT_QUESTION_START_RE = /(^|\n)\s*(?:(?:quest(?:ão|ao)|q)\s*)(\d{1,4})\s*(?:[.)\-–:]|\b)/giu;
+const ALTERNATIVE_LINE_RE = /^\s*(?:\(([A-Ea-e])\)\s*|([A-Ea-e])\)\s*|([A-E])\.\s+)(.*)$/u;
+const INLINE_ALTERNATIVE_MARKER_RE = /(^|\s)(?:\(([A-Ea-e])\)|([A-Ea-e])\)|([A-E])\.)\s+/gu;
 const COMMENT_TAIL_RE = /(^|\n)\s*(?:coment[aá]rios?|gabarito\s+comentado|resolu[cç][aã]o|solu[cç][aã]o|explica[cç][aã]o)\b/iu;
 const ANSWER_LINE_RE = /(^|\n)\s*(?:gabarito|respostas?|alternativa\s+correta)\b/iu;
 
@@ -31,6 +40,7 @@ const normalizeText = (text: string) =>
   text
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
+    .replace(/\[Pagina \d+\]/gi, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -101,6 +111,10 @@ const stripTail = (block: string) => {
 };
 
 const removeQuestionHeader = (block: string, number: number) => {
+  const simuladoHeaderRe = new RegExp(`^\\s*0*${number}\\s*-\\s*\\([^)]+\\)\\s*`, 'iu');
+  const withoutSimuladoHeader = block.replace(simuladoHeaderRe, '').trim();
+  if (withoutSimuladoHeader !== block.trim()) return withoutSimuladoHeader;
+
   const headerRe = new RegExp(`^\\s*(?:(?:quest(?:ão|ao)|q)\\s*)?0*${number}\\s*(?:[.)\\-–:]|\\b)\\s*`, 'iu');
   return block.replace(headerRe, '').trim();
 };
@@ -122,11 +136,11 @@ const parseAlternativesByLines = (body: string) => {
   let currentAlternative: ImportedAlternative | null = null;
 
   for (const line of body.split('\n')) {
-    const match = line.match(/^\s*(?:\(?([A-Ea-e])\)?\s*[.)\-–:]|([A-Ea-e])\s{2,})(?:\s+)?(.*)$/u);
+    const match = line.match(ALTERNATIVE_LINE_RE);
     if (match) {
       currentAlternative = {
-        label: (match[1] || match[2]).toUpperCase(),
-        text: collapseInlineWhitespace(match[3] || ''),
+        label: (match[1] || match[2] || match[3]).toUpperCase(),
+        text: collapseInlineWhitespace(match[4] || ''),
       };
       alternatives.push(currentAlternative);
       continue;
@@ -146,12 +160,11 @@ const parseAlternativesByLines = (body: string) => {
 };
 
 const parseAlternativesInline = (body: string) => {
-  const markerRe = /(^|\s)\(?([A-Ea-e])\)?\s*[.)\-–:]\s+/gu;
-  const markers = Array.from(body.matchAll(markerRe)).map((match) => {
+  const markers = Array.from(body.matchAll(INLINE_ALTERNATIVE_MARKER_RE)).map((match) => {
     const prefix = match[1] ?? '';
     const markerStart = (match.index ?? 0) + prefix.length;
     return {
-      label: match[2].toUpperCase(),
+      label: (match[2] || match[3] || match[4]).toUpperCase(),
       markerStart,
       textStart: markerStart + match[0].length - prefix.length,
     };
@@ -194,6 +207,135 @@ const parseQuestionBlock = (block: string, number: number, answerFromTable?: str
   };
 };
 
+interface CandidateStart {
+  start: number;
+  number: number;
+  type: 'inequivocal' | 'probable' | 'legacy';
+  line: string;
+}
+
+const collectCandidateStarts = (text: string): CandidateStart[] => {
+  const lines = text.split('\n');
+  const candidates: CandidateStart[] = [];
+  let currentCharOffset = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // 1. Inequivocal patterns
+    const matchInequiv1 = line.match(/^\s*(?:quest(?:ão|ao)|q)\s*(\d{1,4})\b/i);
+    const matchInequiv2 = line.match(/^\s*(\d{1,4})\s*-\s*\([^)]+\)/i);
+    const matchInequiv3 = line.match(/^\s*(\d{1,4})\s*\((?:FCC|FGV|CEBRASPE|CESPE|VUNESP|ESAF|QUADRIX|IBFC|INÉDIT\w*|\d{4})[^)]*\)/i);
+
+    if (matchInequiv1) {
+      candidates.push({
+        start: currentCharOffset + line.indexOf(matchInequiv1[0]),
+        number: Number(matchInequiv1[1]),
+        type: 'inequivocal',
+        line,
+      });
+    } else if (matchInequiv2) {
+      candidates.push({
+        start: currentCharOffset + line.indexOf(matchInequiv2[0]),
+        number: Number(matchInequiv2[1]),
+        type: 'inequivocal',
+        line,
+      });
+    } else if (matchInequiv3) {
+      candidates.push({
+        start: currentCharOffset + line.indexOf(matchInequiv3[0]),
+        number: Number(matchInequiv3[1]),
+        type: 'inequivocal',
+        line,
+      });
+    } else {
+      // 2. Probable patterns
+      const matchProbable = line.match(/^\s*(\d{1,4})\s*(?:[-–:]|\.)(?:\s+|$)/i);
+      if (matchProbable) {
+        candidates.push({
+          start: currentCharOffset + line.indexOf(matchProbable[0]),
+          number: Number(matchProbable[1]),
+          type: 'probable',
+          line,
+        });
+      } else {
+        // 3. Legacy patterns
+        const matchLegacy = line.match(/^\s*(\d{1,4})\s+([a-zA-ZÁ-ÿ].*)/i);
+        if (matchLegacy) {
+          const num = Number(matchLegacy[1]);
+          if (num > 0 && num < 1000) {
+            candidates.push({
+              start: currentCharOffset + line.indexOf(matchLegacy[0]),
+              number: num,
+              type: 'legacy',
+              line,
+            });
+          }
+        }
+      }
+    }
+
+    currentCharOffset += line.length + 1; // +1 for newline
+  }
+
+  return candidates.sort((a, b) => a.start - b.start);
+};
+
+const pruneCandidates = (
+  candidates: CandidateStart[],
+  text: string,
+  answerKey: Map<number, string>
+): CandidateStart[] => {
+  const active = [...candidates];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < active.length; i++) {
+      const cand = active[i];
+      const nextCand = active[i + 1];
+      const blockStart = cand.start;
+      const blockEnd = nextCand ? nextCand.start : text.length;
+      const block = text.slice(blockStart, blockEnd).trim();
+
+      if (cand.type !== 'inequivocal') {
+        // Condition 1: the block parsed from this candidate is invalid
+        const parsed = parseQuestionBlock(block, cand.number, answerKey.get(cand.number));
+        if (!parsed) {
+          active.splice(i, 1);
+          changed = true;
+          break;
+        }
+
+        // Condition 2: out of sequence compared to previous
+        if (i > 0 && cand.number <= active[i - 1].number) {
+          active.splice(i, 1);
+          changed = true;
+          break;
+        }
+
+        // Condition 3: cutting the preceding candidate's alternatives
+        if (i > 0) {
+          const prev = active[i - 1];
+          const prevBlockWithC = text.slice(prev.start, cand.start).trim();
+          const prevBlockWithoutC = text.slice(prev.start, blockEnd).trim();
+
+          const prevValidWithC = parseQuestionBlock(prevBlockWithC, prev.number, answerKey.get(prev.number)) !== null;
+          const prevValidWithoutC = parseQuestionBlock(prevBlockWithoutC, prev.number, answerKey.get(prev.number)) !== null;
+
+          if (!prevValidWithC && prevValidWithoutC) {
+            active.splice(i, 1);
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return active;
+};
+
 export const parseObjectiveQuestions = (
   rawText: string,
   options: ParseObjectiveQuestionsOptions = {}
@@ -201,27 +343,145 @@ export const parseObjectiveQuestions = (
   const text = normalizeText(rawText);
   if (!text) return { questions: [], rejectedBlocks: 0 };
 
-  const questionStartRe = options.requireExplicitQuestionLabel ? EXPLICIT_QUESTION_START_RE : QUESTION_START_RE;
-  const starts = Array.from(text.matchAll(questionStartRe)).map((match) => ({
-    start: (match.index ?? 0) + (match[1]?.length ?? 0),
-    number: Number(match[2]),
-  }));
-
+  const originalCandidates = collectCandidateStarts(text);
   const answerKey = extractGlobalAnswerKey(text);
-  const questions: ImportedObjectiveQuestion[] = [];
-  let rejectedBlocks = 0;
 
-  starts.forEach((start, index) => {
-    const nextStart = starts[index + 1]?.start ?? text.length;
+  // Strategy 1: Forte (Inequivocal + Probable)
+  const forteCandidates = originalCandidates.filter((c) => c.type !== 'legacy');
+  const prunedForte = pruneCandidates(forteCandidates, text, answerKey);
+  const questionsForte: ImportedObjectiveQuestion[] = [];
+  let rejectedForte = 0;
+
+  prunedForte.forEach((start, index) => {
+    const nextStart = prunedForte[index + 1]?.start ?? text.length;
     const block = text.slice(start.start, nextStart).trim();
     const parsed = parseQuestionBlock(block, start.number, answerKey.get(start.number));
-
-    if (parsed) {
-      questions.push(parsed);
-    } else {
-      rejectedBlocks += 1;
-    }
+    if (parsed) questionsForte.push(parsed);
+    else rejectedForte += 1;
   });
 
-  return { questions, rejectedBlocks };
+  // Quality metrics for Forte
+  const forteMetrics = {
+    validCount: questionsForte.length,
+    rejectedCount: rejectedForte,
+    duplicateCount: 0,
+    outOfOrderCount: 0,
+    gapCount: 0,
+  };
+  const forteNumbers = questionsForte.map((q) => q.number);
+  const forteSet = new Set(forteNumbers);
+  forteMetrics.duplicateCount = forteNumbers.length - forteSet.size;
+  for (let i = 1; i < questionsForte.length; i++) {
+    if (questionsForte[i].number < questionsForte[i - 1].number) {
+      forteMetrics.outOfOrderCount += 1;
+    }
+  }
+  const minF = forteNumbers.length > 0 ? Math.min(...forteNumbers) : 1;
+  const maxF = forteNumbers.length > 0 ? Math.max(...forteNumbers) : 0;
+  for (let n = minF; n <= maxF; n++) {
+    if (!forteSet.has(n)) forteMetrics.gapCount += 1;
+  }
+  const qualityForte =
+    forteMetrics.validCount * 10 -
+    forteMetrics.rejectedCount * 2 -
+    forteMetrics.duplicateCount * 5 -
+    forteMetrics.outOfOrderCount * 5 -
+    forteMetrics.gapCount * 1;
+
+  // Strategy 2: Legado (Inequivocal + Probable + Legacy)
+  const legacyEnabled = !options.requireExplicitQuestionLabel;
+  let questionsLegado: ImportedObjectiveQuestion[] = [];
+  let rejectedLegado = 0;
+  let qualityLegado = -999999;
+
+  if (legacyEnabled) {
+    const prunedLegado = pruneCandidates(originalCandidates, text, answerKey);
+    prunedLegado.forEach((start, index) => {
+      const nextStart = prunedLegado[index + 1]?.start ?? text.length;
+      const block = text.slice(start.start, nextStart).trim();
+      const parsed = parseQuestionBlock(block, start.number, answerKey.get(start.number));
+      if (parsed) questionsLegado.push(parsed);
+      else rejectedLegado += 1;
+    });
+
+    const legadoMetrics = {
+      validCount: questionsLegado.length,
+      rejectedCount: rejectedLegado,
+      duplicateCount: 0,
+      outOfOrderCount: 0,
+      gapCount: 0,
+    };
+    const legadoNumbers = questionsLegado.map((q) => q.number);
+    const legadoSet = new Set(legadoNumbers);
+    legadoMetrics.duplicateCount = legadoNumbers.length - legadoSet.size;
+    for (let i = 1; i < questionsLegado.length; i++) {
+      if (questionsLegado[i].number < questionsLegado[i - 1].number) {
+        legadoMetrics.outOfOrderCount += 1;
+      }
+    }
+    const minL = legadoNumbers.length > 0 ? Math.min(...legadoNumbers) : 1;
+    const maxL = legadoNumbers.length > 0 ? Math.max(...legadoNumbers) : 0;
+    for (let n = minL; n <= maxL; n++) {
+      if (!legadoSet.has(n)) legadoMetrics.gapCount += 1;
+    }
+    qualityLegado =
+      legadoMetrics.validCount * 10 -
+      legadoMetrics.rejectedCount * 2 -
+      legadoMetrics.duplicateCount * 5 -
+      legadoMetrics.outOfOrderCount * 5 -
+      legadoMetrics.gapCount * 1;
+  }
+
+  // Choose the strategy with higher quality score
+  const useForte = !legacyEnabled || (qualityForte >= qualityLegado);
+  const finalQuestions = useForte ? questionsForte : questionsLegado;
+  const finalRejected = useForte
+    ? (forteCandidates.length - questionsForte.length)
+    : (originalCandidates.length - questionsLegado.length);
+
+  // Diagnostics calculations
+  const detectedNumbers = finalQuestions.map((q) => q.number);
+  
+  const seenNumbers = new Set<number>();
+  const duplicateNumbers = new Set<number>();
+  originalCandidates.forEach((c) => {
+    if (seenNumbers.has(c.number)) {
+      duplicateNumbers.add(c.number);
+    }
+    seenNumbers.add(c.number);
+  });
+
+  const finalSet = new Set(detectedNumbers);
+  const minN = detectedNumbers.length > 0 ? Math.min(...detectedNumbers) : 1;
+  const maxN = detectedNumbers.length > 0 ? Math.max(...detectedNumbers) : 0;
+  const missingNumbers: number[] = [];
+  for (let n = minN; n <= maxN; n++) {
+    if (!finalSet.has(n)) {
+      missingNumbers.push(n);
+    }
+  }
+
+  const outOfOrderNumbers: number[] = [];
+  for (let i = 1; i < finalQuestions.length; i++) {
+    if (finalQuestions[i].number < finalQuestions[i - 1].number) {
+      outOfOrderNumbers.push(finalQuestions[i].number);
+    }
+  }
+
+  // Count rejected candidate starts as those that didn't become validated questions
+  const rejectedBlockCount = originalCandidates.length - finalQuestions.length;
+
+  const diagnostics: ParseDiagnostics = {
+    detectedNumbers: Array.from(new Set(detectedNumbers)).sort((a, b) => a - b),
+    duplicateNumbers: Array.from(duplicateNumbers).sort((a, b) => a - b),
+    missingNumbers: missingNumbers.sort((a, b) => a - b),
+    outOfOrderNumbers: Array.from(new Set(outOfOrderNumbers)).sort((a, b) => a - b),
+    rejectedBlockCount: Math.max(0, rejectedBlockCount),
+  };
+
+  return {
+    questions: finalQuestions,
+    rejectedBlocks: finalRejected,
+    diagnostics,
+  };
 };

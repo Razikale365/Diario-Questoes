@@ -390,7 +390,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     const merged = saveQuestionsToQuestionBank(context);
     if (!merged) return null;
 
-    showToast(`${merged.added} novas no banco; ${merged.duplicates} duplicada(s) ignoradas.`);
+    showToast(`${merged.added} novas no banco; ${merged.updated} atualizada(s); ${merged.duplicates} duplicada(s) ignoradas.`);
     return merged;
   };
 
@@ -770,7 +770,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
         selectedBatchId: imported.externalAnswerBatches[0]?.id || '',
       });
       showToast(
-        `${imported.added} novas; ${imported.duplicates} já existiam; ${imported.externalAnswerBatchesImported} lote(s) TEC importados.`
+        `${imported.added} novas; ${imported.updated} atualizadas; ${imported.duplicates} já existiam; ${imported.externalAnswerBatchesImported} lote(s) TEC importados.`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Arquivo de backup inválido.';
@@ -968,6 +968,30 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
           <Star className="w-3.5 h-3.5 text-gray-600" />
           {result.rejectedBlocks} blocos numerados ficaram fora por não terem alternativas objetivas suficientes.
         </p>
+      )}
+
+      {result && result.diagnostics && (
+        <div className="space-y-1 bg-amber-500/5 border border-amber-500/10 p-3 rounded text-[11px] text-amber-300/90">
+          <h4 className="font-bold text-amber-200 uppercase tracking-widest text-[9px] mb-1.5 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            Avisos de Diagnóstico de Importação
+          </h4>
+          {result.diagnostics.duplicateNumbers.length > 0 && (
+            <p className="flex items-center gap-2">
+              • Duplicidades de numeração de candidatos no PDF: {result.diagnostics.duplicateNumbers.join(', ')}
+            </p>
+          )}
+          {result.diagnostics.missingNumbers.length > 0 && (
+            <p className="flex items-center gap-2">
+              • Lacunas detectadas na numeração do PDF: Questões {result.diagnostics.missingNumbers.join(', ')}
+            </p>
+          )}
+          {result.diagnostics.outOfOrderNumbers.length > 0 && (
+            <p className="flex items-center gap-2">
+              • Sequência fora de ordem: Questões {result.diagnostics.outOfOrderNumbers.join(', ')}
+            </p>
+          )}
+        </div>
       )}
 
       <section className="border-t border-[#404040] pt-5 space-y-4">

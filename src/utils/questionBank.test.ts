@@ -840,3 +840,74 @@ test('resolveMergedQuestionBankItems keeps executable questions linked to the st
   assert.equal(executableItems[0].attempts.length, 1);
   assert.deepEqual(executableItems.map((item) => item.sourceQuestionNumber), [1, 2]);
 });
+
+test('mergeQuestionBankItems updates modified content by secondary identity and preserves user state (Teste E)', () => {
+  const initialQuestions = [
+    {
+      localId: 'q_10',
+      number: 10,
+      statement: 'Conteudo errado da questao 10.',
+      alternatives: [
+        { label: 'A', text: 'Opcao A incorreta' },
+        { label: 'B', text: 'Opcao B incorreta' },
+      ],
+      answerKey: 'A',
+      bank: 'FGV',
+      year: 2024,
+    },
+  ];
+  const initialContext = {
+    sourceKind: 'professor' as const,
+    sourceName: 'Simulado 02',
+    sourceFileName: 'simulado-02.pdf',
+    discipline: 'Direito Tributario',
+    targetSlug: 'sefaz_ce',
+    bank: 'FGV',
+  };
+
+  const initialItems = buildQuestionBankItems(initialQuestions, initialContext);
+  
+  // Apply user state adjustments
+  const oldItem = {
+    ...initialItems[0],
+    favorite: true,
+    hasDoubt: true,
+    observations: 'Observacao a ser mantida.',
+    attempts: [{ answer: 'A', isCorrect: true, attemptedAt: '2026-07-01T12:00:00.000Z' }],
+  };
+
+  // Corrected question (statement and alternatives updated, thus changing fingerprint)
+  const correctedQuestions = [
+    {
+      localId: 'q_10',
+      number: 10,
+      statement: 'Conteudo CORRIGIDO da questao 10.',
+      alternatives: [
+        { label: 'A', text: 'Opcao A corrigida' },
+        { label: 'B', text: 'Opcao B corrigida' },
+      ],
+      answerKey: 'B',
+      bank: 'FGV',
+      year: 2024,
+    },
+  ];
+  const correctedItems = buildQuestionBankItems(correctedQuestions, initialContext);
+
+  const mergeResult = mergeQuestionBankItems([oldItem], correctedItems);
+
+  // Assertions
+  assert.equal(mergeResult.added, 0);
+  assert.equal(mergeResult.duplicates, 0);
+  assert.equal(mergeResult.updated, 1);
+  assert.equal(mergeResult.items.length, 1);
+
+  const finalItem = mergeResult.items[0];
+  assert.equal(finalItem.statement, 'Conteudo CORRIGIDO da questao 10.');
+  assert.equal(finalItem.correctAnswer, 'B');
+  assert.equal(finalItem.favorite, true);
+  assert.equal(finalItem.hasDoubt, true);
+  assert.equal(finalItem.observations, 'Observacao a ser mantida.');
+  assert.equal(finalItem.attempts.length, 1);
+  assert.equal(finalItem.attempts[0].answer, 'A');
+  assert.notEqual(finalItem.fingerprint, oldItem.fingerprint);
+});
