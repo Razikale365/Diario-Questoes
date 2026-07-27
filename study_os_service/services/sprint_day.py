@@ -237,6 +237,12 @@ class SprintDayService:
             for item in eligibility
             if item.task.id not in completed_source_ids
         )
+        calendar_head = self.calendar_repository.get_head(target_slug)
+        calendar_controls_day = (
+            calendar_head is not None
+            and prepared["plan_date"]
+            <= date.fromisoformat(calendar_head["exact_through"])
+        )
         calendar_preferences = (
             self.calendar_repository.executable_assignments_for_date(
                 target_slug, prepared["plan_date"]
@@ -245,6 +251,12 @@ class SprintDayService:
         preference_by_source = {
             row["source_plan_task_id"]: row for row in calendar_preferences
         }
+        if calendar_controls_day:
+            source_tasks = tuple(
+                task
+                for task in source_tasks
+                if task.id in preference_by_source
+            )
         source_tasks = tuple(
             sorted(
                 source_tasks,
@@ -274,7 +286,16 @@ class SprintDayService:
                 target_slug, prepared["plan_date"]
             ),
         )
-        indexed_actions = tuple(enumerate(draft.actions))
+        eligible_actions = (
+            tuple(
+                action
+                for action in draft.actions
+                if action.source_plan_task_id in preference_by_source
+            )
+            if calendar_controls_day
+            else draft.actions
+        )
+        indexed_actions = tuple(enumerate(eligible_actions))
         draft = replace(
             draft,
             actions=tuple(
@@ -297,6 +318,8 @@ class SprintDayService:
                 )
             ),
         )
+        if calendar_controls_day and not preference_by_source:
+            draft = replace(draft, actions=())
         score_snapshot = dict(draft.score_snapshot) | {
             "modeLabel": draft.mode_label,
             "projection": projection_document(projection),

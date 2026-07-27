@@ -2,16 +2,35 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { SourcePlanTask } from './api/sprint';
+import type { PlannerTask } from '../types';
 
 import {
   currentSourcePlanTasks,
   externalSourceTaskId,
   mergeRestoredSourcePlanTasks,
+  plannerCalendarStartDate,
   plannerTaskFromSourcePlan,
   sourcePlanTaskInput,
   sourcePlanCycleForMeta,
   sourceTaskKind,
 } from './sourcePlanBridge';
+
+test('plannerCalendarStartDate retains the current source cycle after meta summary hydration', () => {
+  const tasks = [
+    {
+      metaNumber: 47,
+      sourceCycleStartsOn: '2026-07-11',
+      sourceCycleEndsOn: '2026-07-17',
+    },
+    {
+      metaNumber: 48,
+      sourceCycleStartsOn: '2026-07-18',
+      sourceCycleEndsOn: '2026-07-24',
+    },
+  ] as PlannerTask[];
+
+  assert.equal(plannerCalendarStartDate(tasks, '2026-07-21'), '2026-07-18');
+});
 
 test('sourcePlanCycleForMeta makes the supplied 18-24 July Meta current only for that week', () => {
   assert.deepEqual(sourcePlanCycleForMeta({

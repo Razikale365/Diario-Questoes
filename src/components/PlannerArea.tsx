@@ -108,6 +108,7 @@ import { SprintCommandCenter } from '../study-os/components/SprintCommandCenter'
 import { SprintCalendarPanel } from '../study-os/components/SprintCalendarPanel';
 import type { SprintCalendarDocument } from '../study-os/api/sprintCalendar';
 import {
+  filterCalendarPreviewEntries,
   projectCalendarPreviewEntries,
   type CalendarTaskIdentity,
 } from '../study-os/domain/calendarPreviewProjection';
@@ -122,6 +123,7 @@ import {
   externalSourceTaskId,
   mergeRestoredSourcePlanTasks,
   plannerCalendarEndDate,
+  plannerCalendarStartDate,
   plannerTaskFromSourcePlan,
   sourcePlanCycleForMeta,
   sourcePlanTaskInput,
@@ -609,12 +611,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       : []
   )), [plannerTasks]);
   const calendarPreviewByDate = useMemo(() => {
-    const entries = projectCalendarPreviewEntries(sprintCalendarDocument, calendarTaskIdentities);
+    const entries = filterCalendarPreviewEntries(
+      projectCalendarPreviewEntries(sprintCalendarDocument, calendarTaskIdentities),
+      hideDone,
+    );
     return entries.reduce<Record<string, typeof entries>>((byDate, entry) => {
       (byDate[entry.date] ||= []).push(entry);
       return byDate;
     }, {});
-  }, [calendarTaskIdentities, sprintCalendarDocument]);
+  }, [calendarTaskIdentities, hideDone, sprintCalendarDocument]);
   const monthDays = useMemo(() => buildMonthGrid(monthDate), [monthDate]);
   const weekDays = useMemo(() => buildWeekDays(weekDate), [weekDate]);
   const calendarWeekDays = useMemo(() => {
@@ -1168,7 +1173,7 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       data-testid="calendar-preview-task"
       onClick={() => entry.plannerTaskId && setSelectedTaskId(entry.plannerTaskId)}
       disabled={!entry.plannerTaskId}
-      className={`rounded border border-dashed text-left text-[11px] shadow-sm ${
+      className={`rounded border ${entry.isDraft ? 'border-dashed' : 'border-solid'} text-left text-[11px] shadow-sm ${
         entry.priorityTier === 'critical' ? 'border-rose-400/60 bg-rose-400/10' : entry.priorityTier === 'high' ? 'border-amber-300/60 bg-amber-300/10' : 'border-sky-300/60 bg-sky-300/10'
       } w-full px-2 py-1.5 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-purple-500/60 disabled:cursor-default`}
     >
@@ -1530,8 +1535,11 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
       {studyOsTarget === 'sefaz_ce' && (
         <SprintCalendarPanel
           targetSlug={studyOsTarget}
-          startDate={toIsoDate(new Date())}
-          endDate={plannerCalendarEndDate(
+          startDate={sourcePlanCycleForMeta(metaSummary)?.startsOn || plannerCalendarStartDate(
+            plannerTasks,
+            toIsoDate(new Date()),
+          )}
+          endDate={sourcePlanCycleForMeta(metaSummary)?.endsOn || plannerCalendarEndDate(
             plannerTasks,
             toIsoDate(new Date()),
             studyOsActiveTarget?.deadline,

@@ -51,9 +51,9 @@ export const TaskExecutionFields: React.FC<TaskExecutionFieldsProps> = ({ draft,
   const update = (updates: Partial<TaskExecutionDraft>) => onChange({ ...draft, ...updates });
 
   return (
-    <fieldset className="border border-white/10 bg-[#171b18] p-3 sm:p-4">
+    <fieldset className="task-execution-fields border border-white/10 bg-[#171b18] p-3 sm:p-4">
       <legend className="px-1 text-[9px] font-black uppercase tracking-[0.2em] text-[#bef264]">Recibo de execução</legend>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="task-execution-fields__grid grid gap-2">
         <label className="grid min-w-0 gap-1 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
           Data realizada
           <input
@@ -79,7 +79,7 @@ export const TaskExecutionFields: React.FC<TaskExecutionFieldsProps> = ({ draft,
         <NumericField label="Dúvidas" value={draft.doubtCount} error={fieldErrors.doubtCount} onChange={(doubtCount) => update({ doubtCount })} />
       </div>
 
-      <div className="mt-3 grid gap-3 border-t border-white/[0.07] pt-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <div className="task-execution-fields__summary mt-3 grid gap-3 border-t border-white/[0.07] pt-3">
         <label className="grid gap-1 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
           Observações
           <textarea value={draft.notes} onChange={(event) => update({ notes: event.target.value })} rows={2} className="resize-y border border-white/10 bg-[#111513] px-3 py-2 text-sm font-semibold text-white outline-none focus:border-[#84cc16]" />

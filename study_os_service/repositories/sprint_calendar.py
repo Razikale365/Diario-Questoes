@@ -345,6 +345,26 @@ class SprintCalendarRepository:
             raise CalendarItemConflictError(
                 f"calendar item identity changed for {item.item_key}"
             )
+        if item.kind == "source_task" and item.state == "completed":
+            self.connection.execute(
+                """
+                UPDATE sprint_calendar_items
+                SET state='completed',
+                    completed_at=COALESCE(?, completed_at),
+                    version=version+1,
+                    updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','NOW')
+                WHERE id=? AND state!='completed'
+                """,
+                (
+                    _timestamp(item.completed_at) if item.completed_at else None,
+                    row["id"],
+                ),
+            )
+            row = self.connection.execute(
+                "SELECT * FROM sprint_calendar_items WHERE id=?", (row["id"],)
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("completed calendar item was not visible")
         return row
 
     def insert_preview_in_transaction(

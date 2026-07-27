@@ -128,7 +128,11 @@ class SprintHorizonEngine:
             )
             next_position = self._next_position(used_positions)
 
-            if capacity.available and available_minutes > 0:
+            if (
+                capacity.available
+                and available_minutes > 0
+                and capacity.plan_date >= snapshot.planning_cutoff.date()
+            ):
                 if capacity.plan_date > exact_through and ls_minutes > 0:
                     expected_meta = latest_meta + 1 + max(
                         0, (capacity.plan_date - exact_through - timedelta(days=1)).days // 7

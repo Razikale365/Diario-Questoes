@@ -6,7 +6,10 @@ import { CSS } from '@dnd-kit/utilities';
 import { ActivityBlock, Question } from '../types';
 import { useSnapResizer } from '../hooks/useSnapResizer';
 import { QuestionEditorModal } from './QuestionEditorModal';
+import { QuestionSourcePageViewer } from './QuestionSourcePageViewer';
+import { StudyStopwatch } from './StudyStopwatch';
 import type { TaskQuestionImportDestination } from '../utils/taskQuestionImport';
+import { sortQuestionsByDisplayNumber } from '../utils/questionCardDeck';
 import {
   buildAnswerSelectionUpdate,
   QuestionDraft,
@@ -269,6 +272,7 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                 {globalShowStats && block.showStats !== false && sectionStats && (
                   <PerformanceBadge stats={sectionStats} />
                 )}
+                <StudyStopwatch label={`Cronômetro da seção ${block.title}`} compact />
               </div>
             )}
           </div>
@@ -573,8 +577,9 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
     )
   );
 
-  const availableQuestions = (block.questions || []).filter((question) => question.statement && question.alternatives?.length);
-  const renderedQuestions = displayMode === 'questoes' ? availableQuestions : (block.questions || []);
+  const orderedQuestions = sortQuestionsByDisplayNumber(block.questions || []);
+  const availableQuestions = orderedQuestions.filter((question) => question.statement && question.alternatives?.length);
+  const renderedQuestions = displayMode === 'questoes' ? availableQuestions : orderedQuestions;
   const keyedQuestions = availableQuestions.filter((question) => question.correctAnswer);
   const areAllQuestionAnswersRevealed = keyedQuestions.length > 0
     && keyedQuestions.every((question) => isQuestionRevealed(question));
@@ -796,6 +801,7 @@ export const ActivityBlockCard = memo(forwardRef<HTMLDivElement, ActivityBlockCa
                           )}
                         </div>
                         <p className="text-sm font-semibold leading-relaxed text-gray-100">{q.statement}</p>
+                        <QuestionSourcePageViewer sourcePage={q.sourcePage} />
                       </div>
                     </div>
                     {renderQuestionActions(q)}

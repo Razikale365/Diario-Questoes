@@ -3,6 +3,7 @@ import { StudyTask, ActivityBlock, Question, QuestionBankItem } from '../types';
 import { arrayMove } from '@dnd-kit/sortable';
 import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT, normalizeTaskBlocksLayout } from '../utils/layout';
 import {
+  loadStoredQuestionBank,
   QUESTION_BANK_UPDATED_EVENT,
   syncStoredQuestionBankContent,
   syncStoredQuestionBankProgress,
@@ -12,11 +13,20 @@ import {
   STUDY_TASKS_STORAGE_KEY,
 } from '../utils/taskQuestionImportStorage';
 import {
+  loadLocalStudyTasks,
+  mergeLocalPrivatePackageTasks,
+  migrateMatchingTasksToLocalPrivate,
+  mergeSyncedTasksWithLocalPrivate,
+  saveLocalStudyTasks,
+  splitStudyTasksByStorageScope,
+} from '../storage/localStudyTasks';
+import {
   applyQuestionUpdate,
   QuestionDraft,
   saveQuestionDraft as materializeQuestionDraft,
   SaveQuestionDraftResult,
 } from '../utils/questionExecution';
+import { getGabaritoQuestionNumber } from '../utils/gabaritoParser';
 
 const now = () => new Date().toISOString();
 
@@ -30,6 +40,28 @@ export const useTasks = () => {
       return [];
     }
   });
+  const [localPrivateTasksHydrated, setLocalPrivateTasksHydrated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadLocalStudyTasks()
+      .then((localPrivateTasks) => {
+        if (cancelled) return;
+        setTasks((currentTasks) => {
+          const { synced } = splitStudyTasksByStorageScope(currentTasks);
+          return mergeSyncedTasksWithLocalPrivate(synced, localPrivateTasks);
+        });
+        setLocalPrivateTasksHydrated(true);
+      })
+      .catch((error) => {
+        console.error('[Diário LS] Failed to load private local tasks', error);
+        if (!cancelled) setLocalPrivateTasksHydrated(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(() => {
     try {
@@ -41,11 +73,19 @@ export const useTasks = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(tasks));
+      const { synced } = splitStudyTasksByStorageScope(tasks);
+      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(synced));
     } catch (e) {
       console.error('[Diário LS] Failed to save tasks', e);
     }
   }, [tasks]);
+
+  useEffect(() => {
+    if (!localPrivateTasksHydrated) return;
+    void saveLocalStudyTasks(tasks).catch((error) => {
+      console.error('[Diário LS] Failed to save private local tasks', error);
+    });
+  }, [localPrivateTasksHydrated, tasks]);
 
   useEffect(() => {
     try {
@@ -63,6 +103,27 @@ export const useTasks = () => {
 
   const addTask = (task: StudyTask) => {
     setTasks(prev => [...prev, { ...normalizeTaskBlocksLayout(task), updatedAt: now() }]);
+  };
+
+  const mergeTaskPackage = async (incomingTasks: StudyTask[]) => {
+    const currentTasks = migrateMatchingTasksToLocalPrivate(tasks, incomingTasks);
+    const merged = mergeLocalPrivatePackageTasks(currentTasks, incomingTasks);
+    try {
+      await saveLocalStudyTasks(merged.tasks);
+    } catch (error) {
+      console.error('[Diário LS] Failed to merge local study package', error);
+      return {
+        ok: false as const,
+        message: 'Não foi possível salvar o pacote. As tarefas anteriores foram preservadas.',
+      };
+    }
+
+    setTasks(merged.tasks);
+    return {
+      ok: true as const,
+      added: merged.added,
+      duplicates: merged.duplicates,
+    };
   };
 
   const commitTaskQuestionImport = (
@@ -404,9 +465,9 @@ export const useTasks = () => {
             ...b,
             showGabarito: true,
             questions: b.questions.map(q => {
-              const correctAns = parsedAnswers.get(q.number);
+              const correctAns = parsedAnswers.get(getGabaritoQuestionNumber(q));
               if (correctAns) {
-                let isCorrect = q.isCorrect;
+                let isCorrect: boolean | null = null;
                 if (correctAns === 'ANULADA') {
                   isCorrect = true; 
                 } else if (q.answer) {
@@ -572,6 +633,7 @@ export const useTasks = () => {
     inProgressTasks,
     pauseTask,
     addTask,
+    mergeTaskPackage,
     commitTaskQuestionImport,
     updateTask,
     deleteTask,

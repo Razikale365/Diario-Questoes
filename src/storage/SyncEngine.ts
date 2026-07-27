@@ -35,7 +35,7 @@ export class SyncEngine {
       this.updateState({ status: 'unauthenticated' });
       return;
     }
-    if (this.isInitialized) return;
+    if (this.isInitialized) return void this.pullOnStart();
     this.isInitialized = true;
 
     this.startInterval();
@@ -379,7 +379,7 @@ export class SyncEngine {
     if (!supabase) return;
     await supabase.auth.signOut();
     this.destroy();
-    this.updateState({ status: 'idle' });
+    this.updateState({ status: 'unauthenticated' });
   }
 
   getState(): SyncState {

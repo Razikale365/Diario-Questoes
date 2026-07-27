@@ -2,9 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, FileUp, Loader2, SearchCheck, X } from 'lucide-react';
 
 import type { QuestionBankItem, QuestionSourceKind, StudyTask } from '../types';
+import { saveQuestionSourceDocument } from '../storage/questionSourceDocuments';
 import { BANKS } from '../utils/constants';
 import { parseObjectiveQuestions } from '../utils/objectiveQuestionParser';
 import { importObjectiveQuestionsFromPdf } from '../utils/pdfQuestionImport';
+import {
+  createQuestionImportSelection,
+  filterQuestionsByImportSelection,
+  toggleQuestionImportSelection,
+} from '../utils/questionImportSelection';
 import { loadStoredQuestionBank, type QuestionBankImportContext } from '../utils/questionBank';
 import {
   buildTaskQuestionImportPreview,
@@ -66,6 +72,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
   const [file, setFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState('');
   const [parsed, setParsed] = useState<TaskQuestionImportParsedBatch | null>(null);
+  const [selectedQuestionNumbers, setSelectedQuestionNumbers] = useState<Set<number>>(new Set());
   const [sourceKind, setSourceKind] = useState<ImportSourceKind>('estrategia');
   const [sourceName, setSourceName] = useState('');
   const [targetSlug, setTargetSlug] = useState('');
@@ -85,6 +92,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
   const invalidateParse = () => {
     parseGateRef.current!.invalidate();
     setParsed(null);
+    setSelectedQuestionNumbers(new Set());
     setError(null);
     setIsParsing(false);
   };
@@ -141,6 +149,14 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
     () => bank === 'Outra' ? parsed?.questions.find((question) => question.bank)?.bank || bank : bank,
     [bank, parsed],
   );
+  const selectedQuestions = useMemo(
+    () => filterQuestionsByImportSelection(parsed?.questions || [], selectedQuestionNumbers),
+    [parsed, selectedQuestionNumbers],
+  );
+  const selectedParsed = useMemo(
+    () => parsed ? { ...parsed, questions: selectedQuestions } : null,
+    [parsed, selectedQuestions],
+  );
   const nonSectionBlocks = useMemo(
     () => task?.blocks.filter((block) => !block.isSection) || [],
     [task],
@@ -164,25 +180,25 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
     };
   }, [blockTitle, discipline, effectiveBank, lesson, normalizedFileName, parsed, sourceKind, sourceName, targetSlug]);
   const preview = useMemo(() => {
-    if (!task || !parsed || !destination || !context) return null;
+    if (!task || !selectedParsed || !destination || !context) return null;
     return buildTaskQuestionImportPreview({
       task,
       currentQuestionBank: loadStoredQuestionBank(),
-      parsed,
+      parsed: selectedParsed,
       context,
       destination,
       blockDefaults: {
         title: blockTitle.trim() || 'Questões importadas',
         lesson: lesson.trim() || sourceName.trim() || normalizedFileName,
-        pages: `${parsed.pageCount} páginas`,
+        pages: `${selectedParsed.pageCount} páginas`,
         bank: effectiveBank,
       },
     });
-  }, [blockTitle, context, destination, effectiveBank, lesson, normalizedFileName, parsed, sourceName, task]);
+  }, [blockTitle, context, destination, effectiveBank, lesson, normalizedFileName, selectedParsed, sourceName, task]);
   const canConfirm = Boolean(
     task
       && parsed
-      && parsed.questions.length > 0
+      && selectedQuestions.length > 0
       && discipline.trim()
       && destination
       && preview?.plan.ok,
@@ -225,6 +241,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
       });
       if (!parseGateRef.current!.isCurrent(generation)) return;
       setParsed(imported);
+      setSelectedQuestionNumbers(createQuestionImportSelection(imported.questions));
       if (imported.questions.length === 0) setError('Nenhuma questão objetiva detectada.');
     } catch {
       if (parseGateRef.current!.isCurrent(generation)) setError('Não foi possível ler este PDF.');
@@ -251,6 +268,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
       fileName: 'texto-colado.txt',
       pageCount: 0,
     });
+    setSelectedQuestionNumbers(createQuestionImportSelection(result.questions));
     if (result.questions.length === 0) setError('Nenhuma questão objetiva detectada.');
   };
 
@@ -264,10 +282,22 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
     });
   };
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!canConfirm || !preview || !preview.plan.ok) return;
     setIsCommitting(true);
     setError(null);
+    if (inputMode === 'pdf' && file && parsed?.sourceDocumentId) {
+      try {
+        const storedDocument = await saveQuestionSourceDocument(file, parsed.pageCount);
+        if (storedDocument.id !== parsed.sourceDocumentId) {
+          throw new Error('O PDF selecionado mudou depois da prévia. Processe-o novamente.');
+        }
+      } catch (storageError) {
+        setError(storageError instanceof Error ? storageError.message : 'Não foi possível guardar o PDF local.');
+        setIsCommitting(false);
+        return;
+      }
+    }
     const result = onCommit(preview.plan.task, preview.nextQuestionBank);
     if (!result.ok) {
       setError(result.message);
@@ -423,6 +453,42 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
                     </div>
                   ))}
                 </div>
+                <div className="mt-3 rounded border border-[#243244] bg-[#0b1220] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-[#cbd5e1]">
+                      {selectedQuestions.length} de {parsed.questions.length} selecionadas
+                    </p>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setSelectedQuestionNumbers(createQuestionImportSelection(parsed.questions))} className="rounded border border-[#334155] px-2 py-1 text-[11px] font-bold text-[#cbd5e1] hover:border-[#f59e0b]">
+                        Todas
+                      </button>
+                      <button type="button" onClick={() => setSelectedQuestionNumbers(new Set())} className="rounded border border-[#334155] px-2 py-1 text-[11px] font-bold text-[#94a3b8] hover:border-[#ef4444]">
+                        Nenhuma
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid max-h-36 grid-cols-6 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-10 lg:grid-cols-12">
+                    {parsed.questions.map((question) => {
+                      const selected = selectedQuestionNumbers.has(question.number);
+                      return (
+                        <button
+                          key={question.localId}
+                          type="button"
+                          aria-pressed={selected}
+                          title={`Questão ${question.number}${question.sourcePage?.likelyVisual ? ' · página visual' : ''}`}
+                          onClick={() => setSelectedQuestionNumbers((current) => toggleQuestionImportSelection(current, question.number))}
+                          className={`rounded border px-1.5 py-1.5 text-[11px] font-black ${
+                            selected
+                              ? 'border-[#f59e0b] bg-[#f59e0b]/15 text-[#fcd34d]'
+                              : 'border-[#334155] text-[#64748b] hover:text-[#cbd5e1]'
+                          }`}
+                        >
+                          {question.number}{question.sourcePage?.likelyVisual ? ' V' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 {preview?.plan.ok && preview.plan.summary.conflicts.length > 0 && (
                   <ul className="mt-3 max-h-28 space-y-1 overflow-y-auto rounded border border-[#7c2d12] bg-[#431407]/30 p-2 text-xs text-[#fed7aa]">
                     {preview.plan.summary.conflicts.map((conflict, index) => <li key={`${conflict.kind}-${conflict.existingQuestionNumber}-${index}`}>Questão {conflict.sourceQuestionNumber || conflict.existingQuestionNumber}: conflito de {conflict.kind === 'content' ? 'conteúdo' : 'gabarito'} preservado.</li>)}
@@ -438,7 +504,7 @@ export const TaskQuestionPdfImportModal: React.FC<TaskQuestionPdfImportModalProp
           <p className="text-xs text-[#94a3b8]">{canConfirm ? 'A importação será persistida apenas após sua confirmação.' : 'Informe destino, disciplina e lote válido para confirmar.'}</p>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={isCommitting} className="rounded border border-[#475569] px-3 py-2 text-xs font-black text-[#cbd5e1] hover:text-white disabled:opacity-50">Cancelar</button>
-            <button type="button" onClick={confirm} disabled={!canConfirm || isCommitting} className="inline-flex items-center justify-center gap-2 rounded bg-[#22c55e] px-3 py-2 text-xs font-black text-[#04120a] disabled:opacity-50">
+            <button type="button" onClick={() => void confirm()} disabled={!canConfirm || isCommitting} className="inline-flex items-center justify-center gap-2 rounded bg-[#22c55e] px-3 py-2 text-xs font-black text-[#04120a] disabled:opacity-50">
               {isCommitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Confirmar importação
             </button>
           </div>

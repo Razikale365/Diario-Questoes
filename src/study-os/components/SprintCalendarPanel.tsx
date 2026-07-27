@@ -9,6 +9,7 @@ import {
   Snowflake,
   Sparkles,
   TriangleAlert,
+  Undo2,
   X,
 } from 'lucide-react';
 
@@ -96,7 +97,7 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
 }) => {
   const [document, setDocument] = useState<SprintCalendarDocument | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'preview' | 'apply' | null>(null);
+  const [busy, setBusy] = useState<'preview' | 'apply' | 'undo' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mutationControllerRef = useRef<AbortController | null>(null);
   const requestGateRef = useRef<ReturnType<typeof createCalendarRequestGate> | null>(null);
@@ -241,6 +242,52 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
     }
   };
 
+  const undoOrganization = async () => {
+    if (
+      !document
+      || document.run.decision !== 'applied'
+      || document.run.supersedesRunId === null
+    ) return;
+    requestGateRef.current!.invalidate();
+    mutationControllerRef.current?.abort();
+    const controller = new AbortController();
+    mutationControllerRef.current = controller;
+    const applyRequest = requestGateRef.current!.begin(controller.signal);
+    setBusy('undo');
+    setError(null);
+    try {
+      const restoredPreview = await previewSprintCalendar({
+        targetSlug,
+        startDate,
+        endDate,
+        expectedRunId: document.run.id,
+        mode: 'restore_run',
+        restoreRunId: document.run.supersedesRunId,
+        maxTasksPerDay,
+        hoursPerDay,
+      }, mutationKey('calendar-undo-preview'), controller.signal);
+      const restored = await applySprintCalendarRun(restoredPreview.run.id, {
+        expectedRunId: document.run.id,
+        expectedOverrideVersions: restoredPreview.overrideVersions,
+      }, mutationKey('calendar-undo-apply'), controller.signal);
+      if (mutationControllerRef.current === controller && !controller.signal.aborted) {
+        requestGateRef.current!.applyIfCurrent(applyRequest, () => {
+          setDocument(restored);
+          onNotice?.('Organização anterior restaurada.');
+        });
+      }
+    } catch (undoError) {
+      if (mutationControllerRef.current === controller && !controller.signal.aborted) {
+        setError(messageForError(undoError));
+      }
+    } finally {
+      if (mutationControllerRef.current === controller) {
+        mutationControllerRef.current = null;
+        setBusy(null);
+      }
+    }
+  };
+
   return (
     <section aria-label="Horizonte do Sprint" className="border-y border-[#404040] bg-[#151817] px-3 py-3 sm:px-5 sm:py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -269,6 +316,17 @@ export const SprintCalendarPanel: React.FC<SprintCalendarPanelProps> = ({
             {busy === 'preview' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             Auto-organizar
           </button>
+          {document?.run.decision === 'applied' && document.run.supersedesRunId !== null ? (
+            <button
+              type="button"
+              onClick={() => void undoOrganization()}
+              disabled={busy !== null}
+              className="inline-flex h-9 items-center gap-2 rounded border border-white/15 bg-white/[0.04] px-3 text-[10px] font-black uppercase text-gray-200 transition-colors hover:bg-white/10 disabled:opacity-50"
+            >
+              {busy === 'undo' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+              Desfazer organização
+            </button>
+          ) : null}
           {document?.run.decision === 'draft' ? (
             <button
               type="button"

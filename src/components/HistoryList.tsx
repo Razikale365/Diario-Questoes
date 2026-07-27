@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { History, AlertCircle, Trash2, ChevronLeft, ChevronRight, Flag, Search, Filter, Calendar, X } from 'lucide-react';
+import { History, AlertCircle, Trash2, ChevronLeft, ChevronRight, Flag, Search, Filter, Calendar, X, Plus } from 'lucide-react';
 import { StudyTask, ActivityBlock } from '../types';
 
 interface HistoryListProps {
@@ -8,6 +8,7 @@ interface HistoryListProps {
   setHistoryPage: (page: number | ((p: number) => number)) => void;
   onOpenTask: (id: string) => void;
   onDeleteTask: (id: string) => void;
+  onCreateTask: () => void;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -17,7 +18,8 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   historyPage,
   setHistoryPage,
   onOpenTask,
-  onDeleteTask
+  onDeleteTask,
+  onCreateTask
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'in_progress'>('all');
@@ -86,6 +88,14 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           </h2>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onCreateTask}
+              className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-[#262626]"
+            >
+              <Plus className="h-4 w-4" />
+              Nova tarefa
+            </button>
             {/* Search */}
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-purple-400 transition-colors" />

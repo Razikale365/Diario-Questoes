@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CheckSquare, X, Check } from 'lucide-react';
+import { parseGabarito } from '../utils/gabaritoParser';
 
 interface GabaritoModalProps {
   isOpen: boolean;
@@ -13,49 +14,19 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
   onImport
 }) => {
   const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const handleImport = () => {
     if (!text.trim()) return;
-
-    const parsedAnswers = new Map<number, string>();
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-    // Tentativa 1: Parsing do formato em bloco (linhas alternadas de n°s e respostas)
-    for (let i = 0; i < lines.length - 1; i++) {
-      const isNumLine = /^(\d+\s+)+\d+$|^(\d+)$/.test(lines[i]);
-      if (isNumLine) {
-        const nums = lines[i].split(/\s+/).map(n => parseInt(n, 10));
-        const possibleAnswersLine = lines[i+1];
-        // Captura alternativas limpas incluindo ANULADA, CERTA, ERRADA
-        const ansMatch = possibleAnswersLine.match(/\b(A|B|C|D|E|CERTO|CERTA|ERRADO|ERRADA|C|E|ANULADA)\b/gi);
-        if (ansMatch && ansMatch.length >= nums.length) {
-          nums.forEach((num, idx) => {
-            let ans = ansMatch[idx].toUpperCase();
-            if (ans === 'CERTO' || ans === 'CERTA') ans = 'C';
-            if (ans === 'ERRADO' || ans === 'ERRADA') ans = 'E';
-            parsedAnswers.set(num, ans);
-          });
-          i++; // Pula a linha de resposta pois já foi processada
-          continue;
-        }
-      }
+    const result = parseGabarito(text);
+    if (result.errors.length > 0) {
+      setError(result.errors.join(' '));
+      return;
     }
 
-    // Tentativa 2: Fallback pro formato tradicional linha a linha (Q1: A, 1. LETRA C, 5. ALTERNATIVA C)
-    const regexFallback = /(\d+)\s*[-.)]?\s*(?:LETRA|ALTERNATIVA)?\s*([A-E]|CERTO|CERTA|ERRADO|ERRADA|C|E|ANULADA)\b/gi;
-    let match;
-    while ((match = regexFallback.exec(text)) !== null) {
-      const num = parseInt(match[1], 10);
-      if (!parsedAnswers.has(num)) {
-        let ans = match[2].toUpperCase();
-        if (ans === 'CERTO' || ans === 'CERTA') ans = 'C';
-        if (ans === 'ERRADO' || ans === 'ERRADA') ans = 'E';
-        parsedAnswers.set(num, ans);
-      }
-    }
-
-    onImport(parsedAnswers);
+    onImport(result.answers);
     setText('');
+    setError(null);
     onClose();
   };
 
@@ -80,8 +51,14 @@ export const GabaritoModal: React.FC<GabaritoModalProps> = ({
           className="w-full h-48 bg-[#1a1a1a] border border-[#404040] rounded-lg p-4 text-white font-mono text-sm mb-6 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none"
           placeholder="Exemplo:&#10;1 B&#10;2 D&#10;3 C&#10;4 ERRADO&#10;5 CERTO"
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => {
+            setText(e.target.value);
+            setError(null);
+          }}
         />
+        {error && (
+          <p role="alert" className="-mt-3 mb-4 text-sm text-red-300">{error}</p>
+        )}
         <div className="flex justify-end gap-3">
           <button onClick={onClose} className="px-5 py-2.5 text-gray-300 hover:text-white hover:bg-[#333333] rounded-lg transition-colors font-medium">
             Cancelar

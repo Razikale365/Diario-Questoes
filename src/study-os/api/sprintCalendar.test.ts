@@ -91,6 +91,31 @@ test('calendar parser accepts a non-executable provisional envelope', () => {
   assert.deepEqual(parseSprintCalendar(calendar), calendar);
 });
 
+test('calendar parser accepts an LS-confirmed completion without an invented timestamp', () => {
+  const completed = {
+    ...calendar,
+    items: [{
+      ...calendar.items[0],
+      id: 22,
+      itemKey: 'source-task:77',
+      origin: 'source',
+      kind: 'source_task',
+      sourcePlanTaskId: 77,
+      subjectProfileId: 1,
+      title: 'Tarefa concluída na LS',
+      state: 'completed',
+    }],
+    assignments: [{
+      ...calendar.assignments[0],
+      itemId: 22,
+      precision: 'protected',
+      priorityTier: 'protected',
+    }],
+  };
+
+  assert.deepEqual(parseSprintCalendar(completed), completed);
+});
+
 test('calendar parser rejects executable placeholders and duplicate day identities', () => {
   assert.throws(() => parseSprintCalendar({
     ...calendar,

@@ -17,6 +17,7 @@ export interface CalendarPreviewEntry {
   taskNumber?: number;
   discipline?: string;
   isDraft: boolean;
+  isCompleted: boolean;
 }
 
 export interface CalendarTaskIdentity {
@@ -75,8 +76,16 @@ export function projectCalendarPreviewEntries(
       taskNumber: identity?.taskNumber,
       discipline: identity?.discipline,
       isDraft: document.run.decision === 'draft',
+      isCompleted: item.state === 'completed',
     }];
   });
+}
+
+export function filterCalendarPreviewEntries(
+  entries: CalendarPreviewEntry[],
+  hideCompleted: boolean,
+): CalendarPreviewEntry[] {
+  return hideCompleted ? entries.filter((entry) => !entry.isCompleted) : entries;
 }
 
 export function summarizeCalendarPreviewByDay(

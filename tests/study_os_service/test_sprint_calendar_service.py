@@ -11,6 +11,8 @@ from study_os_service.repositories.sprint_calendar import (
 )
 from study_os_service.services.sprint import SourcePlanService, SprintProfileService
 from study_os_service.services.sprint_calendar import SprintCalendarService
+from study_os_service.services.sprint_day import SprintDayService
+from study_os_service.services.task_execution import TaskExecutionService
 
 
 NOW = datetime(2026, 7, 15, 12, tzinfo=UTC)
@@ -325,5 +327,244 @@ def test_manual_item_is_pinned_into_the_next_preview(tmp_path: Path):
         assert assignment["durationMinutes"] == 35
         assert assignment["precision"] == "protected"
         assert assignment["pinned"] is True
+    finally:
+        database.close()
+
+
+def test_reflow_keeps_completed_source_tasks_on_their_observed_day_and_never_uses_past_capacity(tmp_path: Path):
+    database = connection(tmp_path)
+    try:
+        completed_import = import_cycle(
+            database,
+            meta=48,
+            released_at="2026-07-18T10:00:00Z",
+            starts_on="2026-07-18",
+            ends_on="2026-07-24",
+            external_id="meta-48-completed",
+            scheduled_date="2026-07-18",
+        )
+        pending_import = import_cycle(
+            database,
+            meta=48,
+            released_at="2026-07-18T10:00:00Z",
+            starts_on="2026-07-18",
+            ends_on="2026-07-24",
+            external_id="meta-48-pending",
+            scheduled_date="2026-07-18",
+        )
+        completed_source_id = completed_import["taskIds"][0]
+        pending_source_id = pending_import["taskIds"][0]
+        TaskExecutionService(database).record(
+            completed_source_id,
+            {
+                "outcome": "completed",
+                "performedOn": "2026-07-18",
+                "taskMinutes": 60,
+                "exerciseMinutes": 40,
+                "questionsTotal": 20,
+                "correctCount": 18,
+                "wrongCount": 2,
+                "doubtCount": 0,
+                "notes": "Concluída no primeiro dia da meta",
+            },
+            idempotency_key="complete-meta-48-on-18",
+        )
+        service = SprintCalendarService(
+            database,
+            clock=lambda: datetime(2026, 7, 21, 12, tzinfo=UTC),
+        )
+
+        preview = service.preview(
+            {
+                "targetSlug": "sefaz_ce",
+                "startDate": "2026-07-18",
+                "endDate": "2026-07-24",
+                "expectedRunId": None,
+                "mode": "reflow_open",
+                "maxTasksPerDay": 4,
+                "hoursPerDay": 4,
+            },
+            idempotency_key="reflow-meta-48-after-completion",
+        )
+        item_by_id = {item["id"]: item for item in preview["items"]}
+        source_dates = {
+            item_by_id[assignment["itemId"]]["sourcePlanTaskId"]: assignment["date"]
+            for assignment in preview["assignments"]
+            if item_by_id[assignment["itemId"]]["sourcePlanTaskId"] is not None
+        }
+
+        assert source_dates[completed_source_id] == "2026-07-18"
+        assert source_dates[pending_source_id] >= "2026-07-21"
+    finally:
+        database.close()
+
+
+def test_reflow_projects_ls_completed_status_onto_an_existing_calendar_card(tmp_path: Path):
+    database = connection(tmp_path)
+    try:
+        imported = import_cycle(
+            database,
+            meta=48,
+            released_at="2026-07-18T10:00:00Z",
+            starts_on="2026-07-18",
+            ends_on="2026-07-24",
+            external_id="meta-48-ls-visible-completed",
+            scheduled_date="2026-07-21",
+        )
+        source_task_id = imported["taskIds"][0]
+        service = SprintCalendarService(
+            database,
+            clock=lambda: datetime(2026, 7, 21, 12, tzinfo=UTC),
+        )
+        initial = service.preview(
+            {
+                "targetSlug": "sefaz_ce",
+                "startDate": "2026-07-18",
+                "endDate": "2026-07-24",
+                "expectedRunId": None,
+                "mode": "reflow_open",
+                "maxTasksPerDay": 4,
+                "hoursPerDay": 4,
+            },
+            idempotency_key="initial-ls-visible-card",
+        )
+        initial_item = next(
+            item
+            for item in initial["items"]
+            if item["sourcePlanTaskId"] == source_task_id
+        )
+        assert initial_item["state"] == "pending"
+        service.apply(
+            initial["run"]["id"],
+            {
+                "expectedRunId": None,
+                "expectedOverrideVersions": initial["overrideVersions"],
+            },
+            idempotency_key="apply-initial-ls-visible-card",
+        )
+
+        SourcePlanService(database).import_tasks(
+            {
+                "targetSlug": "sefaz_ce",
+                "sourceKind": "ls",
+                "planLabel": "Meta 48",
+                "metaNumber": 48,
+                "cycle": {
+                    "releasedAt": "2026-07-18T10:00:00Z",
+                    "startsOn": "2026-07-18",
+                    "endsOn": "2026-07-24",
+                },
+                "tasks": [
+                    {
+                        "externalTaskId": "meta-48-ls-visible-completed",
+                        "scheduledDate": "2026-07-21",
+                        "sourceOrder": 1,
+                        "discipline": "Legis. Tribut. Estadual (ICMS)",
+                        "topicHint": "Conteudo da Meta 48",
+                        "taskKind": "questions",
+                        "description": "Resolver tarefa 48",
+                        "estimatedMinutes": 60,
+                        "relevance": 10,
+                        "status": "completed",
+                        "provenance": {
+                            "origin": "ls-visible-history",
+                            "performanceCapture": "not-shown-in-calendar",
+                        },
+                    }
+                ],
+            },
+            idempotency_key="reconcile-ls-visible-completed",
+        )
+
+        reflow = service.preview(
+            {
+                "targetSlug": "sefaz_ce",
+                "startDate": "2026-07-18",
+                "endDate": "2026-07-24",
+                "expectedRunId": initial["run"]["id"],
+                "mode": "reflow_open",
+                "maxTasksPerDay": 4,
+                "hoursPerDay": 4,
+            },
+            idempotency_key="reflow-ls-visible-completed",
+        )
+        reflow_item = next(
+            item
+            for item in reflow["items"]
+            if item["sourcePlanTaskId"] == source_task_id
+        )
+
+        assert reflow_item["state"] == "completed"
+        assert all(
+            assignment["action"] is None
+            for assignment in reflow["assignments"]
+            if assignment["itemId"] == reflow_item["id"]
+        )
+    finally:
+        database.close()
+
+
+def test_ia_today_does_not_offer_a_source_task_outside_the_exact_calendar_day(tmp_path: Path):
+    database = connection(tmp_path)
+    try:
+        imported = import_cycle(
+            database,
+            meta=48,
+            released_at="2026-07-18T10:00:00Z",
+            starts_on="2026-07-18",
+            ends_on="2026-07-24",
+            external_id="meta-48-calendar-only",
+            scheduled_date="2026-07-21",
+        )
+        calendar = SprintCalendarService(
+            database,
+            clock=lambda: datetime(2026, 7, 21, 12, tzinfo=UTC),
+        )
+        preview = calendar.preview(
+            {
+                "targetSlug": "sefaz_ce",
+                "startDate": "2026-07-18",
+                "endDate": "2026-07-24",
+                "expectedRunId": None,
+                "mode": "reflow_open",
+                "maxTasksPerDay": 4,
+                "hoursPerDay": 4,
+            },
+            idempotency_key="calendar-only-preview",
+        )
+        calendar.apply(
+            preview["run"]["id"],
+            {
+                "expectedRunId": None,
+                "expectedOverrideVersions": preview["overrideVersions"],
+            },
+            idempotency_key="calendar-only-apply",
+        )
+
+        day = SprintDayService(database).generate(
+            {
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-22",
+                "energyLevel": 3,
+            },
+            idempotency_key="calendar-only-day",
+            refresh=False,
+        )
+
+        assert day["actions"] == []
+
+        scheduled_day = SprintDayService(database).generate(
+            {
+                "targetSlug": "sefaz_ce",
+                "date": "2026-07-21",
+                "energyLevel": 3,
+            },
+            idempotency_key="calendar-only-scheduled-day",
+            refresh=False,
+        )
+
+        assert [action["sourcePlanTaskId"] for action in scheduled_day["actions"]] == [
+            imported["taskIds"][0]
+        ]
     finally:
         database.close()

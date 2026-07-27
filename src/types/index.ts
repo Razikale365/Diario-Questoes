@@ -11,6 +11,12 @@ export interface QuestionAttempt {
   attemptedAt: string;
 }
 
+export interface QuestionSourcePage {
+  documentId: string;
+  pageNumber: number;
+  likelyVisual: boolean;
+}
+
 export interface QuestionBankItem {
   id: string;
   fingerprint: string;
@@ -22,6 +28,7 @@ export interface QuestionBankItem {
   sourceKind: QuestionSourceKind;
   sourceName: string;
   sourceFileName?: string;
+  sourcePage?: QuestionSourcePage;
   year?: number;
   exam?: string;
   institution?: string;
@@ -55,6 +62,7 @@ export interface Question {
   alternatives?: QuestionAlternative[];
   sourceKind?: QuestionSourceKind;
   sourceName?: string;
+  sourcePage?: QuestionSourcePage;
   year?: number;
   exam?: string;
   institution?: string;
@@ -86,6 +94,7 @@ export interface StudyTask {
   id: string;
   date: string;
   updatedAt?: string; // ISO timestamp of last local mutation — used for per-task conflict resolution
+  storageScope?: 'local-private';
   targetSlug?: string;
   planejamento?: string;
   meta?: string;

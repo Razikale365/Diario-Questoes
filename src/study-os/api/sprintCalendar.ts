@@ -249,7 +249,6 @@ const parseItem = (value: unknown): SprintCalendarItem => {
     || Object.keys(item.result).length !== 0
     || item.completedAt !== null
   )) invalid('placeholder');
-  if (item.state === 'completed' && item.completedAt === null) invalid('completed item');
   return item;
 };
 

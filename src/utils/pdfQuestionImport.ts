@@ -7,6 +7,8 @@ import {
   ParseObjectiveQuestionsResult,
 } from './objectiveQuestionParser';
 import { stripPdfPageArtifacts } from './pdfTextCleanup';
+import { buildQuestionSourceDocumentId } from '../storage/questionSourceDocuments';
+import { attachQuestionSourcePages } from './questionVisualSource';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -20,6 +22,7 @@ export interface PdfQuestionImportResult extends ParseObjectiveQuestionsResult {
   fileName: string;
   pageCount: number;
   extractedTextLength: number;
+  sourceDocumentId: string;
 }
 
 const textItemsToPageText = (items: PdfTextItem[]) => {
@@ -54,7 +57,8 @@ const textItemsToPageText = (items: PdfTextItem[]) => {
 
 export const extractPdfText = async (file: File) => {
   const data = new Uint8Array(await file.arrayBuffer());
-  const loadingTask = pdfjsLib.getDocument({ data });
+  const sourceDocumentId = await buildQuestionSourceDocumentId(data.buffer);
+  const loadingTask = pdfjsLib.getDocument({ data: data.slice() });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
 
@@ -74,6 +78,7 @@ export const extractPdfText = async (file: File) => {
     return {
       text: pages.join('\n\n'),
       pageCount: pdf.numPages,
+      sourceDocumentId,
     };
   } finally {
     await pdf.cleanup();
@@ -89,8 +94,10 @@ export const importObjectiveQuestionsFromPdf = async (
 
   return {
     ...parsed,
+    questions: attachQuestionSourcePages(parsed.questions, extracted.sourceDocumentId),
     fileName: file.name,
     pageCount: extracted.pageCount,
     extractedTextLength: extracted.text.length,
+    sourceDocumentId: extracted.sourceDocumentId,
   };
 };

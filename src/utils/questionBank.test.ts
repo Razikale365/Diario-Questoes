@@ -14,6 +14,7 @@ import {
   matchQuestionBankItemsToPlannerTask,
   mergeQuestionBankItems,
   parseQuestionBankBackup,
+  questionBankItemToQuestion,
   reassignQuestionBankItemsTarget,
   resetQuestionBankItemAttempts,
   resolveMergedQuestionBankItems,
@@ -87,6 +88,30 @@ test('buildQuestionBankItems and backup round-trip preserve explicit study targe
 
   assert.equal(items[0].targetSlug, 'bacen_economia_financas');
   assert.equal(parsed.items[0].targetSlug, 'bacen_economia_financas');
+});
+
+test('build, backup sanitation, and task conversion preserve a local PDF source-page reference', () => {
+  const [item] = buildQuestionBankItems([
+    {
+      ...importedQuestions[0],
+      sourcePage: {
+        documentId: 'pdf_abc123',
+        pageNumber: 33,
+        likelyVisual: true,
+      },
+    },
+  ], context);
+  const backup = createQuestionBankBackup([item], '2026-07-25T12:00:00.000Z');
+  const parsed = parseQuestionBankBackup(backup);
+  const taskQuestion = questionBankItemToQuestion(parsed.items[0], 0);
+
+  assert.deepEqual(item.sourcePage, {
+    documentId: 'pdf_abc123',
+    pageNumber: 33,
+    likelyVisual: true,
+  });
+  assert.deepEqual(parsed.items[0].sourcePage, item.sourcePage);
+  assert.deepEqual(taskQuestion.sourcePage, item.sourcePage);
 });
 
 test('filterQuestionBankItems searches metadata and statement text', () => {

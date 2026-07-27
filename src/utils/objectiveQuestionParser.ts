@@ -1,3 +1,5 @@
+import type { QuestionSourcePage } from '../types';
+
 export interface ImportedAlternative {
   label: string;
   text: string;
@@ -6,6 +8,8 @@ export interface ImportedAlternative {
 export interface ImportedObjectiveQuestion {
   localId: string;
   number: number;
+  sourcePageNumber?: number;
+  sourcePage?: QuestionSourcePage;
   statement: string;
   alternatives: ImportedAlternative[];
   answerKey?: string;
@@ -32,18 +36,56 @@ export interface ParseObjectiveQuestionsOptions {
 }
 
 const ALTERNATIVE_LINE_RE = /^\s*(?:\(([A-Ea-e])\)\s*|([A-Ea-e])\)\s*|([A-E])\.\s+)(.*)$/u;
-const INLINE_ALTERNATIVE_MARKER_RE = /(^|\s)(?:\(([A-Ea-e])\)|([A-Ea-e])\)|([A-E])\.)\s+/gu;
-const COMMENT_TAIL_RE = /(^|\n)\s*(?:coment[aá]rios?|gabarito\s+comentado|resolu[cç][aã]o|solu[cç][aã]o|explica[cç][aã]o)\b/iu;
-const ANSWER_LINE_RE = /(^|\n)\s*(?:gabarito|respostas?|alternativa\s+correta)\b/iu;
+const INLINE_ALTERNATIVE_MARKER_RE = /(^|[\s:;])(?:\(([A-Ea-e])\)|([A-Ea-e])\)|([A-E])\.)\s+/gu;
+const COMMENT_TAIL_RE = /(^|\n)[ \t]*(?:coment[aá]rios?|gabarito[ \t]+comentado|resolu[cç][aã]o|solu[cç][aã]o|explica[cç][aã]o)[ \t]*(?:[:\-–]|$)/iu;
+const ANSWER_LINE_RE = /(^|\n)[ \t]*(?:gabarito|respostas?|alternativa[ \t]+correta)[ \t]*[:\-–]?[ \t]*(?:letra[ \t]*)?(?:[A-E]|CERTO|ERRADO|ANULADA)\b/iu;
 
 const normalizeText = (text: string) =>
   text
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
-    .replace(/\[Pagina \d+\]/gi, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+const stripPrintedPageNumbersAfterMarkers = (text: string) =>
+  text.replace(
+    /\[Pagina (\d+)\][ \t]*\n[ \t]*(\d{1,4})[ \t]*(?=\n|$)/gi,
+    (match, pdfPageText: string, printedPageText: string) => {
+      const offset = Number(pdfPageText) - Number(printedPageText);
+      return offset >= 0 && offset <= 3
+        ? `[Pagina ${pdfPageText}]\n`
+        : match;
+    },
+  );
+
+const stripPageMarkers = (text: string) => {
+  const withoutPrintedPageNumbers = text.replace(
+    /\[Pagina (\d+)\][ \t]*\n[ \t]*(\d{1,4})[ \t]*(?=\n|$)/gi,
+    (match, pdfPageText: string, printedPageText: string) => {
+      const offset = Number(pdfPageText) - Number(printedPageText);
+      return offset >= 0 && offset <= 3 ? '' : match;
+    },
+  );
+  return withoutPrintedPageNumbers.replace(/\[Pagina \d+\]/gi, '');
+};
+
+const findPageNumberBeforeOffset = (text: string, offset: number) => {
+  let pageNumber: number | undefined;
+  const markerRe = /\[Pagina (\d+)\]/gi;
+
+  for (const match of text.slice(0, offset).matchAll(markerRe)) {
+    pageNumber = Number(match[1]);
+  }
+
+  return pageNumber;
+};
+
+const findLastPageNumberInText = (text: string) => {
+  const matches = Array.from(text.matchAll(/\[Pagina (\d+)\]/gi));
+  const value = matches.at(-1)?.[1];
+  return value ? Number(value) : undefined;
+};
 
 const collapseInlineWhitespace = (text: string) =>
   text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, ' ').trim();
@@ -119,6 +161,21 @@ const removeQuestionHeader = (block: string, number: number) => {
   return block.replace(headerRe, '').trim();
 };
 
+const repairPositionalAlternativeLabels = (alternatives: ImportedAlternative[]) => {
+  const labels = alternatives.map((alternative) => alternative.label);
+  if (
+    alternatives.length === 5 &&
+    labels.slice(0, 4).join('') === 'ABCD' &&
+    labels[4] === 'A'
+  ) {
+    return alternatives.map((alternative, index) => ({
+      ...alternative,
+      label: ['A', 'B', 'C', 'D', 'E'][index],
+    }));
+  }
+  return alternatives;
+};
+
 const isValidAlternativeSet = (alternatives: ImportedAlternative[]) => {
   const labels = alternatives.map((alternative) => alternative.label);
   const uniqueLabels = new Set(labels);
@@ -186,21 +243,49 @@ const parseAlternativesInline = (body: string) => {
   return { statement, alternatives };
 };
 
-const parseQuestionBlock = (block: string, number: number, answerFromTable?: string) => {
+const parseQuestionBlock = (
+  block: string,
+  number: number,
+  answerFromTable?: string,
+  sourcePageNumber?: number,
+) => {
   const answerKey = extractInlineAnswer(block) || answerFromTable;
-  const questionOnly = removeQuestionHeader(stripTail(block), number);
+  const questionOnly = removeQuestionHeader(stripPageMarkers(stripTail(block)), number);
   const lineParsed = parseAlternativesByLines(questionOnly);
-  const parsed = isValidAlternativeSet(lineParsed.alternatives) ? lineParsed : parseAlternativesInline(questionOnly);
+  lineParsed.alternatives = repairPositionalAlternativeLabels(lineParsed.alternatives);
+  const inlineParsed = parseAlternativesInline(questionOnly);
+  inlineParsed.alternatives = repairPositionalAlternativeLabels(inlineParsed.alternatives);
+  const parsed = isValidAlternativeSet(lineParsed.alternatives) ? lineParsed : inlineParsed;
 
-  if (!parsed.statement || !isValidAlternativeSet(parsed.alternatives)) {
-    return null;
-  }
+  if (!parsed.statement || !isValidAlternativeSet(parsed.alternatives)) return null;
+  const endingPageNumber = findLastPageNumberInText(block);
+  const alternatives = parsed.alternatives.map((alternative, index) => {
+    const isFinalAlternative = index === parsed.alternatives.length - 1;
+    if (
+      !isFinalAlternative
+      || alternative.label !== 'E'
+      || !sourcePageNumber
+      || !endingPageNumber
+      || endingPageNumber === sourcePageNumber
+    ) {
+      return alternative;
+    }
+
+    return {
+      ...alternative,
+      text: alternative.text.replace(
+        new RegExp(`\\s+${endingPageNumber}\\s*$`, 'u'),
+        '',
+      ),
+    };
+  });
 
   return {
-    localId: `q_${number}_${hashString(`${parsed.statement}\n${parsed.alternatives.map((alt) => `${alt.label}:${alt.text}`).join('\n')}`)}`,
+    localId: `q_${number}_${hashString(`${parsed.statement}\n${alternatives.map((alt) => `${alt.label}:${alt.text}`).join('\n')}`)}`,
     number,
+    sourcePageNumber,
     statement: parsed.statement,
-    alternatives: parsed.alternatives,
+    alternatives,
     answerKey,
     bank: extractBank(block),
     year: extractYear(block),
@@ -336,11 +421,49 @@ const pruneCandidates = (
   return active;
 };
 
+const buildSequentialCandidateChain = (
+  candidates: CandidateStart[],
+  text: string,
+  answerKey: Map<number, string>,
+) => {
+  let best: CandidateStart[] = [];
+  const starts = candidates.filter((candidate) => candidate.number === 1);
+
+  for (const start of starts) {
+    const chain = [start];
+    let current = start;
+
+    for (let expected = 2; expected <= 1000; expected += 1) {
+      const next = candidates.find((candidate) => {
+        if (candidate.start <= current.start || candidate.number !== expected) return false;
+        const previousBlock = text.slice(current.start, candidate.start).trim();
+        return parseQuestionBlock(
+          previousBlock,
+          current.number,
+          answerKey.get(current.number),
+        ) !== null;
+      });
+      if (!next) break;
+      chain.push(next);
+      current = next;
+    }
+
+    if (
+      chain.length > best.length ||
+      (chain.length === best.length && start.start > (best[0]?.start ?? -1))
+    ) {
+      best = chain;
+    }
+  }
+
+  return best;
+};
+
 export const parseObjectiveQuestions = (
   rawText: string,
   options: ParseObjectiveQuestionsOptions = {}
 ): ParseObjectiveQuestionsResult => {
-  const text = normalizeText(rawText);
+  const text = stripPrintedPageNumbersAfterMarkers(normalizeText(rawText));
   if (!text) return { questions: [], rejectedBlocks: 0 };
 
   const originalCandidates = collectCandidateStarts(text);
@@ -355,7 +478,12 @@ export const parseObjectiveQuestions = (
   prunedForte.forEach((start, index) => {
     const nextStart = prunedForte[index + 1]?.start ?? text.length;
     const block = text.slice(start.start, nextStart).trim();
-    const parsed = parseQuestionBlock(block, start.number, answerKey.get(start.number));
+    const parsed = parseQuestionBlock(
+      block,
+      start.number,
+      answerKey.get(start.number),
+      findPageNumberBeforeOffset(text, start.start),
+    );
     if (parsed) questionsForte.push(parsed);
     else rejectedForte += 1;
   });
@@ -399,7 +527,12 @@ export const parseObjectiveQuestions = (
     prunedLegado.forEach((start, index) => {
       const nextStart = prunedLegado[index + 1]?.start ?? text.length;
       const block = text.slice(start.start, nextStart).trim();
-      const parsed = parseQuestionBlock(block, start.number, answerKey.get(start.number));
+      const parsed = parseQuestionBlock(
+        block,
+        start.number,
+        answerKey.get(start.number),
+        findPageNumberBeforeOffset(text, start.start),
+      );
       if (parsed) questionsLegado.push(parsed);
       else rejectedLegado += 1;
     });
@@ -434,10 +567,30 @@ export const parseObjectiveQuestions = (
 
   // Choose the strategy with higher quality score
   const useForte = !legacyEnabled || (qualityForte >= qualityLegado);
-  const finalQuestions = useForte ? questionsForte : questionsLegado;
-  const finalRejected = useForte
+  let finalQuestions = useForte ? questionsForte : questionsLegado;
+  let finalRejected = useForte
     ? (forteCandidates.length - questionsForte.length)
     : (originalCandidates.length - questionsLegado.length);
+
+  const sequentialCandidates = buildSequentialCandidateChain(originalCandidates, text, answerKey);
+  if (sequentialCandidates.length >= 5) {
+    const sequentialQuestions: ImportedObjectiveQuestion[] = [];
+    sequentialCandidates.forEach((start, index) => {
+      const nextStart = sequentialCandidates[index + 1]?.start ?? text.length;
+      const parsed = parseQuestionBlock(
+        text.slice(start.start, nextStart).trim(),
+        start.number,
+        answerKey.get(start.number),
+        findPageNumberBeforeOffset(text, start.start),
+      );
+      if (parsed) sequentialQuestions.push(parsed);
+    });
+
+    if (sequentialQuestions.length > finalQuestions.length) {
+      finalQuestions = sequentialQuestions;
+      finalRejected = sequentialCandidates.length - sequentialQuestions.length;
+    }
+  }
 
   // Diagnostics calculations
   const detectedNumbers = finalQuestions.map((q) => q.number);

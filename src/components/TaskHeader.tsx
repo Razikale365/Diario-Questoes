@@ -3,6 +3,7 @@ import { Edit2, Save, X, CheckCircle2, Columns, Bot, Brain, Flag, Eye, EyeOff, C
 import { StudyTask } from '../types';
 import { BANKS, PLANEJAMENTOS, DISCIPLINAS } from '../utils/constants';
 import { DEFAULT_ACTIVITY_LAYOUT } from '../utils/layout';
+import { StudyStopwatch } from './StudyStopwatch';
 
 interface TaskHeaderProps {
   task: StudyTask;
@@ -234,6 +235,7 @@ ${sections}
             <span className="font-semibold">Banca: {task.bank}</span>
             <span className="w-1.5 h-1.5 rounded-full bg-[#525252]" />
             <span className="font-semibold uppercase text-[10px] tracking-widest">{task.blocks.length} atividades</span>
+            <StudyStopwatch label="Cronômetro geral" />
             
             {(() => {
               const allQuestions = task.blocks.flatMap(b => b.questions || []);

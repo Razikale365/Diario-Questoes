@@ -12,7 +12,7 @@ const run = async () => {
   }
 
   const data = new Uint8Array(fs.readFileSync(pdfPath));
-  const loadingTask = pdfjsLib.getDocument({ data, useWorkerFetch: false, isEvalSupported: false });
+  const loadingTask = pdfjsLib.getDocument({ data, useWorkerFetch: false });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
 
@@ -32,6 +32,7 @@ const run = async () => {
     };
 
     for (const item of items) {
+      if (!('str' in item)) continue;
       const value = item.str?.trim();
       if (!value) continue;
 

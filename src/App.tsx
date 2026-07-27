@@ -40,6 +40,7 @@ import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
 import type { TaskQuestionImportDestination } from './utils/taskQuestionImport';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
+import { mergeSyncedTasksWithLocalPrivate } from './storage/localStudyTasks';
 import { SyncState, SyncStatus } from './types/sync';
 import { useAutoBackup } from './hooks/useAutoBackup';
 import { 
@@ -76,6 +77,7 @@ function App() {
     inProgressTasks,
     pauseTask,
     addTask,
+    mergeTaskPackage,
     commitTaskQuestionImport,
     updateTask,
     deleteTask,
@@ -148,15 +150,9 @@ function App() {
       const detail = (e as CustomEvent).detail as StudyTask[];
       if (detail) {
         skipSyncRef.current = true;
-        setTasks(detail);
-
-        // If the currently-active task is still in the new data, keep it active.
-        // If it disappeared (edge case), clear gracefully so the user sees the list.
-        setActiveTaskId(prev => {
-          if (!prev) return prev;
-          const stillExists = detail.some(t => t.id === prev);
-          return stillExists ? prev : null;
-        });
+        setTasks((currentTasks) =>
+          mergeSyncedTasksWithLocalPrivate(detail, currentTasks),
+        );
 
         showToast('Dados atualizados da nuvem!');
       }
@@ -531,7 +527,23 @@ function App() {
     setTaskWorkTab(getDefaultTaskWorkTab(taskData));
     setActiveTab('caderno');
     setRevisionTaskModal({ ...revisionTaskModal, isOpen: false });
-    showToast('Revisão gerada!');
+    showToast('Tarefa criada!');
+  };
+
+  const handleCreateTaskFromHistory = () => {
+    setRevisionTaskModal({
+      isOpen: true,
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      planejamento: '',
+      meta: '',
+      tarefa: '',
+      assunto: '',
+      discipline: '',
+      bank: 'Outra',
+      blocks: [],
+      status: 'in_progress'
+    });
   };
 
   const handleOpenPlannerStudyTask = (taskId: string) => {
@@ -592,7 +604,11 @@ function App() {
       return;
     }
     if (id === 'account') {
-      handleOpenAuth();
+      if (syncState.status === 'unauthenticated') {
+        handleOpenAuth();
+      } else {
+        handleOpenPasswordChange();
+      }
       return;
     }
     setActiveTab('planner');
@@ -671,7 +687,11 @@ function App() {
                       </div>
                     </div>
                   )}
-                  <ImportArea onImport={(task) => { addTask(task); setTaskWorkTab(getDefaultTaskWorkTab(task)); setActiveTaskId(task.id); showToast('Importado!'); }} showToast={showToast} />
+                  <ImportArea
+                    onImport={(task) => { addTask(task); setTaskWorkTab(getDefaultTaskWorkTab(task)); setActiveTaskId(task.id); showToast('Importado!'); }}
+                    onMergeLocalPackage={mergeTaskPackage}
+                    showToast={showToast}
+                  />
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -898,6 +918,7 @@ function App() {
                   setHistoryPage={setHistoryPage}
                   onOpenTask={handleOpenHistoryTask}
                   onDeleteTask={setTaskToDelete} 
+                  onCreateTask={handleCreateTaskFromHistory}
                 />
               )}
             </div>

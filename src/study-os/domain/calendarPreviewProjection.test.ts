@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { SprintCalendarDocument } from '../api/sprintCalendar';
-import { projectCalendarPreviewEntries, summarizeCalendarPreviewByDay } from './calendarPreviewProjection';
+import {
+  filterCalendarPreviewEntries,
+  projectCalendarPreviewEntries,
+  summarizeCalendarPreviewByDay,
+} from './calendarPreviewProjection';
 
 const document = {
   run: { decision: 'draft' },
@@ -64,7 +68,29 @@ test('projectCalendarPreviewEntries keeps the LS task identity and leaves AI int
     taskNumber: 10,
     discipline: 'Administração Pública',
     isDraft: true,
+    isCompleted: false,
   }]);
+});
+
+test('filterCalendarPreviewEntries removes completed cards only when requested', () => {
+  const applied = {
+    ...document,
+    run: { decision: 'applied' },
+    items: [{
+      ...document.items[0],
+      state: 'completed',
+    }],
+    assignments: [document.assignments[0]],
+  } as SprintCalendarDocument;
+
+  const entries = projectCalendarPreviewEntries(applied);
+
+  assert.deepEqual(entries.map((entry) => ({ isDraft: entry.isDraft, isCompleted: entry.isCompleted })), [{
+    isDraft: false,
+    isCompleted: true,
+  }]);
+  assert.deepEqual(filterCalendarPreviewEntries(entries, true), []);
+  assert.deepEqual(filterCalendarPreviewEntries(entries, false), entries);
 });
 
 test('summarizeCalendarPreviewByDay keeps every block while exposing one readable focus per day', () => {

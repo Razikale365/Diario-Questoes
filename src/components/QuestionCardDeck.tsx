@@ -3,12 +3,16 @@ import { AnimatePresence, motion, PanInfo } from 'framer-motion';
 import {
   BookOpen,
   Check,
+  ChevronFirst,
   ChevronLeft,
+  ChevronLast,
   ChevronRight,
   Edit2,
   Flag,
   MessageSquare,
   Plus,
+  Shuffle,
+  SkipForward,
   Star,
   X,
 } from 'lucide-react';
@@ -16,10 +20,19 @@ import {
 import { Question, StudyTask } from '../types';
 import {
   buildQuestionCardDeck,
+  findAdjacentQuestionCardBlockIndex,
   findFirstUnansweredCardIndex,
+  findNextUnansweredQuestionCardIndex,
+  findQuestionCardIndexByDisplayNumber,
+  findRandomUnansweredQuestionCardIndex,
+  getQuestionCardAlternativeShortcut,
+  getQuestionCardNavigationShortcut,
+  shouldHandleQuestionCardShortcut,
   summarizeQuestionCardDeck,
 } from '../utils/questionCardDeck';
+import { isEditableShortcutTarget } from '../utils/externalAnswers';
 import { QuestionEditorModal } from './QuestionEditorModal';
+import { QuestionSourcePageViewer } from './QuestionSourcePageViewer';
 import {
   buildAnswerSelectionUpdate,
   QuestionDraft,
@@ -65,11 +78,15 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
   const cards = useMemo(() => buildQuestionCardDeck(task), [task]);
   const initializedTaskIdRef = useRef<string | null>(null);
   const deckRef = useRef<HTMLElement>(null);
+  const jumpInputRef = useRef<HTMLInputElement>(null);
+  const jumpButtonRef = useRef<HTMLButtonElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(0);
   const [isEditingObservation, setIsEditingObservation] = useState(false);
   const [revealedQuestionIds, setRevealedQuestionIds] = useState<Set<string>>(() => new Set());
   const [questionBeingEdited, setQuestionBeingEdited] = useState<Question | null | undefined>(undefined);
+  const [isJumpingToQuestion, setIsJumpingToQuestion] = useState(false);
+  const [shouldRestoreJumpFocus, setShouldRestoreJumpFocus] = useState(false);
   const summary = useMemo(() => {
     const visibleCards = cards.map((card) => shouldShowQuestionCorrectness(card.question, revealedQuestionIds.has(card.id))
       ? card
@@ -131,6 +148,135 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
 
   const goPrevious = () => goToCard(currentIndex - 1, -1);
   const goNext = () => goToCard(currentIndex + 1, 1);
+  const goToNextUnanswered = () => {
+    const nextIndex = findNextUnansweredQuestionCardIndex(cards, currentIndex);
+    goToCard(nextIndex, nextIndex >= currentIndex ? 1 : -1);
+  };
+  const goToRandomUnanswered = () => {
+    const nextIndex = findRandomUnansweredQuestionCardIndex(cards, currentIndex);
+    goToCard(nextIndex, nextIndex >= currentIndex ? 1 : -1);
+  };
+  const goToPreviousTopic = () => goToCard(
+    findAdjacentQuestionCardBlockIndex(cards, currentIndex, 'previous'),
+    -1,
+  );
+  const goToNextTopic = () => goToCard(
+    findAdjacentQuestionCardBlockIndex(cards, currentIndex, 'next'),
+    1,
+  );
+
+  const toggleFavorite = () => {
+    if (!currentQuestion) return;
+    updateCurrentQuestion({ favorite: !currentQuestion.favorite });
+  };
+
+  const closeJumpToQuestion = () => {
+    setIsJumpingToQuestion(false);
+    setShouldRestoreJumpFocus(true);
+  };
+
+  useEffect(() => {
+    const handleCardNavigationShortcut = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const hasModifier = event.metaKey || event.ctrlKey || event.altKey || event.shiftKey;
+      const isDialogOpen = questionBeingEdited !== undefined || Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+      if (!shouldHandleQuestionCardShortcut({
+        hasModifier,
+        isEnterOnInteractiveControl: event.key === 'Enter' && (target instanceof HTMLButtonElement || target instanceof HTMLAnchorElement),
+        isEditable: isEditableShortcutTarget(target?.tagName, Boolean(target?.isContentEditable)),
+        isDialogOpen,
+        isDefaultPrevented: event.defaultPrevented,
+      })) return;
+
+      const shortcut = getQuestionCardNavigationShortcut(
+        event.key,
+        hasModifier,
+      );
+      if (shortcut === 'previous') {
+        event.preventDefault();
+        goPrevious();
+      }
+      if (shortcut === 'next') {
+        event.preventDefault();
+        goNext();
+        return;
+      }
+
+      const key = event.key.toUpperCase();
+      if (key === 'L') {
+        event.preventDefault();
+        goToRandomUnanswered();
+        return;
+      }
+      if (key === 'N') {
+        event.preventDefault();
+        goToNextUnanswered();
+        return;
+      }
+      if (key === 'Z') {
+        event.preventDefault();
+        goToPreviousTopic();
+        return;
+      }
+      if (key === 'X') {
+        event.preventDefault();
+        goToNextTopic();
+        return;
+      }
+      if (key === 'P') {
+        event.preventDefault();
+        setIsJumpingToQuestion(true);
+        return;
+      }
+      if (key === 'M') {
+        event.preventDefault();
+        toggleFavorite();
+        return;
+      }
+      if (key === 'O') {
+        event.preventDefault();
+        setIsEditingObservation((previous) => !previous);
+        return;
+      }
+      if (key === 'I' && currentQuestion && !currentCard?.blockIsLocked) {
+        event.preventDefault();
+        setQuestionBeingEdited(currentQuestion);
+        return;
+      }
+      if (event.key === 'Enter' && currentQuestion?.answer) {
+        event.preventDefault();
+        toggleCurrentQuestionReveal();
+        return;
+      }
+
+      const alternative = getQuestionCardAlternativeShortcut(event.key, currentQuestion?.alternatives || []);
+      if (!alternative || !currentQuestion || currentCard?.blockIsLocked) return;
+      event.preventDefault();
+      if (currentQuestion.answer === alternative) {
+        const eliminated = currentQuestion.eliminated || [];
+        updateCurrentQuestion({
+          ...buildAnswerSelectionUpdate(currentQuestion, alternative),
+          eliminated: eliminated.includes(alternative) ? eliminated.filter((item) => item !== alternative) : [...eliminated, alternative],
+        });
+        return;
+      }
+      selectAlternative(alternative);
+    };
+
+    window.addEventListener('keydown', handleCardNavigationShortcut);
+    return () => window.removeEventListener('keydown', handleCardNavigationShortcut);
+  }, [cards, currentCard?.blockIsLocked, currentIndex, currentQuestion, questionBeingEdited, task.id]);
+
+  useEffect(() => {
+    if (isJumpingToQuestion) {
+      jumpInputRef.current?.focus();
+      return;
+    }
+    if (shouldRestoreJumpFocus) {
+      jumpButtonRef.current?.focus();
+      setShouldRestoreJumpFocus(false);
+    }
+  }, [isJumpingToQuestion, shouldRestoreJumpFocus]);
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (Math.abs(info.offset.x) < 90) return;
@@ -221,9 +367,12 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30">
               <div className="h-full rounded-full bg-[#84cc16] transition-[width]" style={{ width: `${answeredPercent}%` }} />
             </div>
+            <p className="mt-2 text-xs font-bold text-gray-400">
+              Atalhos TEC: ←/→ navegar · N pendente · L aleatória · Z/X tópicos · 1–5/A–E marcar · Enter corrigir · M favorita · P ir para
+            </p>
           </div>
 
-          <div className="flex items-center justify-between gap-2 md:justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-2 md:justify-end">
             <button
               type="button"
               onClick={() => setQuestionBeingEdited(null)}
@@ -238,24 +387,103 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
               onClick={goPrevious}
               disabled={currentIndex === 0}
               className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              title="Questao anterior"
+              title="Questão anterior (Seta esquerda)"
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="min-w-[72px] text-center text-xs font-black uppercase tracking-widest text-gray-400">
-              {currentIndex + 1}/{cards.length}
+              {currentCard?.displayNumber ?? 0}/{cards.length}
             </div>
             <button
               type="button"
               onClick={goNext}
               disabled={currentIndex >= cards.length - 1}
               className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              title="Proxima questao"
+              title="Próxima questão (Seta direita)"
             >
               <ChevronRight className="h-5 w-5" />
             </button>
+            <button
+              type="button"
+              onClick={goToRandomUnanswered}
+              disabled={summary.answered === summary.total}
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              title="Questão aleatória não resolvida (L)"
+              aria-label="Questão aleatória não resolvida"
+            >
+              <Shuffle className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={goToNextUnanswered}
+              disabled={summary.answered === summary.total}
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              title="Próxima questão não resolvida (N)"
+              aria-label="Próxima questão não resolvida"
+            >
+              <SkipForward className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={goToPreviousTopic}
+              disabled={findAdjacentQuestionCardBlockIndex(cards, currentIndex, 'previous') === currentIndex}
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              title="Tópico anterior (Z)"
+              aria-label="Tópico anterior"
+            >
+              <ChevronFirst className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={goToNextTopic}
+              disabled={findAdjacentQuestionCardBlockIndex(cards, currentIndex, 'next') === currentIndex}
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              title="Próximo tópico (X)"
+              aria-label="Próximo tópico"
+            >
+              <ChevronLast className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsJumpingToQuestion(true)}
+              ref={jumpButtonRef}
+              className="flex h-11 items-center justify-center rounded-xl bg-white/5 px-3 text-xs font-black text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+              title="Ir para questão (P)"
+            >
+              Ir para
+            </button>
           </div>
         </div>
+        {isJumpingToQuestion && (
+          <form
+            className="mt-3 flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const target = new FormData(event.currentTarget).get('question-position');
+              const displayNumber = typeof target === 'string' ? Number.parseInt(target, 10) : Number.NaN;
+              const nextIndex = Number.isInteger(displayNumber)
+                ? findQuestionCardIndexByDisplayNumber(cards, displayNumber)
+                : -1;
+              if (nextIndex >= 0) goToCard(nextIndex, nextIndex >= currentIndex ? 1 : -1);
+              closeJumpToQuestion();
+            }}
+          >
+            <label htmlFor="jump-to-question" className="text-xs font-bold text-gray-300">Questão</label>
+            <input
+              ref={jumpInputRef}
+              id="jump-to-question"
+              name="question-position"
+              type="number"
+              min="1"
+              max={cards.length}
+              className="h-9 w-20 rounded-lg border border-white/10 bg-black/25 px-2 text-sm font-bold text-white outline-none focus:border-purple-400/50"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') closeJumpToQuestion();
+              }}
+            />
+            <span className="text-xs text-gray-500">de {cards.length}</span>
+          </form>
+        )}
       </div>
 
       <div className="relative">
@@ -334,14 +562,14 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateCurrentQuestion({ favorite: !currentQuestion.favorite })}
+                    onClick={toggleFavorite}
                     disabled={currentCard.blockIsLocked}
                     className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                       currentQuestion.favorite
                         ? 'bg-yellow-500/10 text-yellow-300'
                         : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
                     } disabled:cursor-not-allowed disabled:opacity-40`}
-                    title="Favoritar"
+                    title="Favoritar (M)"
                   >
                     <Star className={`h-4 w-4 ${currentQuestion.favorite ? 'fill-yellow-300' : ''}`} />
                   </button>
@@ -367,7 +595,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                         ? 'bg-blue-500/10 text-blue-300'
                         : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
                     } disabled:cursor-not-allowed disabled:opacity-40`}
-                    title="Observacao"
+                    title="Observação (O)"
                   >
                     <MessageSquare className={`h-4 w-4 ${currentQuestion.observations ? 'fill-blue-300/20' : ''}`} />
                   </button>
@@ -378,6 +606,7 @@ export const QuestionCardDeck: React.FC<QuestionCardDeckProps> = ({
                 <p className="max-w-[118ch] text-[15px] font-semibold leading-7 text-gray-100 [text-wrap:pretty] md:text-base lg:text-[17px] lg:leading-8">
                   {currentQuestion.statement}
                 </p>
+                <QuestionSourcePageViewer sourcePage={currentQuestion.sourcePage} />
 
                 <div className="mt-5 grid gap-2.5 lg:gap-3">
                   {currentQuestion.alternatives?.map((alternative) => {

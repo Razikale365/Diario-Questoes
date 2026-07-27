@@ -27,7 +27,7 @@ body {
   justify-content: space-between;
   gap: 1rem;
   margin: -1rem -1rem 1.25rem;
-  padding: .85rem 1rem;
+  padding: .85rem 1rem .85rem 1.5rem;
   border-bottom: 1px solid rgb(255 255 255 / .09);
   background: rgb(29 29 29 / .94);
   backdrop-filter: blur(16px);
@@ -54,6 +54,21 @@ body {
 .study-primary-link:focus-visible { outline: 2px solid #bef264; outline-offset: 2px; }
 .study-shell-mobile-nav { display: none; }
 .metric-number { font-variant-numeric: tabular-nums; }
+
+/* The execution receipt is reused in both the full planner and a narrow modal rail.
+   Its fields therefore respond to their container, rather than the viewport. */
+.task-execution-fields {
+  container-type: inline-size;
+}
+.task-execution-fields__grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(6.5rem, 100%), 1fr));
+}
+@container (min-width: 35rem) {
+  .task-execution-fields__summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
 
 @media (max-width: 639px) {
   .study-shell-header { margin: -1rem -1rem .85rem; }

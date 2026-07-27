@@ -57,6 +57,27 @@ export const sourcePlanCycleForMeta = (meta: PlannerMetaSummary | null | undefin
 
 const LAST_SUPPORTED_CALENDAR_HORIZON_OFFSET_DAYS = 14;
 
+export const plannerCalendarStartDate = (
+  tasks: PlannerTask[],
+  today: string,
+): string => {
+  const currentCycles = tasks.filter((task) => (
+    task.sourceCycleStartsOn !== undefined
+    && task.sourceCycleEndsOn !== undefined
+    && task.sourceCycleStartsOn <= today
+    && today <= task.sourceCycleEndsOn
+  ));
+  const latestMeta = currentCycles.reduce(
+    (latest, task) => Math.max(latest, task.metaNumber ?? -1),
+    -1,
+  );
+  return currentCycles
+    .filter((task) => (task.metaNumber ?? -1) === latestMeta)
+    .map((task) => task.sourceCycleStartsOn)
+    .filter((value): value is string => value !== undefined)
+    .sort()[0] || today;
+};
+
 export const plannerCalendarEndDate = (
   tasks: PlannerTask[],
   today: string,

@@ -18,6 +18,7 @@ export interface TaskQuestionImportParsedBatch {
   rejectedBlocks: number;
   fileName: string;
   pageCount: number;
+  sourceDocumentId?: string;
 }
 
 export interface BuildTaskQuestionImportPreviewInput {

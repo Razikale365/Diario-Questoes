@@ -222,11 +222,191 @@ e) Alternativa E.
     result.questions[0].alternatives.map((a) => a.label),
     ['A', 'B', 'C', 'D', 'E']
   );
+  assert.equal(result.questions[0].alternatives[2].text, 'Alternativa C.');
   assert.equal(result.questions[1].number, 3);
   assert.equal(result.questions[1].alternatives.length, 5);
 
   // Certificar-se de que a falsa questão "4" não foi criada
   assert.ok(!result.questions.some((q) => q.number === 4));
+});
+
+test('removes a printed page number before collecting the next question candidate', () => {
+  const parsed = parseObjectiveQuestions(`
+[Pagina 5]
+6. Assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+
+[Pagina 6]
+5
+7. Assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+  `);
+
+  assert.deepEqual(parsed.questions.map((question) => question.number), [6, 7]);
+  assert.equal(parsed.questions[0].alternatives[4].text, 'Alternativa E.');
+});
+
+test('removes the printed page number when it is the final extracted line', () => {
+  const parsed = parseObjectiveQuestions(`
+[Pagina 1]
+1. Assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+
+[Pagina 2]
+1`);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.equal(parsed.questions[0].alternatives[4].text, 'Alternativa E.');
+});
+
+test('associates each parsed question with its nearest preceding PDF page marker', () => {
+  const text = `
+[Pagina 7]
+11 - (Inédita 7Fontes)
+Uma aplicação financeira apresenta os seguintes fluxos. Assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+
+12 - (Inédita 7Fontes)
+Sobre juros compostos, assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+
+[Pagina 8]
+13 - (Inédita 7Fontes)
+O gráfico demonstra a evolução da receita. Assinale a alternativa correta.
+a) Alternativa A.
+b) Alternativa B.
+c) Alternativa C.
+d) Alternativa D.
+e) Alternativa E.
+`;
+
+  const result = parseObjectiveQuestions(text);
+
+  assert.deepEqual(
+    result.questions.map((question) => [question.number, question.sourcePageNumber]),
+    [[11, 7], [12, 7], [13, 8]],
+  );
+});
+
+test('keeps a wrapped "alternativa correta" prompt instead of treating it as an answer section', () => {
+  const parsed = parseObjectiveQuestions(`
+[Pagina 26]
+60. Com base no que dispõe a norma, assinale a
+alternativa correta:
+a) Primeira alternativa.
+b) Segunda alternativa.
+c) Terceira alternativa.
+d) Quarta alternativa.
+e) Quinta alternativa.
+  `);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.equal(parsed.questions[0].number, 60);
+  assert.match(parsed.questions[0].statement, /alternativa correta/i);
+  assert.equal(parsed.questions[0].alternatives.length, 5);
+});
+
+test('recovers a complete sequential simulado when an internal numbered line looks like the next question', () => {
+  const text = Array.from({ length: 12 }, (_, index) => {
+    const number = index + 1;
+    const misleadingLine = number === 1 ? '\n2. etapa interna do raciocínio, ainda sem alternativas.' : '';
+    return `${number}. Enunciado objetivo ${number}.${misleadingLine}
+a) Alternativa A da questão ${number}.
+b) Alternativa B da questão ${number}.
+c) Alternativa C da questão ${number}.
+d) Alternativa D da questão ${number}.
+e) Alternativa E da questão ${number}.`;
+  }).join('\n');
+
+  const parsed = parseObjectiveQuestions(text);
+
+  assert.equal(parsed.questions.length, 12);
+  assert.deepEqual(parsed.questions.map((question) => question.number), Array.from({ length: 12 }, (_, index) => index + 1));
+});
+
+test('keeps wrapped alternative text that begins with "explicação" as question content', () => {
+  const parsed = parseObjectiveQuestions(`
+2. Assinale a alternativa correta.
+a) Alternativa inicial.
+b) Uma hipótese em favor de uma
+explicação alternativa plausível.
+c) Terceira alternativa.
+d) Quarta alternativa.
+e) Quinta alternativa.
+  `);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.match(parsed.questions[0].alternatives[1].text, /explicação alternativa/i);
+});
+
+test('parses the first alternative when PDF extraction glues "a)" to the prompt colon', () => {
+  const parsed = parseObjectiveQuestions(`
+68. Os sistemas descritos referem-se, respectivamente, a:a) Data Warehouse e Data Mart.
+b) Banco de Dados Relacional e OLAP.
+c) OLAP e Data Mining.
+d) Data Mining e Data Warehouse.
+e) Star Schema e OLTP.
+  `);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.equal(parsed.questions[0].alternatives.length, 5);
+  assert.equal(parsed.questions[0].alternatives[0].label, 'A');
+  assert.match(parsed.questions[0].statement, /respectivamente, a:$/);
+});
+
+test('repairs an obvious fifth-alternative label typo after an A-D sequence', () => {
+  const parsed = parseObjectiveQuestions(`
+54. O crime consuma-se com
+a) primeira hipótese.
+b) segunda hipótese.
+c) terceira hipótese.
+d) quarta hipótese.
+a) quinta hipótese impressa com rótulo repetido.
+  `);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.deepEqual(parsed.questions[0].alternatives.map((alternative) => alternative.label), ['A', 'B', 'C', 'D', 'E']);
+  assert.match(parsed.questions[0].alternatives[4].text, /quinta hipótese/);
+});
+
+test('prefers the real question sequence over equally numbered simulado instructions', () => {
+  const questions = Array.from({ length: 12 }, (_, index) => {
+    const number = index + 1;
+    return `${number}. Enunciado real ${number}.
+a) Alternativa A ${number}.
+b) Alternativa B ${number}.
+c) Alternativa C ${number}.
+d) Alternativa D ${number}.
+e) Alternativa E ${number}.`;
+  }).join('\n');
+  const parsed = parseObjectiveQuestions(`
+1 - Este simulado conta com questões do concurso.
+2 - A prova contém doze questões.
+${questions}
+  `);
+
+  assert.equal(parsed.questions.length, 12);
+  assert.match(parsed.questions[0].statement, /^Enunciado real 1\./);
 });
 
 // Teste B: Listas internas numeradas
@@ -295,4 +475,26 @@ e) Alt E.
   assert.match(result.questions[0].statement, /20%/);
   assert.match(result.questions[0].statement, /artigo 134/);
   assert.equal(result.questions[0].alternatives.length, 5);
+});
+
+test('removes the ending physical page number from a question that spans pages', () => {
+  const parsed = parseObjectiveQuestions(`
+[Pagina 32]
+Questão 80
+Assinale a alternativa correta.
+a) Primeira alternativa.
+b) Segunda alternativa.
+c) Terceira alternativa.
+d) Quarta alternativa.
+e) Não modificada, mas apenas se a empresa for
+[Pagina 33]
+de capital fechado. 33
+  `);
+
+  assert.equal(parsed.questions.length, 1);
+  assert.equal(parsed.questions[0].sourcePageNumber, 32);
+  assert.equal(
+    parsed.questions[0].alternatives[4].text,
+    'Não modificada, mas apenas se a empresa for de capital fechado.',
+  );
 });

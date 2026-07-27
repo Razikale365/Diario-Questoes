@@ -7,6 +7,7 @@ import json
 import sqlite3
 from typing import Any, Callable, Mapping
 
+from study_os_service.domain.sprint import SourcePlanTask
 from study_os_service.domain.sprint_calendar import (
     CapacityDefaults,
     CapacityObservation,
@@ -178,13 +179,16 @@ class SprintCalendarService:
                 target_slug, include_inactive=True
             )
             cycles = self._list_cycles(target_slug)
-            stable_items = self._stable_items(target_slug)
+            stable_items = self._with_completed_source_items(
+                self._stable_items(target_slug), tasks
+            )
             locked_assignments = self._locked_assignments(
                 target_slug=target_slug,
                 starts_on=starts_on,
                 ends_on=prepared["ends_on"],
                 mode=prepared["mode"],
                 planning_date=planning_cutoff.date(),
+                source_tasks=tasks,
             )
             observations = self._capacity_observations(target_slug, starts_on)
             overrides = self._capacity_overrides(target_slug)
@@ -717,6 +721,83 @@ class SprintCalendarService:
             for row in rows
         )
 
+    @staticmethod
+    def _completion_day(
+        provenance: Mapping[str, object], *, fallback: datetime | None = None
+    ) -> date | None:
+        observed_on = provenance.get("observedOn")
+        if isinstance(observed_on, str):
+            try:
+                return date.fromisoformat(observed_on)
+            except ValueError:
+                pass
+        completed_at = provenance.get("completedAt")
+        if isinstance(completed_at, str):
+            try:
+                timestamp = _timestamp(completed_at)
+            except ValueError:
+                timestamp = None
+            if timestamp is not None:
+                return timestamp.date()
+        return fallback.date() if fallback is not None else None
+
+    @classmethod
+    def _with_completed_source_items(
+        cls,
+        stable_items: tuple[HorizonItemDraft, ...],
+        source_tasks: tuple[SourcePlanTask, ...],
+    ) -> tuple[HorizonItemDraft, ...]:
+        completed_tasks = {
+            task.id: task for task in source_tasks if task.status == "completed"
+        }
+        known_source_ids = {
+            item.source_plan_task_id
+            for item in stable_items
+            if item.source_plan_task_id is not None
+        }
+        projected_items = tuple(
+            replace(
+                item,
+                state="completed",
+                completed_at=(
+                    item.completed_at
+                    or cls._completion_timestamp(completed_tasks[item.source_plan_task_id])
+                ),
+            )
+            if item.source_plan_task_id in completed_tasks
+            else item
+            for item in stable_items
+        )
+        additions: list[HorizonItemDraft] = []
+        for task in completed_tasks.values():
+            if task.id in known_source_ids:
+                continue
+            completed_on = cls._completion_day(task.provenance)
+            if completed_on is None:
+                continue
+            additions.append(
+                HorizonItemDraft(
+                    item_key=f"source-task:{task.id}",
+                    origin="source",
+                    kind="source_task",
+                    source_plan_task_id=task.id,
+                    subject_profile_id=None,
+                    title=task.description,
+                    expected_meta_number=task.meta_number,
+                    state="completed",
+                    completed_at=cls._completion_timestamp(task) or datetime(
+                        completed_on.year, completed_on.month, completed_on.day,
+                        12, tzinfo=UTC,
+                    ),
+                )
+            )
+        return projected_items + tuple(additions)
+
+    @staticmethod
+    def _completion_timestamp(task: SourcePlanTask) -> datetime | None:
+        completed_at = task.provenance.get("completedAt")
+        return _timestamp(completed_at) if isinstance(completed_at, str) else None
+
     def _locked_assignments(
         self,
         *,
@@ -725,6 +806,7 @@ class SprintCalendarService:
         ends_on: date,
         mode: str,
         planning_date: date,
+        source_tasks: tuple[SourcePlanTask, ...],
     ) -> tuple[LockedCalendarAssignment, ...]:
         head = self.repository.get_head(target_slug)
         override_rows = self.repository.list_item_overrides(target_slug)
@@ -737,8 +819,10 @@ class SprintCalendarService:
                 self.connection.execute(
                     """
                     SELECT assignment.*, item.item_key, item.kind, item.state,
+                           item.completed_at,
                            item.source_plan_task_id,
-                           source.status AS source_status
+                           source.status AS source_status,
+                           source.provenance_json AS source_provenance_json
                     FROM sprint_calendar_assignments AS assignment
                     JOIN sprint_calendar_items AS item
                       ON item.id=assignment.item_id
@@ -756,8 +840,11 @@ class SprintCalendarService:
         )
         candidates: list[dict[str, Any]] = []
         assigned_item_ids: set[int] = set()
+        assigned_source_ids: set[int] = set()
         for row in rows:
             assigned_item_ids.add(row["item_id"])
+            if row["source_plan_task_id"] is not None:
+                assigned_source_ids.add(row["source_plan_task_id"])
             original_date = date.fromisoformat(row["plan_date"])
             override = overrides.get(row["item_id"])
             plan_date = (
@@ -765,14 +852,28 @@ class SprintCalendarService:
                 if override is not None
                 else original_date
             )
+            completed_on = (
+                self._completion_day(
+                    _json_object(row["source_provenance_json"]),
+                    fallback=_timestamp(row["completed_at"]),
+                )
+                if row["source_status"] == "completed"
+                else None
+            )
+            if completed_on is not None:
+                plan_date = completed_on
             fixed = (
-                original_date < planning_date
+                row["source_status"] == "completed"
                 or row["state"] in {"completed", "active"}
                 or row["source_status"] == "started"
                 or row["kind"] == "manual"
                 or bool(row["pinned_snapshot"])
                 or override is not None
                 or mode == "fill_open"
+                or (
+                    row["source_plan_task_id"] is None
+                    and original_date < planning_date
+                )
             )
             if not fixed or not starts_on <= plan_date <= ends_on:
                 continue
@@ -792,12 +893,33 @@ class SprintCalendarService:
                         else row["duration_minutes"]
                     ),
                     "source_id": row["source_plan_task_id"],
-                    "state": row["state"],
+                    "state": (
+                        "completed"
+                        if row["source_status"] == "completed"
+                        else row["state"]
+                    ),
                     "reason": (
                         "manual_pin"
                         if override is not None
                         else "preserved_calendar_assignment"
                     ),
+                }
+            )
+        for task in source_tasks:
+            if task.status != "completed" or task.id in assigned_source_ids:
+                continue
+            completed_on = self._completion_day(task.provenance)
+            if completed_on is None or not starts_on <= completed_on <= ends_on:
+                continue
+            candidates.append(
+                {
+                    "item_key": f"source-task:{task.id}",
+                    "plan_date": completed_on,
+                    "position": max(1, task.source_order),
+                    "duration": max(1, task.estimated_minutes),
+                    "source_id": task.id,
+                    "state": "completed",
+                    "reason": "completed_on_observed_date",
                 }
             )
         for override in override_rows:

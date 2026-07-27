@@ -187,6 +187,19 @@ const normalizeAttempt = (value: unknown) => {
   return answer && attemptedAt ? { answer, isCorrect, attemptedAt } : null;
 };
 
+const normalizeSourcePage = (value: unknown) => {
+  if (!isObject(value)) return undefined;
+  const documentId = asString(value.documentId).trim();
+  const pageNumber = asOptionalNumber(value.pageNumber);
+  if (!documentId || !pageNumber || pageNumber < 1) return undefined;
+
+  return {
+    documentId,
+    pageNumber,
+    likelyVisual: Boolean(value.likelyVisual),
+  };
+};
+
 const normalizeAnswerLabel = (answer: string | undefined) =>
   (answer || '')
     .normalize('NFD')
@@ -241,6 +254,7 @@ const sanitizeQuestionBankItem = (value: unknown): QuestionBankItem | null => {
     sourceKind,
     sourceName,
     sourceFileName: asOptionalString(value.sourceFileName),
+    sourcePage: normalizeSourcePage(value.sourcePage),
     year: asOptionalNumber(value.year),
     exam: asOptionalString(value.exam),
     institution: asOptionalString(value.institution),
@@ -600,6 +614,7 @@ export const buildQuestionBankItems = (
       sourceKind: context.sourceKind,
       sourceName: context.sourceName,
       sourceFileName: context.sourceFileName,
+      sourcePage: question.sourcePage,
       targetSlug: context.targetSlug,
       year: question.year,
       discipline: context.discipline,
@@ -962,6 +977,7 @@ export const questionBankItemToQuestion = (item: QuestionBankItem, index: number
   doubtedAlts: [],
   sourceKind: item.sourceKind,
   sourceName: item.sourceName,
+  sourcePage: item.sourcePage,
   year: item.year,
   exam: item.exam,
   institution: item.institution,

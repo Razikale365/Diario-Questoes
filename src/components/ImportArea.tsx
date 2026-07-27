@@ -4,13 +4,19 @@ import { StudyTask } from '../types';
 import { parseLSTask } from '../utils/parser';
 import { PLANEJAMENTOS, DISCIPLINAS, BANKS } from '../utils/constants';
 import { QuestionPdfImport } from './QuestionPdfImport';
+import { LocalStudyPackageImport } from './LocalStudyPackageImport';
 
 interface ImportAreaProps {
   onImport: (task: StudyTask) => void;
+  onMergeLocalPackage: (tasks: StudyTask[]) =>
+    Promise<
+      | { ok: true; added: number; duplicates: number }
+      | { ok: false; message: string }
+    >;
   showToast: (msg: string) => void;
 }
 
-export const ImportArea: React.FC<ImportAreaProps> = ({ onImport, showToast }) => {
+export const ImportArea: React.FC<ImportAreaProps> = ({ onImport, onMergeLocalPackage, showToast }) => {
   const [importText, setImportText] = useState('');
   const [importPlanejamento, setImportPlanejamento] = useState('');
   const [importMeta, setImportMeta] = useState('');
@@ -77,6 +83,8 @@ export const ImportArea: React.FC<ImportAreaProps> = ({ onImport, showToast }) =
         </h2>
       </div>
       <div className="p-6 space-y-6">
+        <LocalStudyPackageImport onMergeTasks={onMergeLocalPackage} showToast={showToast} />
+        <div className="border-t border-[#404040]" />
         <QuestionPdfImport onImport={onImport} showToast={showToast} />
         <div className="border-t border-[#404040]" />
         <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">

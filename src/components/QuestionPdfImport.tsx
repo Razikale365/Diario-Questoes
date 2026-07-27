@@ -47,6 +47,12 @@ import {
   type ExternalAnswerDraft,
 } from '../utils/externalAnswers';
 import { importObjectiveQuestionsFromPdf, PdfQuestionImportResult } from '../utils/pdfQuestionImport';
+import { saveQuestionSourceDocument } from '../storage/questionSourceDocuments';
+import {
+  createQuestionImportSelection,
+  filterQuestionsByImportSelection,
+  toggleQuestionImportSelection,
+} from '../utils/questionImportSelection';
 import { DEFAULT_STUDY_TARGET_PROFILES } from '../utils/studyPlannerCore';
 import {
   answerQuestionBankItemInline,
@@ -132,7 +138,9 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
   const [discipline, setDiscipline] = useState('');
   const [bank, setBank] = useState('Outra');
   const [isParsing, setIsParsing] = useState(false);
+  const [isSavingImport, setIsSavingImport] = useState(false);
   const [result, setResult] = useState<PdfQuestionImportResult | null>(null);
+  const [selectedQuestionNumbers, setSelectedQuestionNumbers] = useState<Set<number>>(new Set());
   const [questionBank, setQuestionBank] = useState<QuestionBankItem[]>(loadStoredQuestionBank);
   const [bankQuery, setBankQuery] = useState('');
   const [bankDiscipline, setBankDiscipline] = useState('');
@@ -217,6 +225,10 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
       years: Array.from(new Set(questions.map((question) => question.year).filter(Boolean))).sort(),
     };
   }, [result]);
+  const selectedQuestions = useMemo(
+    () => filterQuestionsByImportSelection(result?.questions || [], selectedQuestionNumbers),
+    [result, selectedQuestionNumbers],
+  );
 
   const bankDisciplines = useMemo(
     () => Array.from(new Set(questionBank.map((item) => item.discipline))).sort(),
@@ -304,12 +316,14 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     setDiscipline('');
     setBank('Outra');
     setResult(null);
+    setSelectedQuestionNumbers(new Set());
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] || null;
     setFile(nextFile);
     setResult(null);
+    setSelectedQuestionNumbers(new Set());
 
     if (nextFile) {
       const title = normalizeFileTitle(nextFile.name);
@@ -330,6 +344,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
         requireExplicitQuestionLabel: sourceKind === 'professor',
       });
       setResult(imported);
+      setSelectedQuestionNumbers(createQuestionImportSelection(imported.questions));
 
       if (imported.questions.length === 0) {
         showToast('Nenhuma questão objetiva identificada.');
@@ -373,9 +388,14 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     };
   };
 
-  const saveQuestionsToQuestionBank = (context: NonNullable<ReturnType<typeof buildBankContext>>) => {
+  const saveQuestionsToQuestionBank = async (context: NonNullable<ReturnType<typeof buildBankContext>>) => {
     if (!result) return null;
-    const incoming = buildQuestionBankItems(result.questions, context);
+    if (!file || selectedQuestions.length === 0) return null;
+    const storedDocument = await saveQuestionSourceDocument(file, result.pageCount);
+    if (storedDocument.id !== result.sourceDocumentId) {
+      throw new Error('O PDF selecionado mudou depois da prévia. Processe-o novamente.');
+    }
+    const incoming = buildQuestionBankItems(selectedQuestions, context);
     const merged = mergeQuestionBankItems(questionBank, incoming);
     const executableItems = resolveMergedQuestionBankItems(incoming, merged.items);
     setQuestionBank(merged.items);
@@ -383,18 +403,29 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     return { ...merged, executableItems };
   };
 
-  const saveResultToQuestionBank = () => {
+  const saveResultToQuestionBank = async () => {
     const context = buildBankContext();
     if (!context) return null;
+    if (selectedQuestions.length === 0) {
+      showToast('Selecione pelo menos uma questão.');
+      return null;
+    }
 
-    const merged = saveQuestionsToQuestionBank(context);
-    if (!merged) return null;
-
-    showToast(`${merged.added} novas no banco; ${merged.updated} atualizada(s); ${merged.duplicates} duplicada(s) ignoradas.`);
-    return merged;
+    setIsSavingImport(true);
+    try {
+      const merged = await saveQuestionsToQuestionBank(context);
+      if (!merged) return null;
+      showToast(`${merged.added} novas no banco; ${merged.updated} atualizada(s); ${merged.duplicates} duplicada(s) ignoradas.`);
+      return merged;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível guardar o PDF local.');
+      return null;
+    } finally {
+      setIsSavingImport(false);
+    }
   };
 
-  const handleCreateTask = () => {
+  const handleCreateTask = async () => {
     if (!result || result.questions.length === 0) {
       showToast('Processe um PDF com questões primeiro.');
       return;
@@ -408,8 +439,24 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
     const context = buildBankContext();
     if (!context) return;
 
-    const merged = saveQuestionsToQuestionBank(context);
-    if (!merged) return;
+    if (selectedQuestions.length === 0) {
+      showToast('Selecione pelo menos uma questão.');
+      return;
+    }
+
+    setIsSavingImport(true);
+    let merged;
+    try {
+      merged = await saveQuestionsToQuestionBank(context);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível guardar o PDF local.');
+      setIsSavingImport(false);
+      return;
+    }
+    if (!merged) {
+      setIsSavingImport(false);
+      return;
+    }
 
     const effectiveBank = context.bank;
     const effectiveSourceName = context.sourceName;
@@ -451,6 +498,7 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
 
     onImport(newTask);
     resetImport();
+    setIsSavingImport(false);
   };
 
   const toggleFavorite = (itemId: string) => {
@@ -909,6 +957,48 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
         </div>
       )}
 
+      {result && result.questions.length > 0 && (
+        <div className="rounded border border-white/10 bg-[#171717] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest text-white">Escolher questões</p>
+              <p className="mt-1 text-xs text-gray-400">
+                {selectedQuestions.length} de {result.questions.length} selecionadas. O PDF original só será guardado ao confirmar.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSelectedQuestionNumbers(createQuestionImportSelection(result.questions))} className="rounded border border-white/10 px-3 py-1.5 text-xs font-bold text-gray-200 hover:border-[#84cc16]">
+                Todas
+              </button>
+              <button type="button" onClick={() => setSelectedQuestionNumbers(new Set())} className="rounded border border-white/10 px-3 py-1.5 text-xs font-bold text-gray-400 hover:border-red-400 hover:text-red-200">
+                Nenhuma
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid max-h-44 grid-cols-5 gap-2 overflow-y-auto pr-1 sm:grid-cols-8 md:grid-cols-10">
+            {result.questions.map((question) => {
+              const selected = selectedQuestionNumbers.has(question.number);
+              return (
+                <button
+                  key={question.localId}
+                  type="button"
+                  aria-pressed={selected}
+                  title={`Questão ${question.number}${question.sourcePage?.likelyVisual ? ' · página visual' : ''}`}
+                  onClick={() => setSelectedQuestionNumbers((current) => toggleQuestionImportSelection(current, question.number))}
+                  className={`rounded border px-2 py-2 text-xs font-black transition-colors ${
+                    selected
+                      ? 'border-[#84cc16] bg-[#84cc16]/15 text-[#bef264]'
+                      : 'border-white/10 bg-black/20 text-gray-500 hover:text-gray-200'
+                  }`}
+                >
+                  {question.number}{question.sourcePage?.likelyVisual ? ' V' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {result?.questions[0] && (
         <div className="bg-[#1a1a1a] border border-white/5 rounded p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -947,16 +1037,16 @@ export const QuestionPdfImport: React.FC<QuestionPdfImportProps> = ({ onImport, 
         </button>
         <button
           type="button"
-          onClick={saveResultToQuestionBank}
-          disabled={!result || result.questions.length === 0}
+          onClick={() => void saveResultToQuestionBank()}
+          disabled={!result || selectedQuestions.length === 0 || isSavingImport}
           className="bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-purple-200 px-5 py-3 rounded font-bold flex items-center gap-2 transition-colors border border-purple-500/20"
         >
-          <Database className="w-5 h-5" /> Salvar no Banco
+          {isSavingImport ? <Loader2 className="w-5 h-5 animate-spin" /> : <Database className="w-5 h-5" />} Salvar no Banco
         </button>
         <button
           type="button"
-          onClick={handleCreateTask}
-          disabled={!result || result.questions.length === 0}
+          onClick={() => void handleCreateTask()}
+          disabled={!result || selectedQuestions.length === 0 || isSavingImport}
           className="bg-[#84cc16] hover:bg-[#65a30d] disabled:opacity-50 disabled:cursor-not-allowed text-black px-5 py-3 rounded font-bold flex items-center gap-2 transition-colors"
         >
           <Play className="w-5 h-5" /> Criar Tarefa
