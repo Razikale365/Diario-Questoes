@@ -78,6 +78,7 @@ import {
   questionBankItemToQuestion,
 } from '../utils/questionBank';
 import { createPlannerTaskModalStyle } from '../utils/modalSizing';
+import { createId } from '../utils/createId';
 import { filterPlannerTaskDiscovery, type TaskQuickView } from '../utils/unifiedTasks';
 import { parseTaskExecutionDraft, type TaskExecutionDraft } from '../utils/taskResultDraft';
 import {
@@ -335,7 +336,7 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
   const title = `Tarefa ${plannerTask.number} - ${plannerTask.discipline}`;
 
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     date: new Date().toISOString(),
     targetSlug: plannerTask.targetSlug,
     planejamento: plannerTask.planejamento || 'Planner',
@@ -346,7 +347,7 @@ const buildStudyTaskFromPlanner = (plannerTask: PlannerTask, bankItems: Question
     bank,
     blocks: [
       {
-        id: crypto.randomUUID(),
+        id: createId(),
         title,
         lesson: sourceNames.length > 0 ? `${plannerTask.description} · ${sourceNames.join(', ')}` : plannerTask.description,
         pages: matchedQuestions.length > 0 ? `${matchedQuestions.length} questões do banco` : '',

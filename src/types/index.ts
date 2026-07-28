@@ -196,13 +196,10 @@ export interface PlannerMetaHistoryEntry {
   relatedMetaId?: string;
 }
 
-export interface RevisionTaskModalState {
+export interface RevisionTaskModalState extends StudyTask {
   isOpen: boolean;
   planejamento: string;
   meta: string;
   tarefa: string;
-  discipline: string;
   assunto: string;
-  bank: string;
-  blocks: ActivityBlock[];
 }

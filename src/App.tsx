@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { CheckCircle2, Undo, Plus, Play, Clock, BookOpen, ChevronRight, FileUp } from 'lucide-react';
 
-import { ActivityBlock, StudyTask, Question } from './types';
+import type { ActivityBlock, StudyTask, Question, RevisionTaskModalState } from './types';
 import { useTasks } from './hooks/useTasks';
 import { Sidebar } from './components/Sidebar';
 import { ConfirmModal } from './components/ConfirmModal';
@@ -23,6 +23,7 @@ import { AuthModal, AuthModalMode } from './components/AuthModal';
 import { BottomNav } from './components/BottomNav';
 import { AppShell } from './components/AppShell';
 import { MorePage } from './components/MorePage';
+import { DataManagementPage } from './components/DataManagementPage';
 import { useAppRoute } from './utils/appRoute';
 import type { PlannerSection } from './components/PlannerArea';
 import { formatQuestionList, parseQuestionsText } from './utils/parser';
@@ -37,6 +38,7 @@ import { loadStoredExternalAnswerBatches, persistExternalAnswerBatches } from '.
 import { TaskWorkTab, getDefaultTaskWorkTab, normalizeTaskWorkTabForTask } from './utils/taskWorkModes';
 import { mergeStudyTaskBackup, parseStudyTaskBackup } from './utils/taskBackup';
 import { DEFAULT_ACTIVITY_LAYOUT } from './utils/layout';
+import { createId } from './utils/createId';
 import type { TaskQuestionImportDestination } from './utils/taskQuestionImport';
 import { LocalStorageAdapter } from './storage/StorageAdapter';
 import { SyncEngine } from './storage/SyncEngine';
@@ -248,16 +250,7 @@ function App() {
     bank: ''
   });
 
-  const [revisionTaskModal, setRevisionTaskModal] = useState<any>({ 
-    isOpen: false, 
-    planejamento: '',
-    meta: '',
-    tarefa: '',
-    assunto: '',
-    discipline: '',
-    bank: '',
-    blocks: []
-  });
+  const [revisionTaskModal, setRevisionTaskModal] = useState<RevisionTaskModalState | null>(null);
 
   const [blockEditModal, setBlockEditModal] = useState<BlockEditModalState | null>(null);
   
@@ -521,19 +514,20 @@ function App() {
   };
 
   const handleConfirmRevisionTask = () => {
+    if (!revisionTaskModal) return;
     const { isOpen, ...taskData } = revisionTaskModal;
     addTask(taskData);
     setActiveTaskId(taskData.id);
     setTaskWorkTab(getDefaultTaskWorkTab(taskData));
     setActiveTab('caderno');
-    setRevisionTaskModal({ ...revisionTaskModal, isOpen: false });
+    setRevisionTaskModal(null);
     showToast('Tarefa criada!');
   };
 
   const handleCreateTaskFromHistory = () => {
     setRevisionTaskModal({
       isOpen: true,
-      id: crypto.randomUUID(),
+      id: createId(),
       date: new Date().toISOString(),
       planejamento: '',
       meta: '',
@@ -588,6 +582,7 @@ function App() {
         ? moreView as PlannerSection
         : 'today';
   const showMoreIndex = route.destination === 'more' && !moreView && activeTab === 'planner';
+  const moreDataView = moreView === 'backup' || moreView === 'account' ? moreView : null;
 
   const openMoreSection = (id: string) => {
     if (id === 'review') {
@@ -598,17 +593,8 @@ function App() {
       setActiveTab('historico');
       return;
     }
-    if (id === 'backup') {
-      exportBackup();
-      showToast('Backup exportado.');
-      return;
-    }
-    if (id === 'account') {
-      if (syncState.status === 'unauthenticated') {
-        handleOpenAuth();
-      } else {
-        handleOpenPasswordChange();
-      }
+    if (id === 'backup' || id === 'account') {
+      window.location.hash = `#/more?view=${id}`;
       return;
     }
     setActiveTab('planner');
@@ -800,8 +786,9 @@ function App() {
                   discipline: discipline,
                   bank: '',
                   blocks: revisionDraft.blocks,
-                  id: crypto.randomUUID(),
-                  date: new Date().toISOString()
+                  id: createId(),
+                  date: new Date().toISOString(),
+                  status: 'in_progress'
                 });
               }} 
               showToast={showToast} 
@@ -811,6 +798,20 @@ function App() {
           {activeTab === 'planner' && (
             showMoreIndex ? (
               <MorePage onOpen={openMoreSection} />
+            ) : moreDataView ? (
+              <DataManagementPage
+                view={moreDataView}
+                syncState={syncState}
+                onBack={() => { window.location.hash = '#/more'; }}
+                onExport={exportBackup}
+                onImport={importBackup}
+                onMerge={mergeBackup}
+                onPaste={() => setIsPasteModalOpen(true)}
+                onSyncNow={handleSyncNow}
+                onAuth={handleOpenAuth}
+                onChangePassword={handleOpenPasswordChange}
+                onDisconnect={handleDisconnect}
+              />
             ) : (
               <PlannerArea
                 studyTasks={tasks}
@@ -968,7 +969,7 @@ function App() {
         />
       )}
 
-      {revisionTaskModal.isOpen && (
+      {revisionTaskModal?.isOpen && (
         <CreateTaskModal
           modalState={revisionTaskModal}
           setModalState={setRevisionTaskModal}

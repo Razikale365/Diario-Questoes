@@ -19,13 +19,14 @@ test('password recovery opens the reset form and remains reachable from a live s
   assert.equal(syncBadgeSource.includes('Alterar senha'), true);
 });
 
-test('a newly signed-in session resumes cloud sync without asking for login again', () => {
+test('a newly signed-in session resumes cloud sync and More opens an explicit account page', () => {
   assert.match(
     syncEngineSource,
     /if \(this\.isInitialized\) return void this\.pullOnStart\(\)/,
   );
   assert.match(
     appSource,
-    /id === 'account'.*?syncState\.status === 'unauthenticated'.*?handleOpenAuth\(\).*?handleOpenPasswordChange\(\)/s,
+    /id === 'backup' \|\| id === 'account'.*?window\.location\.hash = `#\/more\?view=\$\{id\}`/s,
   );
+  assert.doesNotMatch(appSource, /id === 'account'.*?handleOpenPasswordChange\(\)/s);
 });
