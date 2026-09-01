@@ -1,7 +1,11 @@
-import { StudyTask } from '../types';
-import { SyncState, SyncStatus } from '../types/sync';
+import type { StudyTask } from '../types';
+import type { SyncState } from '../types/sync';
 import { supabase } from '../lib/supabase';
 import { StorageAdapter } from '../storage/StorageAdapter';
+import {
+  areStudyTaskCollectionsEqual,
+  mergeStudyTaskCollections,
+} from '../utils/taskSyncMerge';
 
 const SYNC_DEBOUNCE_MS = 2000;
 const SYNC_INTERVAL_MS = 30000;
@@ -78,7 +82,23 @@ export class SyncEngine {
         return;
       }
 
-      const tasks = this.adapter.readTasks();
+      const localTasks = this.adapter.readTasks();
+      const { data: remoteData, error: remoteError } = await supabase
+        .from(SYNC_DATA_KEY)
+        .select('payload')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      if (remoteError) throw remoteError;
+
+      const remoteTasks: StudyTask[] = Array.isArray(remoteData?.payload)
+        ? remoteData.payload
+        : [];
+      const { tasks } = mergeStudyTaskCollections(remoteTasks, localTasks);
+      const localChanged = !areStudyTaskCollectionsEqual(tasks, localTasks);
+      if (localChanged) {
+        this.adapter.writeTasks(tasks);
+        window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: tasks }));
+      }
       const now = new Date().toISOString();
 
       const { error } = await supabase
@@ -122,7 +142,7 @@ export class SyncEngine {
         return;
       }
 
-      await this.doPull({ isStartup: true });
+      await this.doPull();
     } catch {
       // On startup, don't fail hard — just start in idle
       this.updateState({ status: 'idle' });
@@ -137,7 +157,7 @@ export class SyncEngine {
     }
   }
 
-  private async doPull(opts: { isStartup?: boolean } = {}): Promise<void> {
+  private async doPull(): Promise<void> {
     if (!supabase) return;
 
     try {
@@ -168,31 +188,20 @@ export class SyncEngine {
       const remoteUpdatedAt: string = data.updated_at;
       const localTasks = this.adapter.readTasks();
 
-      // A "fresh device" is one that has never synced before (no cloudUpdatedAt stored).
-      // In that case we always defer to the cloud to avoid overwriting valid history.
-      const knownCloudUpdatedAt = this.getCloudUpdatedAt();
-      const isFreshDevice = opts.isStartup && !knownCloudUpdatedAt;
-      const remoteIsNewer =
-        !knownCloudUpdatedAt ||
-        new Date(remoteUpdatedAt) > new Date(knownCloudUpdatedAt);
+      const { tasks: merged, differsFromRemote } = mergeStudyTaskCollections(
+        remoteTasks,
+        localTasks,
+      );
+      this.setCloudUpdatedAt(remoteUpdatedAt);
 
-      if (isFreshDevice || remoteIsNewer) {
-        // Smart merge: per-task updatedAt decides the winner on conflicts
-        const { merged, hadLocalWinner } = this.mergeTasks(remoteTasks, localTasks);
-        this.setCloudUpdatedAt(remoteUpdatedAt);
+      const dataChanged = !areStudyTaskCollectionsEqual(merged, localTasks);
+      if (dataChanged) {
+        this.adapter.writeTasks(merged);
+        window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: merged }));
+      }
 
-        // Only update React state (and show toast) when data actually changed.
-        // Avoids jarring re-renders on mobile every 30s when nothing changed.
-        const dataChanged = JSON.stringify(merged) !== JSON.stringify(localTasks);
-        if (dataChanged) {
-          this.adapter.writeTasks(merged);
-          window.dispatchEvent(new CustomEvent('ls_sync_pull', { detail: merged }));
-        }
-
-        // If any local task won the merge, push the reconciled result back to cloud
-        if (hadLocalWinner) {
-          setTimeout(() => this.doPush(), 200);
-        }
+      if (differsFromRemote) {
+        setTimeout(() => this.doPush(), 200);
       }
 
       this.updateState({
@@ -203,57 +212,6 @@ export class SyncEngine {
       const message = e instanceof Error ? e.message : 'Pull failed';
       this.updateState({ status: 'error', lastError: message });
     }
-  }
-
-  /**
-   * Smart merge of remote and local task arrays using per-task timestamps.
-   *
-   * For each task id:
-   *   - If only in remote → keep remote
-   *   - If only in local  → keep local (never silently discard local work)
-   *   - If in both        → keep whichever has the newer `updatedAt`
-   *                         (falls back to remote if both are missing timestamps)
-   *
-   * Returns { merged, hadLocalWinner } so the caller knows whether to push back.
-   */
-  private mergeTasks(
-    remote: StudyTask[],
-    local: StudyTask[]
-  ): { merged: StudyTask[]; hadLocalWinner: boolean } {
-    const remoteMap = new Map(remote.map(t => [t.id, t]));
-    const localMap  = new Map(local.map(t => [t.id, t]));
-
-    const merged: StudyTask[] = [];
-    let hadLocalWinner = false;
-
-    // Walk remote first
-    for (const remoteTask of remote) {
-      const localTask = localMap.get(remoteTask.id);
-      if (!localTask) {
-        // Only in remote
-        merged.push(remoteTask);
-      } else {
-        // Exists on both — pick the newer one
-        const remoteTs = remoteTask.updatedAt ? new Date(remoteTask.updatedAt).getTime() : 0;
-        const localTs  = localTask.updatedAt  ? new Date(localTask.updatedAt).getTime()  : 0;
-        if (localTs > remoteTs) {
-          merged.push(localTask);
-          hadLocalWinner = true;
-        } else {
-          merged.push(remoteTask);
-        }
-      }
-    }
-
-    // Append tasks that only exist locally (never in remote)
-    for (const localTask of local) {
-      if (!remoteMap.has(localTask.id)) {
-        merged.push(localTask);
-        hadLocalWinner = true;
-      }
-    }
-
-    return { merged, hadLocalWinner };
   }
 
   // ── Meta helpers ────────────────────────────────────────────────────────────
@@ -274,11 +232,6 @@ export class SyncEngine {
     } catch {
       // ignore
     }
-  }
-
-  /** Last known cloud updated_at timestamp (to detect if remote has newer data) */
-  private getCloudUpdatedAt(): string | null {
-    return this.readMeta().cloudUpdatedAt || null;
   }
 
   private setCloudUpdatedAt(ts: string): void {

@@ -8,6 +8,7 @@ import {
   createQuestionBankBackup,
   createStudyTaskFromQuestionBankItems,
   filterQuestionBankItems,
+  findCompatibleStudyTaskForPlannerTask,
   importQuestionBankBackup,
   getQuestionBankAnswerOptions,
   isStudyTaskCompatibleWithPlannerTask,
@@ -537,6 +538,75 @@ test('isStudyTaskCompatibleWithPlannerTask rejects a linked task from another ex
       studyTask,
     ),
     false,
+  );
+});
+
+test('findCompatibleStudyTaskForPlannerTask reuses the progressed canonical task instead of a newer duplicate', () => {
+  const plannerTask = {
+    id: 'planner-27',
+    number: 27,
+    metaNumber: 49,
+    discipline: 'Legis. Tribut. Estadual (ICMS)',
+    format: 'Exercícios',
+    description: 'ICMS Parte III - Decreto nº 33.327/2019',
+    spentMinutes: 0,
+    estimatedMinutes: 65,
+    performance: null,
+    status: 'started' as const,
+    relevance: 10,
+    durationMinutes: 65,
+    source: 'ls-meta-pdf' as const,
+    createdAt: '2026-07-28T10:00:00.000Z',
+    updatedAt: '2026-07-28T10:00:00.000Z',
+  };
+  const canonical = {
+    id: 'canonical-task-27',
+    date: '2026-07-28T10:00:00.000Z',
+    planejamento: 'RUMO À SEFAZ CE',
+    meta: '49',
+    tarefa: '27',
+    assunto: plannerTask.description,
+    discipline: plannerTask.discipline,
+    bank: 'Outra',
+    status: 'in_progress' as const,
+    blocks: [{
+      id: 'canonical-block',
+      title: 'Tarefa 27',
+      lesson: plannerTask.description,
+      pages: '',
+      questions: [{
+        number: 1,
+        statement: 'Questão respondida',
+        alternatives: [],
+        answer: 'C',
+        isCorrect: true,
+        hasDoubt: false,
+      }],
+    }],
+    updatedAt: '2026-07-28T10:05:00.000Z',
+  };
+  const duplicate = {
+    ...canonical,
+    id: 'duplicate-task-27',
+    date: '2026-07-28T11:00:00.000Z',
+    blocks: [{
+      ...canonical.blocks[0],
+      id: 'duplicate-block',
+      questions: [{
+        number: 1,
+        statement: 'Questão ainda não respondida',
+        alternatives: [],
+        answer: '',
+        isCorrect: null,
+        hasDoubt: false,
+      }],
+    }],
+    updatedAt: '2026-07-28T11:00:00.000Z',
+  };
+
+  assert.equal(
+    findCompatibleStudyTaskForPlannerTask(plannerTask, [duplicate, canonical])?.id,
+    canonical.id,
   );
 });
 

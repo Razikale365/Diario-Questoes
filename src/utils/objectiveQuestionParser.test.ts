@@ -324,6 +324,7 @@ e) Quinta alternativa.
   assert.equal(parsed.questions[0].number, 60);
   assert.match(parsed.questions[0].statement, /alternativa correta/i);
   assert.equal(parsed.questions[0].alternatives.length, 5);
+  assert.equal(parsed.questions[0].answerKey, undefined);
 });
 
 test('recovers a complete sequential simulado when an internal numbered line looks like the next question', () => {

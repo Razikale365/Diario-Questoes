@@ -1,4 +1,5 @@
 import type { Question, StudyTask } from '../types';
+import { mergeStudyTaskCollections } from '../utils/taskSyncMerge';
 
 export interface LocalStudyTaskStore {
   load(): Promise<StudyTask[]>;
@@ -179,10 +180,16 @@ export const mergeSyncedTasksWithLocalPrivate = (
   currentTasks: StudyTask[],
 ) => {
   const localPrivate = currentTasks.filter(isLocalPrivateTask);
-  const localIds = new Set(localPrivate.map((task) => task.id));
+  const localById = new Map(localPrivate.map((task) => [task.id, task]));
+  const syncedIds = new Set(syncedTasks.map((task) => task.id));
   return [
-    ...syncedTasks.filter((task) => !localIds.has(task.id)),
-    ...localPrivate,
+    ...syncedTasks.map((task) => {
+      const localTask = localById.get(task.id);
+      if (!localTask) return task;
+      const [merged] = mergeStudyTaskCollections([task], [localTask]).tasks;
+      return { ...merged, storageScope: 'local-private' as const };
+    }),
+    ...localPrivate.filter((task) => !syncedIds.has(task.id)),
   ];
 };
 

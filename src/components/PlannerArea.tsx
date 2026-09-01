@@ -69,6 +69,7 @@ import {
 } from '../utils/plannerGenerator';
 import { buildPlannerInsights, PlannerDisciplineInsight, PlannerInsights } from '../utils/plannerInsights';
 import {
+  findCompatibleStudyTaskForPlannerTask,
   isStudyTaskCompatibleWithPlannerTask,
   loadStoredQuestionBank,
   matchQuestionBankItemsToPlannerTask,
@@ -980,9 +981,15 @@ export const PlannerArea: React.FC<PlannerAreaProps> = ({
     const linkedTask = task.linkedStudyTaskId
       ? studyTasks.find((studyTask) => studyTask.id === task.linkedStudyTaskId)
       : null;
+    const reusableTask = linkedTask && isStudyTaskCompatibleWithPlannerTask(task, linkedTask)
+      ? linkedTask
+      : findCompatibleStudyTaskForPlannerTask(task, studyTasks);
 
-    if (linkedTask && isStudyTaskCompatibleWithPlannerTask(task, linkedTask)) {
-      onOpenStudyTask(linkedTask.id);
+    if (reusableTask) {
+      if (task.linkedStudyTaskId !== reusableTask.id) {
+        updatePlannerTask(task.id, { linkedStudyTaskId: reusableTask.id });
+      }
+      onOpenStudyTask(reusableTask.id);
       return;
     }
 

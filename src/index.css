@@ -63,9 +63,13 @@ body {
 .task-execution-fields__grid {
   grid-template-columns: repeat(auto-fit, minmax(min(6.5rem, 100%), 1fr));
 }
+.task-execution-fields__footer {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
 @container (min-width: 35rem) {
   .task-execution-fields__summary {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, auto);
     align-items: end;
   }
 }

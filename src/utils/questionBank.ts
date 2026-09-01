@@ -962,6 +962,53 @@ export const isStudyTaskCompatibleWithPlannerTask = (plannerTask: PlannerTask, s
   );
 };
 
+const countStudyTaskProgress = (task: StudyTask) =>
+  task.blocks.reduce((count, block) => (
+    count + block.questions.filter((question) => (
+      Boolean(question.answer)
+      || question.isCorrect !== null
+      || question.hasDoubt
+      || Boolean(question.observations?.trim())
+      || Boolean(question.favorite)
+    )).length
+  ), 0);
+
+const countStudyTaskQuestions = (task: StudyTask) =>
+  task.blocks.reduce((count, block) => count + block.questions.length, 0);
+
+export const findCompatibleStudyTaskForPlannerTask = (
+  plannerTask: PlannerTask,
+  studyTasks: StudyTask[],
+) => {
+  const normalizedDiscipline = normalize(plannerTask.discipline);
+  const normalizedDescription = normalize(plannerTask.description);
+  const candidates = studyTasks.filter((studyTask) => {
+    if (studyTask.tarefa?.trim() !== String(plannerTask.number)) return false;
+    if (normalize(studyTask.discipline) !== normalizedDiscipline) return false;
+    if (
+      plannerTask.metaNumber
+      && studyTask.meta?.trim()
+      && studyTask.meta.trim() !== String(plannerTask.metaNumber)
+    ) {
+      return false;
+    }
+    if (
+      normalizedDescription
+      && studyTask.assunto
+      && normalize(studyTask.assunto) !== normalizedDescription
+    ) {
+      return false;
+    }
+    return isStudyTaskCompatibleWithPlannerTask(plannerTask, studyTask);
+  });
+
+  return candidates.sort((left, right) => (
+    countStudyTaskProgress(right) - countStudyTaskProgress(left)
+    || countStudyTaskQuestions(right) - countStudyTaskQuestions(left)
+    || new Date(left.date).getTime() - new Date(right.date).getTime()
+  ))[0] || null;
+};
+
 export const questionBankItemToQuestion = (item: QuestionBankItem, index: number): Question => ({
   number: index + 1,
   sourceQuestionNumber: item.sourceQuestionNumber,

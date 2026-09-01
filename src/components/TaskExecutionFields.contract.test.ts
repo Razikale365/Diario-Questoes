@@ -40,7 +40,15 @@ test('shared execution fields adapt to the modal rail instead of viewport breakp
 
   assert.equal(source.includes('task-execution-fields__grid'), true);
   assert.equal(source.includes('task-execution-fields__summary'), true);
+  assert.equal(source.includes('task-execution-fields__footer'), true);
+  assert.equal(source.includes('sm:w-56'), false, 'component must not use viewport breakpoint sm:w-56');
   assert.equal(stylesheet.includes('container-type: inline-size'), true);
   assert.equal(stylesheet.includes('grid-template-columns: repeat(auto-fit, minmax(min(6.5rem, 100%), 1fr))'), true);
   assert.equal(stylesheet.includes('@container (min-width: 35rem)'), true);
+  assert.equal(stylesheet.includes('.task-execution-fields__footer'), true);
+  assert.match(
+    stylesheet,
+    /\.task-execution-fields__footer\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*min-width: 0;/s,
+  );
+  assert.equal(stylesheet.includes('grid-template-columns: minmax(0, 1fr) minmax(15rem, auto)'), true);
 });

@@ -1,4 +1,5 @@
 import { ActivityBlock, Question, QuestionBankItem, StudyTask } from '../types';
+import { createId } from './createId';
 import { DEFAULT_ACTIVITY_LAYOUT, DEFAULT_SECTION_LAYOUT } from './layout';
 import { ImportedObjectiveQuestion } from './objectiveQuestionParser';
 import { questionBankItemToQuestion } from './questionBank';
@@ -259,7 +260,7 @@ export const planTaskQuestionImport = (input: PlanTaskQuestionImportInput): Task
     return failure('batch_mismatch', summary);
   }
 
-  const idFactory = input.idFactory || (() => crypto.randomUUID());
+  const idFactory = input.idFactory || createId;
   const now = input.now || (() => new Date().toISOString());
   const { task, destination, canonicalItems } = input;
 

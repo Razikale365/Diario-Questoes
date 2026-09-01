@@ -177,6 +177,44 @@ test('preserves private tasks when a cloud pull replaces synced tasks', () => {
   assert.equal(merged[1].storageScope, 'local-private');
 });
 
+test('merges cloud progress into a matching private task without losing local answers', () => {
+  const cloudTask = {
+    ...task('private'),
+    updatedAt: '2026-07-28T21:00:00.000Z',
+    blocks: [{
+      id: 'questions',
+      title: 'Simulado',
+      lesson: 'P1',
+      pages: '',
+      questions: [
+        { number: 1, answer: 'A', isCorrect: true, hasDoubt: false },
+        { number: 2, answer: '', isCorrect: null, hasDoubt: false },
+      ],
+    }],
+  };
+  const privateTask = {
+    ...task('private', 'local-private'),
+    updatedAt: '2026-07-28T21:05:00.000Z',
+    blocks: [{
+      id: 'questions',
+      title: 'Simulado',
+      lesson: 'P1',
+      pages: '',
+      questions: [
+        { number: 1, answer: '', isCorrect: null, hasDoubt: false },
+        { number: 2, answer: 'C', isCorrect: false, hasDoubt: true },
+      ],
+    }],
+  };
+
+  const [merged] = mergeSyncedTasksWithLocalPrivate([cloudTask], [privateTask]);
+
+  assert.equal(merged.storageScope, 'local-private');
+  assert.equal(merged.blocks[0].questions[0].answer, 'A');
+  assert.equal(merged.blocks[0].questions[1].answer, 'C');
+  assert.equal(merged.blocks[0].questions[1].hasDoubt, true);
+});
+
 test('persists and reloads only private tasks from the local task store', async () => {
   const store = new MemoryLocalStudyTaskStore();
 

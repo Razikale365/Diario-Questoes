@@ -301,6 +301,40 @@ test('creates a responsive section and treats a repeated batch as idempotent', (
   ]);
 });
 
+test('creates a new section when randomUUID is unavailable on a LAN origin', () => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(0);
+        return bytes;
+      },
+    },
+  });
+
+  try {
+    const result = planTaskQuestionImport({
+      task: taskWith([]),
+      sourceQuestions: [parsed(1)],
+      canonicalItems: [canonical(1)],
+      destination: { kind: 'new_section', sectionTitle: 'Aula 11 - Parte 01' },
+      blockDefaults: defaults,
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.task.blocks.at(-2)?.id, '00000000-0000-4000-8000-000000000000');
+    assert.equal(result.task.blocks.at(-1)?.id, '00000000-0000-4000-8000-000000000000');
+  } finally {
+    if (originalCrypto) {
+      Object.defineProperty(globalThis, 'crypto', originalCrypto);
+    } else {
+      delete (globalThis as { crypto?: Crypto }).crypto;
+    }
+  }
+});
+
 test('does not treat a conflicting same-number manual question as an equivalent section batch', () => {
   const manualBlock: StudyTask['blocks'][number] = {
     id: 'manual-block',

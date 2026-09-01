@@ -73,8 +73,7 @@ export const useTasks = () => {
 
   useEffect(() => {
     try {
-      const { synced } = splitStudyTasksByStorageScope(tasks);
-      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(synced));
+      localStorage.setItem(STUDY_TASKS_STORAGE_KEY, JSON.stringify(tasks));
     } catch (e) {
       console.error('[Diário LS] Failed to save tasks', e);
     }

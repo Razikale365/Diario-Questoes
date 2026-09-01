@@ -122,7 +122,7 @@ const extractYear = (text: string) => {
 };
 
 const extractInlineAnswer = (text: string) => {
-  const direct = text.match(/\b(?:gabarito|resposta|alternativa\s+correta)\s*[:\-–]?\s*(A|B|C|D|E|CERTO|ERRADO|ANULADA)\b/iu);
+  const direct = text.match(/\b(?:gabarito|resposta|alternativa[ \t]+correta)[ \t]*[:\-–]?[ \t]*(A|B|C|D|E|CERTO|ERRADO|ANULADA)\b/iu);
   if (direct) return normalizeAnswer(direct[1]);
 
   const verbose = text.match(/\b(?:gabarito|resposta|alternativa\s+correta)\b.{0,40}\b(?:letra|op[cç][aã]o)?\s*(A|B|C|D|E)\b/iu);

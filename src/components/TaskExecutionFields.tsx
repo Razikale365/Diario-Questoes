@@ -84,10 +84,10 @@ export const TaskExecutionFields: React.FC<TaskExecutionFieldsProps> = ({ draft,
           Observações
           <textarea value={draft.notes} onChange={(event) => update({ notes: event.target.value })} rows={2} className="resize-y border border-white/10 bg-[#111513] px-3 py-2 text-sm font-semibold text-white outline-none focus:border-[#84cc16]" />
         </label>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="grid min-w-0 flex-1 gap-1 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
+        <div className="task-execution-fields__footer grid gap-3">
+          <label className="grid min-w-0 gap-1 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
             Desempenho derivado
-            <input readOnly value={performance} title="Calculado automaticamente a partir de certas e erradas" className="h-10 min-w-0 w-full border border-[#84cc16]/20 bg-[#84cc16]/10 px-3 text-sm font-black text-[#d9f99d] outline-none sm:w-56" />
+            <input readOnly value={performance} title="Calculado automaticamente a partir de certas e erradas" className="h-10 min-w-0 w-full border border-[#84cc16]/20 bg-[#84cc16]/10 px-3 text-sm font-black text-[#d9f99d] outline-none" />
           </label>
           <div className="grid gap-1">
             <span className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">Energia depois</span>
